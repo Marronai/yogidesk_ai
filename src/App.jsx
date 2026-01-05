@@ -21,7 +21,7 @@ import ResetPassword from './pages/ResetPassword';
 import Contacts from './pages/Contacts'; 
 import PaymentStatus from './pages/PaymentStatus';
 import Support from './pages/Support'; 
-import Settings from './pages/Settings'; 
+import Settings from './pages/Setting'; 
 import Campaigns from './pages/Campaigns'; 
 import HospitalDischarge from './pages/HospitalDischarge';
 import TemplateManager from './pages/TemplateManager';
