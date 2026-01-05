@@ -21,7 +21,7 @@ import ResetPassword from './pages/ResetPassword';
 import Contacts from './pages/Contacts'; 
 import PaymentStatus from './pages/PaymentStatus';
 import Support from './pages/Support'; 
-import Settings from './pages/SettingsPage'; 
+import SettingsPage from './pages/SettingsPage'; 
 import Campaigns from './pages/Campaigns'; 
 import HospitalDischarge from './pages/HospitalDischarge';
 import TemplateManager from './pages/TemplateManager';
@@ -68,7 +68,7 @@ const App = () => {
                 <Route path="inbox" element={<Inbox />} />
                 <Route path="contacts" element={<Contacts />} />
                 <Route path="support" element={<Support />} />
-                <Route path="settings" element={<Settings />} />
+                <Route path="SettingsPage" element={<SettingsPage />} />
                 <Route path="ads-crm" element={<LeadsCRM />} />
                 <Route path="agent-dashboard" element={<AgentDashboard />} />
               </Route>
