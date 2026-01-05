@@ -1,0 +1,72 @@
+const axios = require('axios');
+const User = require('../models/User');
+const crypto = require('crypto');
+
+// 1. Create Payment Order
+exports.createOrder = async (req, res) => {
+    try {
+        // 🛡️ Safety Check: Agar .env se URL nahi mila toh default sandbox use karo
+        const baseUrl = process.env.CASHFREE_BASE_URL || "https://sandbox.cashfree.com/pg";
+        
+        // 🔍 Debugging: Yeh line terminal mein URL print karegi
+        console.log("Connecting to Cashfree at:", baseUrl);
+
+        const { amount } = req.body;
+        const user = req.user;
+
+        const response = await axios.post(`${baseUrl}/orders`, {
+            order_amount: amount,
+            order_currency: "INR",
+            order_id: `order_${Date.now()}`,
+            customer_details: {
+                customer_id: user._id.toString(),
+                customer_email: user.email,
+                customer_phone: "9999999999" 
+            }
+        }, {
+            headers: {
+                'x-client-id': process.env.CASHFREE_APP_ID,
+                'x-client-secret': process.env.CASHFREE_SECRET_KEY,
+                'x-api-version': '2023-08-01'
+            }
+        });
+
+        res.status(200).json(response.data);
+    } catch (err) {
+        // terminal mein detail mein error dikhega
+        console.error("Cashfree Error:", err.response?.data || err.message);
+        res.status(500).json({ msg: "Internal Server Error" });
+    }
+};
+
+// 2. Verify Payment (Webhook/Return)
+exports.verifyPayment = async (req, res) => {
+    try {
+        const { order_id } = req.body;
+
+        // Cashfree se order status mangwao
+        const response = await axios.get(`${process.env.CASHFREE_BASE_URL}/orders/${order_id}`, {
+            headers: {
+                'x-client-id': process.env.CASHFREE_APP_ID,
+                'x-client-secret': process.env.CASHFREE_SECRET_KEY,
+                'x-api-version': '2023-08-01'
+            }
+        });
+
+        if (response.data.order_status === 'PAID') {
+            // 🔥 SUCCESS: Plan Update Logic
+            const user = await User.findOne({ email: response.data.customer_details.customer_email });
+            
+            user.subscriptionStatus = 'active';
+            // Aaj ki date se 30 din aage ki expiry set karo
+            user.planExpiryDate = new Date(+new Date() + 30*24*60*60*1000); 
+            
+            await user.save();
+            return res.status(200).json({ msg: "Payment Verified & Plan Activated!" });
+        }
+
+        res.status(400).json({ msg: "Payment not completed" });
+    } catch (err) {
+        res.status(500).json({ msg: "Verification Error" });
+    }
+};
