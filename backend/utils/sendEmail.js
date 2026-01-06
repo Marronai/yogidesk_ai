@@ -1,58 +1,27 @@
-const nodemailer = require('nodemailer');
+// File: backend/utils/sendEmail.js (ya jahan bhi mail logic hai)
+const nodemailer = require("nodemailer");
 
 const sendEmail = async (options) => {
-  console.log("-------------------------------------------");
-  console.log("📧 EMAIL PROCESS STARTED...");
-  
-  // 1. Credentials Check (Passwords mat dikhana, bas length check karo)
-  console.log("🔍 Checking Credentials:");
-  console.log("   -> User:", process.env.BREVO_USER || "MISSING");
-  console.log("   -> Pass Length:", process.env.BREVO_PASS ? process.env.BREVO_PASS.length : "MISSING");
-
-  // 2. Transporter Create
-  // AGAR TUM GMAIL USE KAR RAHE HO TOH YE UNCOMMENT KARO:
-  /*
+  // 1. Transporter (Daakiya) - Yahan Brevo ki settings aayengi
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: process.env.EMAIL_HOST, // Render se value lega
+    port: process.env.EMAIL_PORT, // Render se value lega
+    secure: false, // Brevo ke liye 587 port par false rakhte hain
     auth: {
-      user: process.env.BREVO_USER, 
-      pass: process.env.BREVO_PASS, 
-    },
-  });
-  */
-
-  // AGAR TUM BREVO USE KAR RAHE HO TOH YE RAKHO:
-  const transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587, // Agar fail ho toh 2525 try karna
-    secure: false,
-    auth: {
-      user: process.env.BREVO_USER,
-      pass: process.env.BREVO_PASS,
+      user: process.env.9f34b9001@smtp-brevo.com, // Tumhara Brevo Login Email
+      pass: process.env.xsmtpsib-9882d73242399dd9d9ca9abbda224f6f97f367ddc22d72548549c842c67cccaa-PMSBDgcHnQz2fPz5, // Brevo SMTP Key (Password nahi!)
     },
   });
 
-  // 3. Email Options
-  const message = {
-    from: `"Marroncorp Support" <${process.env.BREVO_USER}>`,
+  // 2. Email Details
+  const mailOptions = {
+    from: process.env.no-reply@yogidesk-AirVent.com, // ⚠️ ZAROORI: Ye wahi email ho jo Brevo me verify hai
     to: options.email,
     subject: options.subject,
-    html: options.message,
+    html: options.message, // Ya tumhara template HTML
   };
 
-  console.log(`📤 Attempting to send to: ${options.email}`);
-
-  try {
-    const info = await transporter.sendMail(message);
-    console.log("✅ SUCCESS! Email Sent.");
-    console.log("   -> Message ID:", info.messageId);
-  } catch (error) {
-    console.error("❌ FAILURE! Email Nahi Gaya.");
-    console.error("   -> Error Code:", error.code);
-    console.error("   -> Error Message:", error.message);
-    console.error("   -> Error Response:", error.response);
-  }
-  console.log("-------------------------------------------");
+  await transporter.sendMail(mailOptions);
 };
 
 module.exports = sendEmail;
