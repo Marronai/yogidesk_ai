@@ -5,7 +5,7 @@ const sendEmail = async (options) => {
   try {
     // 👇 UPDATE: Response ko sahi se todna (Destructure) zaroori hai
     const { data, error } = await resend.emails.send({
-      from: 'onboarding@resend.dev', // Testing email
+      from: 'no-reply@yogidesk-ai.com', // Testing email
       to: options.email,
       subject: options.subject,
       html: options.message,
