@@ -1,23 +1,26 @@
 const { Resend } = require('resend');
-
-// Render ke Environment Variable se Key lega
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async (options) => {
   try {
-    const data = await resend.emails.send({
-      // ⚠️ IMPORTANT: 'from' mein wahi domain daalo jo Resend.com par verify kiya hai
-      from: 'YogiDesk Team <no-reply@yogidesk.com>', 
+    // 👇 UPDATE: Response ko sahi se todna (Destructure) zaroori hai
+    const { data, error } = await resend.emails.send({
+      from: 'onboarding@resend.dev', // Testing email
       to: options.email,
       subject: options.subject,
       html: options.message,
     });
 
-    console.log("Email sent successfully via Resend. ID:", data.id);
+    // 🛑 Agar Error aaya hai, toh use Chhupao mat, Log karo!
+    if (error) {
+      console.error("❌ Resend API Error:", error);
+      return; 
+    }
+
+    console.log("✅ Email sent successfully. ID:", data.id);
     return data;
-  } catch (error) {
-    console.error("Resend Email Error:", error);
-    // Error ko throw nahi karenge taaki server crash na ho, bas log karenge
+  } catch (err) {
+    console.error("Server Connection Error:", err);
   }
 };
 
