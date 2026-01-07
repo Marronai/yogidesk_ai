@@ -1,5 +1,5 @@
 const User = require('../models/User');
-const sendEmail = require('../utils/sendEmailResend'); // Tumhara Resend wala file
+const sendEmail = require('../utils/sendEmail'); // Tumhara Resend wala file
 const { welcomeEmailTemplate, otpEmailTemplate } = require('../utils/emailTemplates'); // Templates wala file
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
