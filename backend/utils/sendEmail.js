@@ -1,26 +1,24 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require('resend');
+
+// Render ke Environment Variable se Key lega
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async (options) => {
-    const transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST,
-        port: process.env.EMAIL_PORT,
-        secure: false, 
-        auth: {
-            // 👇 YAHAN GALTI THI. ISKO SAME TO SAME REHNE DO.
-            // Asli email Render ke dashboard se aayega.
-            user: process.env.EMAIL_USER, 
-            pass: process.env.EMAIL_PASS,
-        },
+  try {
+    const data = await resend.emails.send({
+      // ⚠️ IMPORTANT: 'from' mein wahi domain daalo jo Resend.com par verify kiya hai
+      from: 'YogiDesk Team <no-reply@yogidesk.com>', 
+      to: options.email,
+      subject: options.subject,
+      html: options.message,
     });
 
-    const mailOptions = {
-        from: process.env.EMAIL_USER, // Yahan bhi variable hi rahega
-        to: options.email,
-        subject: options.subject,
-        html: options.message,
-    };
-
-    await transporter.sendMail(mailOptions);
+    console.log("Email sent successfully via Resend. ID:", data.id);
+    return data;
+  } catch (error) {
+    console.error("Resend Email Error:", error);
+    // Error ko throw nahi karenge taaki server crash na ho, bas log karenge
+  }
 };
 
 module.exports = sendEmail;
