@@ -13,6 +13,11 @@ const UserSchema = new mongoose.Schema({
     unique: true,
     match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please add a valid email']
   },
+
+  isVerified: {
+    type: Boolean,
+    default: false
+},
   // 🔒 SECURITY FIX: Password tabhi required hai jab Google ID na ho
   password: {
     type: String,
