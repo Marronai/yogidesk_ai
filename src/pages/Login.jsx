@@ -4,7 +4,7 @@ import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, Shiel
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { jwtDecode } from "jwt-decode";
-import { useGoogleLogin } from '@react-oauth/google'; // 🔑 Google Auth Hook
+import { useGoogleLogin } from '@react-oauth/google';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -12,11 +12,13 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   
-  // 🆕 NEW: Login Steps State (1 = Credentials, 2 = OTP)
+  // Login Steps State (1 = Credentials, 2 = OTP)
   const [step, setStep] = useState(1);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]); // 6 Digit OTP Array
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
   const [formData, setFormData] = useState({ email: '', password: '' });
+  
+  // ⚠️ Ensure VITE_API_URL is correct in .env (e.g., http://localhost:5000/api)
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
   // --- CAROUSEL DATA ---
@@ -34,13 +36,26 @@ const Login = () => {
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  // 🔢 OTP INPUT HANDLER
+  // 🔢 OTP INPUT HANDLER (Improved)
   const handleOtpChange = (element, index) => {
     if (isNaN(element.value)) return false;
-    setOtp([...otp.map((d, idx) => (idx === index ? element.value : d))]);
+    
+    const newOtp = [...otp];
+    newOtp[index] = element.value;
+    setOtp(newOtp);
+
     // Auto focus next input
-    if (element.nextSibling && element.value) {
+    if (element.value && element.nextSibling) {
       element.nextSibling.focus();
+    }
+  };
+
+  // 🔙 BACKSPACE HANDLER (New UX Fix)
+  const handleKeyDown = (e, index) => {
+    if (e.key === "Backspace") {
+      if (!otp[index] && e.target.previousSibling) {
+        e.target.previousSibling.focus();
+      }
     }
   };
 
@@ -50,7 +65,7 @@ const Login = () => {
       try {
         setLoading(true);
         const res = await axios.post(`${API_URL}/auth/google`, {
-          tokenId: tokenResponse.access_token // Google Access Token Backend ko bhejo
+          tokenId: tokenResponse.access_token 
         });
         handleAuthSuccess(res.data);
       } catch (err) {
@@ -65,16 +80,22 @@ const Login = () => {
   // ✅ COMMON SUCCESS HANDLER
   const handleAuthSuccess = (data) => {
     const storage = rememberMe ? localStorage : sessionStorage;
-    const decoded = jwtDecode(data.token);
     
-    storage.setItem('token', data.token);
-    storage.setItem('user_id', decoded.id);
-    storage.setItem('user_role', decoded.role);
-    storage.setItem('user_name', data.user.name);
-    
-    // Redirect based on role
-    if (decoded.role === 'employee') navigate('/dashboard/agent-dashboard');
-    else navigate('/dashboard');
+    // Decode token safely
+    try {
+        const decoded = jwtDecode(data.token);
+        storage.setItem('token', data.token);
+        storage.setItem('user_id', decoded.id);
+        storage.setItem('user_role', decoded.role);
+        storage.setItem('user_name', data.user.name);
+        
+        // Redirect based on role
+        if (decoded.role === 'employee') navigate('/dashboard/agent-dashboard');
+        else navigate('/dashboard');
+    } catch (error) {
+        console.error("Token Decode Error", error);
+        alert("Login successful but token is invalid");
+    }
   };
 
   // 🚀 MAIN SUBMIT HANDLER
@@ -85,25 +106,36 @@ const Login = () => {
     try {
       if (step === 1) {
         // --- STEP 1: VERIFY EMAIL/PASS & SEND OTP ---
-        const res = await axios.post(`${API_URL}/auth/login`, formData); // Calls loginStep1
+        const res = await axios.post(`${API_URL}/auth/login`, formData); 
+        
         if (res.data.success) {
           setStep(2); // Move to OTP Screen
+          // OTP fill karne ke liye array reset karo
+          setOtp(["", "", "", "", "", ""]);
+          // User friendly message
           alert(`OTP Sent to ${formData.email}`);
         }
       } else {
         // --- STEP 2: VERIFY OTP ---
         const finalOtp = otp.join("");
-        const res = await axios.post(`${API_URL}/auth/verify-otp`, { 
+        
+        // 👇👇 CRITICAL FIX: Changed endpoint from /verify-otp to /verify-login 👇👇
+        const res = await axios.post(`${API_URL}/auth/verify-login`, { 
           email: formData.email, 
           otp: finalOtp 
         });
+
         handleAuthSuccess(res.data);
       }
     } catch (error) {
+      console.error(error);
       const msg = error.response?.data?.msg || "Login Failed";
       alert(msg);
+      
       // Agar OTP expire ho gaya, toh wapis step 1 par bhejo
-      if(msg.includes("Expired")) setStep(1);
+      if(msg.includes("Expired") || msg.includes("not found")) {
+          setStep(1);
+      }
     }
     setLoading(false);
   };
@@ -238,6 +270,7 @@ const Login = () => {
                       maxLength="1"
                       value={data}
                       onChange={e => handleOtpChange(e.target, index)}
+                      onKeyDown={e => handleKeyDown(e, index)} // Backspace support
                       onFocus={e => e.target.select()}
                       className="w-12 h-14 border border-gray-300 rounded-xl text-center text-xl font-bold focus:border-[#FF6B00] focus:ring-2 focus:ring-orange-100 outline-none transition-all"
                     />
