@@ -1,16 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const rateLimit = require('express-rate-limit'); // 🔒 SECURITY PATCH: Anti-Brute Force
+const rateLimit = require('express-rate-limit'); // 🔒 SECURITY PATCH
 
 // 👇 Import Updated Controller Functions
+// Dhyan de: Humne 'verifyOtp' ko hata kar 2 alag functions import kiye hain
 const { 
   register, 
+  verifySignupOtp, // ✅ New: Signup verify karne ke liye
   loginStep1, 
-  verifyOtp, 
+  verifyLoginOtp,  // ✅ New: Login verify karne ke liye
   googleLogin,
   forgotPassword, 
-  resetPassword,
-  // getMe // Agar tumne getMe controller me nahi banaya hai toh hata do, warna uncomment karo
+  resetPassword
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/authMiddleware');
@@ -19,7 +20,7 @@ const { protect } = require('../middleware/authMiddleware');
 // 🔒 SECURITY: RATE LIMITERS (Brute Force Blocker)
 // -------------------------------------------------
 
-// Login Limiter: 10 mins mein sirf 5 attempts allow karega
+// Login Limiter: 10 mins mein sirf 5 attempts
 const loginLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, 
   max: 5, 
@@ -37,12 +38,13 @@ const createAccountLimiter = rateLimit({
 // 🚀 PUBLIC ROUTES (No Token Needed)
 // -------------------------------------------------
 
-// 1. Register (With Spam Protection)
-router.post('/register', createAccountLimiter, register);
+// 1. Register Flow (Signup)
+router.post('/register', createAccountLimiter, register);          // Step 1: Details lo -> OTP Bhejo
+router.post('/verify-signup', createAccountLimiter, verifySignupOtp); // Step 2: OTP check -> Welcome Email -> Token
 
-// 2. Login Flow (With Brute Force Protection)
-router.post('/login', loginLimiter, loginStep1);      // Step 1: Send Creds -> Get OTP
-router.post('/verify-otp', loginLimiter, verifyOtp);  // Step 2: Send OTP -> Get Token
+// 2. Login Flow (Login)
+router.post('/login', loginLimiter, loginStep1);                  // Step 1: Email/Pass check -> OTP Bhejo
+router.post('/verify-login', loginLimiter, verifyLoginOtp);       // Step 2: OTP check -> Token
 
 // 3. Google Login
 router.post('/google', googleLogin); 
@@ -55,10 +57,7 @@ router.put('/resetpassword/:resetToken', resetPassword);
 // 🛡️ PROTECTED ROUTES (Token Required)
 // -------------------------------------------------
 
-// User Profile fetch karne ke liye (Agar controller me getMe hai toh ise use karo)
-// router.get('/me', protect, getMe); 
-
-// Session active hai ya nahi check karne ke liye
+// Session Check
 router.get('/check-session', protect, (req, res) => {
   res.status(200).json({ status: 'active', user: req.user });
 });
