@@ -1,18 +1,20 @@
 const User = require('../models/User');
-const sendEmail = require('../utils/sendEmail'); // Resend wala function
-const { welcomeEmailTemplate, otpEmailTemplate } = require('../utils/emailTemplates'); // HTML Designs
+const sendEmail = require('../utils/sendEmail');
+const { welcomeEmailTemplate, otpEmailTemplate } = require('../utils/emailTemplates');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios'); // ✅ Google User Data fetch karne ke liye
 
 // ---------------------------------------------
-// 🛠️ HELPER: Token Generator
+// 🛠️ HELPER: Token Generator (FIXED ✅)
 // ---------------------------------------------
-const generateToken = (id) => {
+// Ab ye Session ID bhi lega, taaki token aur DB match ho sakein
+const generateToken = (id, sessionId) => {
   if (!process.env.JWT_SECRET) {
     throw new Error("FATAL ERROR: JWT_SECRET is not defined.");
   }
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+  // 👇 Yahan sessionId add kiya hai, yehi missing tha pehle
+  return jwt.sign({ id, sessionId }, process.env.JWT_SECRET, {
     expiresIn: '30d',
   });
 };
@@ -127,8 +129,8 @@ exports.verifySignupOtp = async (req, res) => {
       console.error("Welcome Email Failed:", err);
     }
 
-    // Generate Token
-    const token = generateToken(user._id);
+    // Generate Token (Session ID ke sath)
+    const token = generateToken(user._id, user.currentSessionId);
 
     res.status(201).json({
       success: true,
@@ -210,10 +212,10 @@ exports.verifyLoginOtp = async (req, res) => {
     
     // 🔒 FIX: Session ID Update
     user.currentSessionId = crypto.randomBytes(16).toString('hex');
-    
     await user.save();
 
-    const token = generateToken(user._id);
+    // Generate Token (Session ID ke sath)
+    const token = generateToken(user._id, user.currentSessionId);
 
     res.status(200).json({
       success: true,
@@ -234,7 +236,7 @@ exports.googleLogin = async (req, res) => {
   try {
     const { tokenId } = req.body; // Frontend se 'Access Token' aayega
 
-    // ✅ STEP 1: Google API se user data mango
+    // ✅ STEP 1: Google API se user data mango (axios use kar rahe hain)
     const googleRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${tokenId}` }
     });
@@ -283,7 +285,8 @@ exports.googleLogin = async (req, res) => {
     user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
-    const token = generateToken(user._id);
+    // Generate Token (Session ID ke sath)
+    const token = generateToken(user._id, user.currentSessionId);
 
     res.status(200).json({
       success: true,
@@ -303,7 +306,7 @@ exports.googleLogin = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.body.email });
-    if (!user) return res.status(200).json({ success: true, data: "Email sent" }); // Security fake success
+    if (!user) return res.status(200).json({ success: true, data: "Email sent" }); // Fake success for security
 
     // Token generate karo (Model method)
     const resetToken = user.getResetPasswordToken(); 
