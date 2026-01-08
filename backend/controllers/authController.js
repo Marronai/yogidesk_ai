@@ -1,12 +1,9 @@
 const User = require('../models/User');
-const sendEmail = require('../utils/sendEmail'); // Tumhara Resend wala file
-const { welcomeEmailTemplate, otpEmailTemplate } = require('../utils/emailTemplates'); // Templates wala file
+const sendEmail = require('../utils/sendEmail'); // Resend wala function
+const { welcomeEmailTemplate, otpEmailTemplate } = require('../utils/emailTemplates'); // HTML Designs
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { OAuth2Client } = require('google-auth-library');
-
-// Google Client Setup
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const axios = require('axios'); // ✅ Google User Data fetch karne ke liye
 
 // ---------------------------------------------
 // 🛠️ HELPER: Token Generator
@@ -21,7 +18,7 @@ const generateToken = (id) => {
 };
 
 // ---------------------------------------------
-// 1️⃣ REGISTER STEP 1: Create User & Send OTP (No Token Yet)
+// 1️⃣ REGISTER STEP 1: Details Lo & OTP Bhejo
 // ---------------------------------------------
 exports.register = async (req, res) => {
   try {
@@ -29,22 +26,22 @@ exports.register = async (req, res) => {
 
     // 1. Check if user exists
     let user = await User.findOne({ email });
-    
-    // Agar user hai aur verified hai -> Error
+
+    // Agar user pehle se verified hai, toh error do
     if (user && user.isVerified) {
       return res.status(400).json({ msg: 'User already exists' });
     }
 
-    // 2. Generate OTP
+    // 2. Generate 6 Digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpires = Date.now() + 10 * 60 * 1000; // 10 Minutes
 
-    // 3. Create or Update User (Verified: false rakhenge)
+    // 3. Create or Update User (Verified: false)
     if (!user) {
       user = await User.create({
         name,
         email,
-        password, // Pre-save hook will hash it
+        password, // Model ka pre-save hook hash karega
         phone,
         businessName,
         businessType,
@@ -52,10 +49,10 @@ exports.register = async (req, res) => {
         planType: 'free_trial',
         otp: otp,
         otpExpires: otpExpires,
-        isVerified: false // 🔒 Abhi verify nahi hua
+        isVerified: false
       });
     } else {
-      // Agar user tha par verify nahi kiya tha, toh naya OTP update karo
+      // Agar user tha par verify nahi tha, toh details update karo
       user.name = name;
       user.password = password;
       user.otp = otp;
@@ -63,7 +60,7 @@ exports.register = async (req, res) => {
       await user.save();
     }
 
-    // 4. 📧 SEND OTP EMAIL (Template Use Kiya)
+    // 4. 📧 SEND OTP EMAIL
     try {
       const emailHtml = otpEmailTemplate(otp); // Template se HTML lo
       
@@ -73,13 +70,13 @@ exports.register = async (req, res) => {
         message: emailHtml,
       });
     } catch (emailError) {
-      console.error("Signup OTP Failed:", emailError.message);
+      console.error("Signup Email Error:", emailError.message);
       return res.status(500).json({ msg: "Email sending failed. Please try again." });
     }
 
     res.status(200).json({
       success: true,
-      msg: 'OTP sent to your email. Please verify to complete registration.',
+      msg: 'OTP sent to your email.',
       email: user.email,
       step: 'verify_signup' // Frontend ko signal
     });
@@ -91,7 +88,7 @@ exports.register = async (req, res) => {
 };
 
 // ---------------------------------------------
-// 2️⃣ REGISTER STEP 2: Verify OTP & Send Welcome Email
+// 2️⃣ REGISTER STEP 2: Verify OTP, Set Session & Welcome
 // ---------------------------------------------
 exports.verifySignupOtp = async (req, res) => {
   try {
@@ -110,11 +107,15 @@ exports.verifySignupOtp = async (req, res) => {
     user.isVerified = true;
     user.otp = undefined;
     user.otpExpires = undefined;
+    
+    // 🔒 FIX: Session ID set karo taaki logout na ho
+    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    
     await user.save();
 
-    // 📧 SEND WELCOME EMAIL (Ab user verify ho gaya)
+    // 📧 SEND WELCOME EMAIL
     try {
-      const dashboardLink = "https://yogidesk-ai.vercel.app/login"; // Apna Frontend Link daalo
+      const dashboardLink = "https://yogidesk-ai.vercel.app/login";
       const welcomeHtml = welcomeEmailTemplate(user.name, dashboardLink);
 
       await sendEmail({
@@ -142,7 +143,7 @@ exports.verifySignupOtp = async (req, res) => {
 };
 
 // ---------------------------------------------
-// 3️⃣ LOGIN STEP 1: Verify Password & Send OTP
+// 3️⃣ LOGIN STEP 1: Verify Pass & Send OTP
 // ---------------------------------------------
 exports.loginStep1 = async (req, res) => {
   try {
@@ -158,16 +159,15 @@ exports.loginStep1 = async (req, res) => {
     const isMatch = await user.matchPassword(password);
     if (!isMatch) return res.status(400).json({ msg: 'Invalid Credentials' });
 
-    // 4. Generate 6 Digit OTP
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
     user.otp = otp;
     user.otpExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    // 📧 SEND OTP EMAIL (Template Use Kiya)
+    // 📧 SEND OTP EMAIL
     try {
-      const emailHtml = otpEmailTemplate(otp); // Wahi same OTP template login ke liye bhi
+      const emailHtml = otpEmailTemplate(otp);
       
       await sendEmail({
         email: user.email,
@@ -180,7 +180,7 @@ exports.loginStep1 = async (req, res) => {
 
     res.status(200).json({ 
       success: true, 
-      msg: 'OTP Sent to your email', 
+      msg: 'OTP Sent', 
       email: user.email,
       step: 'verify_login' 
     });
@@ -207,7 +207,10 @@ exports.verifyLoginOtp = async (req, res) => {
     // Clear OTP
     user.otp = undefined;
     user.otpExpires = undefined;
+    
+    // 🔒 FIX: Session ID Update
     user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    
     await user.save();
 
     const token = generateToken(user._id);
@@ -225,29 +228,30 @@ exports.verifyLoginOtp = async (req, res) => {
 };
 
 // ---------------------------------------------
-// 5️⃣ GOOGLE LOGIN
+// 5️⃣ GOOGLE LOGIN (AXIOS FIX ✅)
 // ---------------------------------------------
 exports.googleLogin = async (req, res) => {
   try {
-    const { tokenId } = req.body; 
+    const { tokenId } = req.body; // Frontend se 'Access Token' aayega
 
-    const ticket = await client.verifyIdToken({
-      idToken: tokenId,
-      audience: process.env.GOOGLE_CLIENT_ID
+    // ✅ STEP 1: Google API se user data mango
+    const googleRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokenId}` }
     });
 
-    const { name, email, picture, sub } = ticket.getPayload();
+    const { name, email, picture, sub } = googleRes.data;
 
     let user = await User.findOne({ email });
     let isNewUser = false;
 
     if (user) {
+      // Agar user hai par Google link nahi hai, toh link karo
       if (!user.googleId) {
         user.googleId = sub;
         user.avatar = picture;
-        await user.save();
       }
     } else {
+      // Naya User Banao
       isNewUser = true;
       user = await User.create({
         name,
@@ -256,13 +260,11 @@ exports.googleLogin = async (req, res) => {
         avatar: picture,
         role: 'trial_user',
         planType: 'free_trial',
-        isVerified: true, // Google wale verified hote hain
-        password: crypto.randomBytes(20).toString('hex')
+        isVerified: true, // Google trusted source hai
+        password: crypto.randomBytes(20).toString('hex') // Dummy password
       });
-    }
-
-    // 📧 Agar naya user hai toh Welcome Email Bhejo
-    if (isNewUser) {
+      
+      // 📧 Welcome Email Bhejo
       try {
         const dashboardLink = "https://yogidesk-ai.vercel.app/dashboard";
         const welcomeHtml = welcomeEmailTemplate(name, dashboardLink);
@@ -272,8 +274,14 @@ exports.googleLogin = async (req, res) => {
           subject: 'Welcome to YogiDesk AI! 🚀',
           message: welcomeHtml
         });
-      } catch (err) {}
+      } catch (err) {
+        console.error("Welcome email failed", err);
+      }
     }
+
+    // 🔒 FIX: Session ID zaroor set karo
+    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    await user.save();
 
     const token = generateToken(user._id);
 
@@ -290,15 +298,75 @@ exports.googleLogin = async (req, res) => {
 };
 
 // ---------------------------------------------
-// 6️⃣ FORGOT PASSWORD (OTP Based)
+// 6️⃣ FORGOT PASSWORD (Link Bhejo)
 // ---------------------------------------------
-// Isko bhi template ke sath update kar sakte ho, 
-// filhal purana wala logic rakha hai par sendEmailResend use karega.
 exports.forgotPassword = async (req, res) => {
-  // ... (Same Logic, bas sendEmail updated file use karega) ...
-  // Shortened for brevity, use purana logic here
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    if (!user) return res.status(200).json({ success: true, data: "Email sent" }); // Security fake success
+
+    // Token generate karo (Model method)
+    const resetToken = user.getResetPasswordToken(); 
+    await user.save({ validateBeforeSave: false });
+
+    // Link banao
+    const resetUrl = `https://yogidesk-ai.vercel.app/reset-password/${resetToken}`;
+
+    const message = `
+      <h1>Password Reset Request</h1>
+      <p>Click the link below to reset your password:</p>
+      <a href="${resetUrl}" style="background:#FF6B00; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;">Reset Password</a>
+      <p>If you didn't request this, ignore this email.</p>
+    `;
+
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'Password Reset - YogiDesk AI',
+        message,
+      });
+      res.status(200).json({ success: true, data: "Email sent" });
+    } catch (err) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(500).json({ msg: "Email could not be sent" });
+    }
+  } catch (error) {
+    res.status(500).json({ msg: "Server Error" });
+  }
 };
 
+// ---------------------------------------------
+// 7️⃣ RESET PASSWORD (New Pass Set)
+// ---------------------------------------------
 exports.resetPassword = async (req, res) => {
-   // ... (Same Logic) ...
+  try {
+    // URL token ko Hash karo taaki DB se match ho sake
+    const resetPasswordToken = crypto.createHash('sha256').update(req.params.resetToken).digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ msg: 'Invalid or Expired Token' });
+    }
+
+    // Set new password
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    
+    // Purane sessions invalidate karo
+    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    
+    await user.save();
+
+    res.status(200).json({ success: true, data: "Password Updated Success" });
+
+  } catch (error) {
+    res.status(500).json({ msg: "Server Error" });
+  }
 };
