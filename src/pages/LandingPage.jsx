@@ -50,13 +50,13 @@ const industries = [
 ];
 
 const testimonials = [
-  { name: "Dr. Sharma", role: "Dental Surgeon", text: "Marroncorp reduced our no-show rate by 40% with automated reminders.", rating: 5 },
+  { name: "Dr. Sharma", role: "Dental Surgeon", text: "Yogidesk-ai reduced our no-show rate by 40% with automated reminders.", rating: 5 },
   { name: "Rahul Verma", role: "E-com Owner", text: "The best WhatsApp tool for Shopify. ROI is insane!", rating: 5 },
   { name: "Priya Singh", role: "EdTech Founder", text: "Managing student queries was a nightmare, now it's automated.", rating: 5 },
 ];
 
 const faqs = [
-  { q: "Is this compliant with WhatsApp Policy?", a: "Yes, Marroncorp is built on the Official WhatsApp Business API, ensuring 100% compliance." },
+  { q: "Is this compliant with WhatsApp Policy?", a: "Yes, Yogidesk-ai is built on the Official WhatsApp Business API, ensuring 100% compliance." },
   { q: "Can I use my existing number?", a: "Yes, you can migrate your existing WhatsApp number to our platform in 10 minutes." },
   { q: "What is the Free Checkup Ad feature?", a: "It's a feature where leads from Facebook Ads land directly in your WhatsApp with a pre-filled message." },
 ];
@@ -74,7 +74,7 @@ const LandingPage = () => {
         <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
           <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo(0,0)}>
             <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg shadow-orange-200 text-white font-bold text-xl">M</div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Marroncorp</span>
+            <span className="text-xl font-bold tracking-tight text-slate-900">Yogidesk-ai</span>
           </div>
 
           <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
@@ -329,7 +329,7 @@ const LandingPage = () => {
           <div className="max-w-7xl mx-auto px-6">
               <div className="text-center mb-16">
                   <h2 className="text-4xl font-bold text-slate-900 mb-4">Built For Every Business</h2>
-                  <p className="text-slate-500 text-xl max-w-2xl mx-auto">Whether you run a clinic, a shop, or a college—Marroncorp adapts to your needs.</p>
+                  <p className="text-slate-500 text-xl max-w-2xl mx-auto">Whether you run a clinic, a shop, or a college—Yogidesk-ai adapts to your needs.</p>
               </div>
               <div className="grid md:grid-cols-3 gap-8">
                   {industries.map((item, i) => (
@@ -389,7 +389,7 @@ const LandingPage = () => {
       <section className="py-20 bg-slate-900 text-white text-center">
          <div className="max-w-4xl mx-auto px-6">
             <h2 className="text-4xl md:text-5xl font-black mb-6">Ready to Automate Your Business?</h2>
-            <p className="text-xl text-slate-400 mb-10">Join 500+ businesses growing with Marroncorp AI. No credit card required.</p>
+            <p className="text-xl text-slate-400 mb-10">Join 500+ businesses growing with Yogidesk-ai. No credit card required.</p>
             <Link to="/signup" className="inline-flex items-center gap-2 bg-[#FF6B00] hover:bg-orange-600 text-white px-10 py-4 rounded-xl text-lg font-bold transition shadow-2xl shadow-orange-500/20 transform hover:scale-105">
                Start Free Trial <Rocket size={20}/>
             </Link>
@@ -422,7 +422,7 @@ const LandingPage = () => {
             <div className="col-span-1">
                <div className="flex items-center gap-2 mb-6">
                   <div className="w-8 h-8 bg-[#FF6B00] rounded-lg flex items-center justify-center font-bold text-white">M</div>
-                  <span className="font-bold text-xl">Marroncorp</span>
+                  <span className="font-bold text-xl">Yogidesk-ai</span>
                </div>
                <p className="text-slate-400 text-sm mb-6">Empowering businesses with intelligent WhatsApp automation.</p>
                <div className="flex gap-4">
@@ -455,7 +455,7 @@ const LandingPage = () => {
             </div>
          </div>
          <div className="max-w-7xl mx-auto px-6 pt-8 mt-8 border-t border-slate-900 text-center text-slate-500 text-sm">
-            &copy; 2025 Marroncorp AI. All rights reserved. Made in India 🇮🇳
+            &copy; 2025 Yogidesk-ai. All rights reserved. Made in India 🇮🇳
          </div>
       </footer>
     </div>
@@ -487,7 +487,7 @@ const ConversionDemo = () => {
               </div>
               <div className={`transition-all duration-500 ${stage === 'chat' ? 'opacity-100 scale-100' : 'opacity-30 scale-95'}`}>
                  <div className="flex items-center gap-3 mb-2"><div className="p-2 bg-green-500 rounded-lg"><MessageSquare size={20}/></div><h3 className="font-bold">Step 2: The Conversion</h3></div>
-                 <p className="text-sm text-slate-400">Marroncorp AI handles the chat instantly and books the lead.</p>
+                 <p className="text-sm text-slate-400">Yogidesk-ai AI handles the chat instantly and books the lead.</p>
               </div>
               <button onClick={restart} className="mt-8 text-xs uppercase tracking-widest text-[#FF6B00] hover:text-white flex items-center gap-2"><Play size={12}/> Replay Animation</button>
            </div>
