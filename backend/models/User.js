@@ -14,7 +14,7 @@ const UserSchema = new mongoose.Schema({
     unique: true,
     match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please add a valid email']
   },
-  phone: { // ✅ ADDED: Controller me hum ye save kar rahe thay
+  phone: { 
     type: String,
     default: ""
   },
@@ -27,16 +27,16 @@ const UserSchema = new mongoose.Schema({
     required: function() { return !this.googleId; } // Google login walon ko password nahi chahiye
   },
   
-  // 🆕 ROLE: Default 'trial_user' (Payment ke baad change hoga)
+  // 🆕 ROLE: 'user' add kiya taaki purane accounts crash na karein
   role: {
     type: String,
-    enum: ['trial_user', 'admin', 'manager', 'employee'], 
+    enum: ['user', 'trial_user', 'admin', 'manager', 'employee'], 
     default: 'trial_user'
   },
   
   // 🏢 BUSINESS INFO
   businessName: String,
-  businessType: { // ✅ ADDED: Controller se match karne ke liye
+  businessType: { 
     type: String, 
     default: 'general' 
   },
@@ -58,6 +58,7 @@ const UserSchema = new mongoose.Schema({
   // 🔥 SUBSCRIPTION & PLAN LOGIC
   planType: {
     type: String,
+    // ✅ FIX: Yahan se 'user' hata diya (wo galti se aya tha) aur syntax theek kiya
     enum: ['free_trial', 'lite', 'elite', 'bronze', 'premium', 'custom'],
     default: 'free_trial'
   },
