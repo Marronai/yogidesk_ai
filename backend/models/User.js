@@ -1,51 +1,157 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs'); // 🔐 Password Hashing
 
-const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, select: false }, // Google login walon ke paas password nahi hota
-  
-  // ... Baki fields (phone, businessName etc.) ...
+const UserSchema = new mongoose.Schema({
+  // 1. BASIC INFO
+  name: {
+    type: String,
+    required: [true, 'Please add a name']
+  },
+  email: {
+    type: String,
+    required: [true, 'Please add an email'],
+    unique: true,
+    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please add a valid email']
+  },
+  phone: { // ✅ ADDED: Controller me hum ye save kar rahe thay
+    type: String,
+    default: ""
+  },
 
-  googleId: { type: String }, // Google Login ke liye
-  avatar: { type: String },
-  
-  role: { 
-    type: String, 
-    enum: ['user', 'admin', 'employee', 'manager', 'trial_user'], 
-    default: 'user' 
+  // 🔒 SECURITY: Password tabhi required hai jab Google ID na ho
+  password: {
+    type: String,
+    minlength: 6,
+    select: false, // 🛡️ Database query karte waqt password return nahi hoga
+    required: function() { return !this.googleId; } // Google login walon ko password nahi chahiye
   },
   
-  // 👇👇 YE MISSING THA! ISKO ADD KARO 👇👇
+  // 🆕 ROLE: Default 'trial_user' (Payment ke baad change hoga)
+  role: {
+    type: String,
+    enum: ['trial_user', 'admin', 'manager', 'employee'], 
+    default: 'trial_user'
+  },
+  
+  // 🏢 BUSINESS INFO
+  businessName: String,
+  businessType: { // ✅ ADDED: Controller se match karne ke liye
+    type: String, 
+    default: 'general' 
+  },
+  industry: {
+    type: String,
+    enum: ['general', 'hospital', 'education', 'startup', 'ecommerce'],
+    default: 'general'
+  },
+
+  // 💬 WHATSAPP API CONFIGURATION (SaaS Model)
+  whatsappConfig: {
+    phoneNumberId: { type: String, default: "" },
+    wabaId: { type: String, default: "" },
+    // 🛡️ SECURITY: Token ko hide kiya taaki hack hone par leak na ho
+    accessToken: { type: String, default: "", select: false }, 
+    isConfigured: { type: Boolean, default: false }
+  },
+  
+  // 🔥 SUBSCRIPTION & PLAN LOGIC
+  planType: {
+    type: String,
+    enum: ['free_trial', 'lite', 'elite', 'bronze', 'premium', 'custom'],
+    default: 'free_trial'
+  },
+  subscriptionStatus: {
+    type: String,
+    enum: ['trial', 'active', 'expired', 'suspended'],
+    default: 'trial'
+  },
+  trialStartDate: {
+    type: Date,
+    default: Date.now
+  },
+  // ✅ 5 Days Trial Expiry Logic
+  planExpiryDate: {
+    type: Date,
+    default: () => new Date(+new Date() + 5*24*60*60*1000) 
+  },
+
+  // 🕒 SHIFT TIMING (For Employees)
+  shiftStart: { type: String, default: "09:00" },
+  shiftEnd: { type: String, default: "18:00" },
+
+  // 🆕 GOOGLE AUTH & OTP FIELDS
+  googleId: { type: String }, // Google walo ki unique ID
+  avatar: { type: String },   // User ki photo
+  
+  otp: { type: String, select: false }, // Hidden
+  otpExpires: { type: Date, select: false },       
+  
+  isVerified: { 
+    type: Boolean, 
+    default: false 
+  }, 
+
+  // 🛡️ SESSION MANAGEMENT (Logout Fix)
   currentSessionId: { type: String }, 
-  // 👆👆 Ye line bohot zaroori hai logout issue rokne ke liye
-  
-  isVerified: { type: Boolean, default: false },
-  
-  // OTP Fields
-  otp: { type: String, select: false },
-  otpExpires: { type: Date, select: false },
-  
-  // Plan/Shift Fields
-  planType: { type: String, default: 'free' },
-  planExpiryDate: { type: Date },
-  shiftStart: { type: String },
-  shiftEnd: { type: String },
 
-}, { timestamps: true });
+  resetPasswordToken: String,
+  resetPasswordExpire: Date,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
-// Password Hash Middleware (Agar pehle se hai toh rehne do)
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+// -----------------------------------------------------
+// 🔒 MIDDLEWARE: PASSWORD ENCRYPTION (Auto-Hash)
+// -----------------------------------------------------
+UserSchema.pre('save', async function(next) {
+  // 1. Agar password change nahi hua, toh aage badho
+  if (!this.isModified('password')) {
+    return next();
+  }
+
+  // 2. Agar Google user hai (password null hai), toh aage badho
+  if (!this.password) {
+    return next();
+  }
+  
+  // 3. Password Hash karo
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-// Password Match Method
-userSchema.methods.matchPassword = async function (enteredPassword) {
+// -----------------------------------------------------
+// 🔑 METHODS
+// -----------------------------------------------------
+
+// 1. Password Match Checker
+UserSchema.methods.matchPassword = async function(enteredPassword) {
+  if (!this.password) return false; // Google users ke liye false
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+// 2. Account Active Checker
+UserSchema.methods.isAccountActive = function() {
+    const now = new Date();
+    // Status active/trial ho AUR date expiry se kam ho
+    if ((this.subscriptionStatus === 'active' || this.subscriptionStatus === 'trial') && this.planExpiryDate > now) {
+        return true;
+    }
+    return false;
+};
+
+// 3. Reset Password Token Generator
+UserSchema.methods.getResetPasswordToken = function () {
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  
+  // Token Hash karke DB me save karo
+  this.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 Minutes
+  
+  return resetToken;
+};
+
+module.exports = mongoose.model('User', UserSchema);
