@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs'); // 🔐 Password Hashing
+const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema({
   // 1. BASIC INFO
@@ -19,15 +19,15 @@ const UserSchema = new mongoose.Schema({
     default: ""
   },
 
-  // 🔒 SECURITY: Password tabhi required hai jab Google ID na ho
+  // 🔒 SECURITY
   password: {
     type: String,
     minlength: 6,
-    select: false, // 🛡️ Database query karte waqt password return nahi hoga
-    required: function() { return !this.googleId; } // Google login walon ko password nahi chahiye
+    select: false,
+    required: function() { return !this.googleId; }
   },
   
-  // 🆕 ROLE: 'user' add kiya taaki purane accounts crash na karein
+  // 🆕 ROLE FIX: 'user' add kiya taaki purane accounts crash na karein
   role: {
     type: String,
     enum: ['user', 'trial_user', 'admin', 'manager', 'employee'], 
@@ -36,29 +36,24 @@ const UserSchema = new mongoose.Schema({
   
   // 🏢 BUSINESS INFO
   businessName: String,
-  businessType: { 
-    type: String, 
-    default: 'general' 
-  },
+  businessType: { type: String, default: 'general' },
   industry: {
     type: String,
     enum: ['general', 'hospital', 'education', 'startup', 'ecommerce'],
     default: 'general'
   },
 
-  // 💬 WHATSAPP API CONFIGURATION (SaaS Model)
+  // 💬 WHATSAPP API
   whatsappConfig: {
     phoneNumberId: { type: String, default: "" },
     wabaId: { type: String, default: "" },
-    // 🛡️ SECURITY: Token ko hide kiya taaki hack hone par leak na ho
     accessToken: { type: String, default: "", select: false }, 
     isConfigured: { type: Boolean, default: false }
   },
   
-  // 🔥 SUBSCRIPTION & PLAN LOGIC
+  // 🔥 SUBSCRIPTION
   planType: {
     type: String,
-    // ✅ FIX: Yahan se 'user' hata diya (wo galti se aya tha) aur syntax theek kiya
     enum: ['free_trial', 'lite', 'elite', 'bronze', 'premium', 'custom'],
     default: 'free_trial'
   },
@@ -67,91 +62,73 @@ const UserSchema = new mongoose.Schema({
     enum: ['trial', 'active', 'expired', 'suspended'],
     default: 'trial'
   },
-  trialStartDate: {
-    type: Date,
-    default: Date.now
-  },
-  // ✅ 5 Days Trial Expiry Logic
+  trialStartDate: { type: Date, default: Date.now },
   planExpiryDate: {
     type: Date,
     default: () => new Date(+new Date() + 5*24*60*60*1000) 
   },
 
-  // 🕒 SHIFT TIMING (For Employees)
+  // 🕒 SHIFT TIMING
   shiftStart: { type: String, default: "09:00" },
   shiftEnd: { type: String, default: "18:00" },
 
-  // 🆕 GOOGLE AUTH & OTP FIELDS
-  googleId: { type: String }, // Google walo ki unique ID
-  avatar: { type: String },   // User ki photo
-  
-  otp: { type: String, select: false }, // Hidden
+  // 🆕 GOOGLE AUTH
+  googleId: { type: String },
+  avatar: { type: String },
+  otp: { type: String, select: false },
   otpExpires: { type: Date, select: false },       
-  
-  isVerified: { 
-    type: Boolean, 
-    default: false 
-  }, 
+  isVerified: { type: Boolean, default: false }, 
 
-  // 🛡️ SESSION MANAGEMENT (Logout Fix)
+  // 🛡️ SESSION
   currentSessionId: { type: String }, 
 
   resetPasswordToken: String,
   resetPasswordExpire: Date,
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  createdAt: { type: Date, default: Date.now }
 });
 
 // -----------------------------------------------------
-// 🔒 MIDDLEWARE: PASSWORD ENCRYPTION (Auto-Hash)
+// 🔒 MIDDLEWARE FIX (No 'next' used)
 // -----------------------------------------------------
-UserSchema.pre('save', async function(next) {
-  // 1. Agar password change nahi hua, toh aage badho
+// 👇 Yahan se 'next' parameter hata diya hai
+UserSchema.pre('save', async function() {
+  // 1. Return directly (No next())
   if (!this.isModified('password')) {
-    return next();
+    return;
   }
 
-  // 2. Agar Google user hai (password null hai), toh aage badho
+  // 2. Return directly
   if (!this.password) {
-    return next();
+    return;
   }
   
-  // 3. Password Hash karo
+  // 3. Hash Password
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
+  // Async function automatically promise resolve kar lega
 });
 
 // -----------------------------------------------------
 // 🔑 METHODS
 // -----------------------------------------------------
 
-// 1. Password Match Checker
 UserSchema.methods.matchPassword = async function(enteredPassword) {
-  if (!this.password) return false; // Google users ke liye false
+  if (!this.password) return false;
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// 2. Account Active Checker
 UserSchema.methods.isAccountActive = function() {
     const now = new Date();
-    // Status active/trial ho AUR date expiry se kam ho
     if ((this.subscriptionStatus === 'active' || this.subscriptionStatus === 'trial') && this.planExpiryDate > now) {
         return true;
     }
     return false;
 };
 
-// 3. Reset Password Token Generator
 UserSchema.methods.getResetPasswordToken = function () {
   const resetToken = crypto.randomBytes(20).toString('hex');
-  
-  // Token Hash karke DB me save karo
   this.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 Minutes
-  
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
   return resetToken;
 };
 
