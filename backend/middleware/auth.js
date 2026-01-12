@@ -31,9 +31,18 @@ const protect = async (req, res, next) => {
         });
       }
 
-      // 🔒 B. SINGLE SESSION CHECK (Anti-Account Sharing)
-      if (user.currentSessionId && user.currentSessionId !== decoded.sessionId) {
-        return res.status(401).json({ msg: "Session expired. Logged in from another device." });
+      // 🔒 B. SMART SESSION CHECK (The Auto-Logout Fix ✅)
+      // Logic: Sirf tab logout karo jab Token aur DB dono ke paas ID ho, aur wo ALAG ho.
+      // Agar Token purana hai (sessionId missing), toh user ko pareshan mat karo.
+      
+      if (user.currentSessionId && decoded.sessionId) {
+          if (user.currentSessionId !== decoded.sessionId) {
+            console.log(`🚫 Session Mismatch! DB: ${user.currentSessionId} | Token: ${decoded.sessionId}`);
+            return res.status(401).json({ 
+                msg: "Session expired. Logged in from another device.",
+                logout: true // ✅ Frontend signal to clear storage
+            });
+          }
       }
 
       // 🕒 C. SHIFT TIMING CHECK (Sirf Employees ke liye)
@@ -41,16 +50,19 @@ const protect = async (req, res, next) => {
         const currentTime = new Date();
         const currentMins = currentTime.getHours() * 60 + currentTime.getMinutes();
 
-        const [startH, startM] = user.shiftStart.split(':').map(Number);
-        const [endH, endM] = user.shiftEnd.split(':').map(Number);
+        // Shift check tabhi karo jab start/end defined ho
+        if (user.shiftStart && user.shiftEnd) {
+            const [startH, startM] = user.shiftStart.split(':').map(Number);
+            const [endH, endM] = user.shiftEnd.split(':').map(Number);
 
-        const startMins = startH * 60 + startM;
-        const endMins = endH * 60 + endM;
+            const startMins = startH * 60 + startM;
+            const endMins = endH * 60 + endM;
 
-        if (currentMins < startMins || currentMins > endMins) {
-          return res.status(403).json({ 
-            msg: `Access Denied: Your shift is from ${user.shiftStart} to ${user.shiftEnd}` 
-          });
+            if (currentMins < startMins || currentMins > endMins) {
+            return res.status(403).json({ 
+                msg: `Access Denied: Your shift is from ${user.shiftStart} to ${user.shiftEnd}` 
+            });
+            }
         }
       }
 
