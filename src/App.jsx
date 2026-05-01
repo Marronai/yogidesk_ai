@@ -68,7 +68,7 @@ const App = () => {
                 <Route path="inbox" element={<Inbox />} />
                 <Route path="contacts" element={<Contacts />} />
                 <Route path="support" element={<Support />} />
-                <Route path="Settings" element={<Settings />} />
+                <Route path="settings" element={<Settings />} />
                 <Route path="ads-crm" element={<LeadsCRM />} />
                 <Route path="agent-dashboard" element={<AgentDashboard />} />
               </Route>
