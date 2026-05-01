@@ -12,10 +12,10 @@ const app = express();
 // --- 1. GLOBAL MIDDLEWARES (Order is Very Important) ---
 
 // A. CORS: Allow cross-origin requests
-app.use(cors({ origin: true, credentials: true })); 
+app.use(cors({ origin: true, credentials: true }));
 
 // B. JSON Parser: ⚠️ ISKO ROUTES SE PEHLE HONA CHAHIYE (Fixed)
-app.use(express.json()); 
+app.use(express.json());
 
 // C. Debug Logger: Request aate hi console mein dikhega
 app.use((req, res, next) => {
