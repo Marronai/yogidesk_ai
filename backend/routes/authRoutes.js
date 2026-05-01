@@ -27,22 +27,23 @@ const createAccountLimiter = rateLimit({
   message: { msg: "Too many accounts created from this IP, please try again later" }
 });
 
-// ✅✅✅ FIX: Add these 2 lines ✅✅✅
-router.post('/signup', createAccountLimiter, register); // Alias for /register
-router.get('/signup', (req, res) => res.status(405).json({ msg: "Method Not Allowed. Use POST to /api/auth/register" }));
-
-// Main Routes
+// ✅✅✅ SIGNUP ROUTES (Both /register and /signup) ✅✅✅
 router.post('/register', createAccountLimiter, register);
+router.post('/signup', createAccountLimiter, register); // Alias for compatibility
 router.post('/verify-signup', createAccountLimiter, verifySignupOtp);
 
+// Login Routes
 router.post('/login', loginLimiter, loginStep1);
 router.post('/verify-login', loginLimiter, verifyLoginOtp);
 
+// Google Login
 router.post('/google', googleLogin); 
 
+// Password Recovery
 router.post('/forgotpassword', forgotPassword);
 router.put('/resetpassword/:resetToken', resetPassword);
 
+// Protected Routes
 router.get('/check-session', protect, (req, res) => {
   res.status(200).json({ status: 'active', user: req.user });
 });

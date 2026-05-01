@@ -11,13 +11,29 @@ const app = express();
 
 // --- 1. GLOBAL MIDDLEWARES (Order is Very Important) ---
 
-// A. CORS: Allow cross-origin requests
-app.use(cors({ origin: true, credentials: true }));
+// ✅✅✅ A. CORS FIX (UPDATED) ✅✅✅
+const corsOptions = {
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://yogidesk-ai.vercel.app',
+    /vercel\.app$/ // All Vercel preview URLs allowed
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+};
 
-// B. JSON Parser: ⚠️ ISKO ROUTES SE PEHLE HONA CHAHIYE (Fixed)
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// B. JSON Parser
 app.use(express.json());
 
-// C. Debug Logger: Request aate hi console mein dikhega
+// C. Debug Logger
 app.use((req, res, next) => {
   console.log(`📩 [${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
   next();
@@ -25,34 +41,30 @@ app.use((req, res, next) => {
 
 // --- 2. ROUTE DEFINITIONS ---
 
-// Auth Routes (Login, Signup)
+// Auth Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 
-// Payment Routes (Cashfree)
+// Payment Routes
 app.use('/api/payments', require('./routes/paymentRoutes'));
 
-// Settings Routes (Profile, Password)
+// Settings Routes
 app.use('/api/settings', require('./routes/settingsRoutes'));
 
-// WhatsApp Routes (Meta API)
+// WhatsApp Routes
 app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
 
-// Team Routes (Roles, Agents Management)
+// Team Routes
 app.use('/api/team', require('./routes/teamRoutes'));
 
-// Contact/Audience Routes (With CSV Upload)
+// Contact/Audience Routes
 app.use('/api/contacts', require('./routes/contactRoutes'));
 
-// Template Routes (WA Approved Templates)
+// Template Routes
 app.use('/api/templates', require('./routes/templateRoutes'));
-app.use('/api/contacts', require('./routes/contactRoutes'));
-// Dashboard Stats (Agar file banayi hai toh uncomment karein)
-// app.use('/api/dashboard', require('./routes/dashboardRoutes'));
-
 
 // --- 3. ERROR HANDLING & 404 ---
 
-// Agar koi route na mile (404)
+// 404 Handler
 app.use((req, res) => {
   res.status(404).json({ msg: "API endpoint not found" });
 });
