@@ -1,15 +1,16 @@
 const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async (options) => {
-  try {
-    // 👇 UPDATE: Response ko sahi se todna (Destructure) zaroori hai
-    const { data, error } = await resend.emails.send({
-      from: 'no-reply@yogidesk-ai.com', // Testing email
-      to: options.email,
-      subject: options.subject,
-      html: options.message,
-    });
+    // Function ke ANDAR initialize karein, bahar nahi!
+    const resend = new Resend(process.env.RESEND_API_KEY); 
+
+    try {
+        const { data, error } = await resend.emails.send({
+            from: 'no-reply@yogidesk-ai.com',
+            to: options.email,
+            subject: options.subject,
+            html: options.message,
+        });
 
     // 🛑 Agar Error aaya hai, toh use Chhupao mat, Log karo!
     if (error) {

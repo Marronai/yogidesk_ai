@@ -1,15 +1,20 @@
-// FILE: backend/config/db.js
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
+  // 👇 Yahan apna pura MongoDB URL directly daal dein
+  const mongoURI = "mongodb+srv://marroncorpai_db_user:Avinash111@cluster0.bqsqfjx.mongodb.net/?appName=Cluster0";
+
   try {
-    // MongoDB se connect karne ki koshish
-    const conn = await mongoose.connect(process.env.MONGO_URI);
+    const conn = await mongoose.connect(mongoURI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.error(`❌ Error: ${error.message}`);
-    process.exit(1); // Failure ke sath exit karo
+    console.error(`❌ Database Connection Failed: ${error.message}`);
+    // Server crash na ho isliye exit code hata sakte hain ya rehne dein
+    process.exit(1); 
   }
 };
 

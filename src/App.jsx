@@ -28,6 +28,7 @@ import TemplateManager from './pages/TemplateManager';
 import Templates from './pages/Templates';
 import About from './pages/About';
 import Contact from './pages/Contact';
+import AuthSuccess from './pages/AuthSuccess';
 
 const App = () => {
   // 🔑 Google Client ID ko environment variable se lo
@@ -51,8 +52,13 @@ const App = () => {
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          
+          <Route path="/auth-success" element={<AuthSuccess />} />  
+          
+
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:resetToken" element={<ResetPassword />} />
+          
           
           {/* ============================== */}
           {/* 2. PROTECTED ROUTES (Locked)   */}
@@ -64,6 +70,7 @@ const App = () => {
               <Route path="/dashboard" element={<MainLayout />}>
                 <Route index element={<DashboardHome />} />
                 
+                
                 {/* Note: Sidebar me Link hona chahiye "/dashboard/inbox" */}
                 <Route path="inbox" element={<Inbox />} />
                 <Route path="contacts" element={<Contacts />} />
@@ -71,6 +78,7 @@ const App = () => {
                 <Route path="settings" element={<Settings />} />
                 <Route path="ads-crm" element={<LeadsCRM />} />
                 <Route path="agent-dashboard" element={<AgentDashboard />} />
+                
               </Route>
 
               {/* ✅ Standalone Protected Tools (Bina Login ke nahi dikhenge) */}

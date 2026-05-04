@@ -73,7 +73,11 @@ const UserSchema = new mongoose.Schema({
   shiftEnd: { type: String, default: "18:00" },
 
   // 🆕 GOOGLE AUTH
-  googleId: { type: String },
+  googleId: { 
+    type: String, 
+    unique: true, 
+    sparse: true // 👈 Ise add karein (Zaroori hai!)
+  },
   avatar: { type: String },
   otp: { type: String, select: false },
   otpExpires: { type: Date, select: false },       

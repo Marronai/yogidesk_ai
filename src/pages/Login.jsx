@@ -86,11 +86,12 @@ const Login = () => {
         const decoded = jwtDecode(data.token);
         storage.setItem('token', data.token);
         storage.setItem('user_id', decoded.id);
-        storage.setItem('user_role', decoded.role);
-        storage.setItem('user_name', data.user.name);
+        const role = decoded.role || data.user?.role || 'trial_user';
+        storage.setItem('user_role', role);
+        storage.setItem('user_name', decoded.name || data.user?.name || 'User');
         
         // Redirect based on role
-        if (decoded.role === 'employee') navigate('/dashboard/agent-dashboard');
+        if (role === 'employee') navigate('/dashboard/agent-dashboard');
         else navigate('/dashboard');
     } catch (error) {
         console.error("Token Decode Error", error);
