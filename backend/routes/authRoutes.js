@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const { 
   register, 
   loginStep1, 
-  verifyLoginOtp,
+  verifyOTP,
   googleLogin
 } = require('../controllers/authController');
 
@@ -21,7 +21,7 @@ const { protect } = require('../middleware/authMiddleware');
 router.post('/register', register);
 router.post('/signup', register); 
 router.post('/login', loginStep1);
-router.post('/verify-login', verifyLoginOtp);
+router.post('/verify-otp', verifyOTP);
 
 // --- GOOGLE AUTH ROUTES ---
 router.post('/google', googleLogin);

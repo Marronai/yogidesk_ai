@@ -2,6 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
+const { sendOTP } = require('../config/emailConfig');
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
 const generateToken = (userOrId, sessionId) => {
@@ -12,108 +13,143 @@ const generateToken = (userOrId, sessionId) => {
   return jwt.sign(payload, secret, { expiresIn: '30d' });
 };
 
-// 1️⃣ REGISTER: Bypass Mode
+// 🛠️ HELPER: Generate 6-digit OTP
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// 1️⃣ REGISTER: Send OTP to email, set isVerified: false
 exports.register = async (req, res) => {
   try {
     const { name, email, password, phone, businessName, businessType } = req.body;
 
-    // Check if body data exists (Validation fix)
-    if (!name || !email) {
-      return res.status(400).json({ msg: "Please provide name and email" });
+    if (!name || !email || !password) {
+      return res.status(400).json({ msg: "Please provide name, email, and password" });
     }
 
     let user = await User.findOne({ email });
 
     if (user) {
-      user.currentSessionId = crypto.randomBytes(16).toString('hex');
-      await user.save();
-      const token = generateToken(user, user.currentSessionId);
-      return res.status(200).json({ 
-        success: true, 
-        token, 
-        user: { id: user._id, name: user.name, email: user.email, role: user.role } 
-      });
+      return res.status(400).json({ msg: 'User already exists' });
     }
 
-    // Naya User (Saari fields ensure karein taaki validation fail na ho)
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    // Create new user
     user = await User.create({
       name,
       email,
-      password: password || crypto.randomBytes(10).toString('hex'), // Default password if empty
-      phone: phone || '0000000000',
+      password,
+      phone: phone || '',
       businessName: businessName || 'My Business',
       businessType: businessType || 'Other',
       role: 'trial_user',
-      isVerified: true,
+      isVerified: false,
+      otp,
+      otpExpires,
       currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
-    const token = generateToken(user, user.currentSessionId);
+    // Send OTP email
+    const otpSent = await sendOTP(user.email, user.name, otp);
+    
+    if (!otpSent) {
+      return res.status(500).json({ msg: 'Failed to send OTP. Please try again.' });
+    }
+
     res.status(201).json({
       success: true,
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      msg: 'User registered. Please check your email for OTP verification.'
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
   }
 };
 
-// 2️⃣ LOGIN: Direct Bypass
+// 2️⃣ LOGIN STEP 1: Verify email/password, send OTP
 exports.loginStep1 = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email }).select('+password');
 
-    if (!user) return res.status(400).json({ msg: 'Invalid Credentials' });
-
-    // Password match check
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) return res.status(400).json({ msg: 'Invalid Credentials' });
-
-    user.currentSessionId = crypto.randomBytes(16).toString('hex');
-    await user.save();
-
-    const token = generateToken(user, user.currentSessionId);
-    res.status(200).json({
-      success: true,
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
-  } catch (error) {
-    res.status(500).json({ msg: 'Server Error', error: error.message });
-  }
-};
-
-// 2️⃣ OTP / VERIFY LOGIN FALLBACK (Direct Bypass)
-exports.verifyLoginOtp = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ msg: 'Please provide email' });
+    if (!email || !password) {
+      return res.status(400).json({ msg: 'Please provide email and password' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select('+password');
+
     if (!user) {
       return res.status(400).json({ msg: 'Invalid Credentials' });
     }
 
-    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    // Check password
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(400).json({ msg: 'Invalid Credentials' });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    user.otp = otp;
+    user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
     await user.save();
 
-    const token = generateToken(user, user.currentSessionId);
+    // Send OTP email
+    const otpSent = await sendOTP(user.email, user.name, otp);
+    
+    if (!otpSent) {
+      return res.status(500).json({ msg: 'Failed to send OTP. Please try again.' });
+    }
+
     res.status(200).json({
       success: true,
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      msg: 'Credentials verified. Please check your email for OTP.'
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
   }
 };
 
-// 3️⃣ GOOGLE LOGIN: Direct token-based fallback
+// 3️⃣ VERIFY OTP: Verify OTP and issue JWT
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ msg: 'Please provide email and OTP' });
+    }
+
+    const user = await User.findOne({ email }).select('+otp +otpExpires');
+
+    if (!user) {
+      return res.status(400).json({ msg: 'User not found' });
+    }
+
+    if (!user.otp || user.otp !== otp || user.otpExpires < Date.now()) {
+      return res.status(400).json({ msg: 'Invalid or expired OTP' });
+    }
+
+    // Clear OTP
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    user.isVerified = true;
+    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    await user.save();
+
+    const token = generateToken(user, user.currentSessionId);
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified }
+    });
+  } catch (error) {
+    res.status(500).json({ msg: 'Server Error', error: error.message });
+  }
+};
+
+// 4️⃣ GOOGLE LOGIN: Direct token-based fallback
 exports.googleLogin = async (req, res) => {
   try {
     const { access_token, tokenId } = req.body;
