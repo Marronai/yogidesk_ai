@@ -1,15 +1,34 @@
 const nodemailer = require('nodemailer');
 
-// 🛠️ Nodemailer Transporter for Hostinger Business Email
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.hostinger.com',
-  port: process.env.EMAIL_PORT || 465,
-  secure: true, // true for 465, false for other ports
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = Number(process.env.SMTP_PORT);
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const emailFrom = process.env.EMAIL_FROM;
+
+const missingEmailVars = [];
+if (!smtpHost) missingEmailVars.push('SMTP_HOST');
+if (!process.env.SMTP_PORT) missingEmailVars.push('SMTP_PORT');
+if (!smtpUser) missingEmailVars.push('SMTP_USER');
+if (!smtpPass) missingEmailVars.push('SMTP_PASS');
+if (!emailFrom) missingEmailVars.push('EMAIL_FROM');
+
+if (missingEmailVars.length > 0) {
+  console.error(`❌ Missing email configuration variables in .env: ${missingEmailVars.join(', ')}.`);
+  console.error('   Email sending is disabled until these values are defined.');
+}
+
+const transporter = missingEmailVars.length === 0
+  ? nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      }
+    })
+  : null;
 
 // 🛠️ Professional HTML Email Template for OTP
 const otpEmailTemplate = (userName, otp) => {
@@ -145,13 +164,13 @@ const otpEmailTemplate = (userName, otp) => {
 // 🛠️ Send OTP Function
 const sendOTP = async (email, userName, otp) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('❌ Email credentials not configured in .env');
+    if (!transporter || !emailFrom) {
+      console.error('❌ Nodemailer is not configured because required SMTP env variables are missing.');
       return false;
     }
 
     const mailOptions = {
-      from: process.env.EMAIL_USER,
+      from: emailFrom,
       to: email,
       subject: '🔐 Your YogiDesk Verification Code',
       html: otpEmailTemplate(userName, otp)
@@ -168,6 +187,11 @@ const sendOTP = async (email, userName, otp) => {
 
 // 🛠️ Verify Transporter Connection (Optional - for testing)
 const verifyConnection = async () => {
+  if (!transporter) {
+    console.error('❌ Nodemailer transporter unavailable: missing SMTP configuration.');
+    return false;
+  }
+
   try {
     await transporter.verify();
     console.log('✅ Nodemailer transporter connected successfully');
