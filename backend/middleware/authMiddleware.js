@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
-exports.protect = async (req, res, next) => {
+// 🛡️ 1. Protect Middleware (Token Verification)
+const protect = async (req, res, next) => {
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
@@ -37,4 +38,5 @@ const adminOnly = (req, res, next) => {
   res.status(403).json({ msg: 'Access denied. Admins/Managers only.' });
 };
 
+// ✅ Sahi tarika: Saare functions ek saath export karein
 module.exports = { protect, adminOnly };
