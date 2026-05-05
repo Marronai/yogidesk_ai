@@ -18,8 +18,8 @@ const Login = () => {
 
   const [formData, setFormData] = useState({ email: '', password: '' });
   
-  // ⚠️ Ensure VITE_API_URL is correct in .env (e.g., http://localhost:5000/api)
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  // ⚠️ Ensure VITE_API_URL is correct in .env for production
+  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com/api';
 
   // --- CAROUSEL DATA ---
   const [currentSlide, setCurrentSlide] = useState(0);
