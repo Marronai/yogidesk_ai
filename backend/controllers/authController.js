@@ -21,7 +21,7 @@ const generateOTP = () => {
 // 1️⃣ REGISTER: Send OTP to email, set isVerified: false
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, phone, businessName, businessType } = req.body;
+    const { name, email, password, phone, businessName, businessType, businessCategory } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ msg: "Please provide name, email, and password" });
@@ -45,6 +45,7 @@ exports.register = async (req, res) => {
       phone: phone || '',
       businessName: businessName || 'My Business',
       businessType: businessType || 'Other',
+      businessCategory: businessCategory || 'Other',
       role: 'trial_user',
       isVerified: false,
       otp,
@@ -131,6 +132,44 @@ exports.verifyOTP = async (req, res) => {
     }
 
     // Clear OTP
+    user.otp = undefined;
+    user.otpExpires = undefined;
+    user.isVerified = true;
+    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    await user.save();
+
+    const token = generateToken(user, user.currentSessionId);
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified }
+    });
+  } catch (error) {
+    res.status(500).json({ msg: 'Server Error', error: error.message });
+  }
+};
+
+// 3.5️⃣ VERIFY SIGNUP OTP: Verify OTP for signup and issue JWT
+exports.verifySignupOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ msg: 'Please provide email and OTP' });
+    }
+
+    const user = await User.findOne({ email }).select('+otp +otpExpires');
+
+    if (!user) {
+      return res.status(400).json({ msg: 'User not found' });
+    }
+
+    if (!user.otp || user.otp !== otp || user.otpExpires < Date.now()) {
+      return res.status(400).json({ msg: 'Invalid or expired OTP' });
+    }
+
+    // Clear OTP and verify user
     user.otp = undefined;
     user.otpExpires = undefined;
     user.isVerified = true;

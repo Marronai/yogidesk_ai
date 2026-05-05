@@ -37,6 +37,11 @@ const UserSchema = new mongoose.Schema({
   // 🏢 BUSINESS INFO
   businessName: String,
   businessType: { type: String, default: 'general' },
+  businessCategory: {
+    type: String,
+    enum: ['Hospital', 'Clinic', 'Coaching', 'Salon', 'Other'],
+    default: 'Other'
+  },
   industry: {
     type: String,
     enum: ['general', 'hospital', 'education', 'startup', 'ecommerce'],

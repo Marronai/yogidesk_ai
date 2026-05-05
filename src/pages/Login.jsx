@@ -114,6 +114,10 @@ const Login = () => {
 
     try {
       if (step === 1) {
+        // Clear any old tokens before login attempt
+        localStorage.removeItem('token');
+        sessionStorage.removeItem('token');
+
         // --- STEP 1: VERIFY EMAIL/PASS & SEND OTP ---
         const res = await axios.post(`${API_URL}/auth/login`, formData); 
         
