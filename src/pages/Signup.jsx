@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { jwtDecode } from "jwt-decode";
+import jwtDecode from 'jwt-decode';
 import { 
   User, Building, Mail, Lock, Phone, ArrowRight, Loader2, 
   Star, CheckCircle, Eye, EyeOff, Briefcase 

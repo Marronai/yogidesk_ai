@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, ShieldCheck, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
-import { jwtDecode } from "jwt-decode";
+import jwtDecode from 'jwt-decode';
 import { useGoogleLogin } from '@react-oauth/google';
 
 const Login = () => {
@@ -84,11 +84,19 @@ const Login = () => {
     // Decode token safely
     try {
         const decoded = jwtDecode(data.token);
-        storage.setItem('token', data.token);
-        storage.setItem('user_id', decoded.id);
+        localStorage.setItem('token', data.token);
+        if (!rememberMe) sessionStorage.setItem('token', data.token);
+
+        localStorage.setItem('user_id', decoded.id);
         const role = decoded.role || data.user?.role || 'trial_user';
-        storage.setItem('user_role', role);
-        storage.setItem('user_name', decoded.name || data.user?.name || 'User');
+        localStorage.setItem('user_role', role);
+        localStorage.setItem('user_name', decoded.name || data.user?.name || 'User');
+
+        if (!rememberMe) {
+          sessionStorage.setItem('user_id', decoded.id);
+          sessionStorage.setItem('user_role', role);
+          sessionStorage.setItem('user_name', decoded.name || data.user?.name || 'User');
+        }
         
         // Redirect based on role
         if (role === 'employee') navigate('/dashboard/agent-dashboard');
