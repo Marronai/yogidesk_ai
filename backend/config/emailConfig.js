@@ -161,26 +161,158 @@ const otpEmailTemplate = (userName, otp) => {
   `;
 };
 
-// 🛠️ Send OTP Function
-const sendOTP = async (email, userName, otp) => {
+// 🛠️ Professional Welcome Email Template for New Users
+const welcomeEmailTemplate = (userName, businessName) => {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          background-color: #ffffff;
+          padding: 20px;
+          margin: 0;
+        }
+        .email-container {
+          max-width: 600px;
+          margin: 0 auto;
+          background-color: #ffffff;
+          border-radius: 8px;
+          overflow: hidden;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          border: 1px solid #e0e0e0;
+        }
+        .header {
+          background: linear-gradient(135deg, #FF6B00 0%, #002D62 100%);
+          padding: 40px 20px;
+          text-align: center;
+        }
+        .logo {
+          font-size: 32px;
+          font-weight: bold;
+          color: #ffffff;
+          margin: 0;
+        }
+        .content {
+          padding: 40px 20px;
+          text-align: center;
+        }
+        .greeting {
+          font-size: 24px;
+          color: #333333;
+          margin: 0 0 10px 0;
+          font-weight: 600;
+        }
+        .message {
+          font-size: 16px;
+          color: #666666;
+          line-height: 1.6;
+          margin: 20px 0;
+        }
+        .highlight-box {
+          background-color: #f8f9fa;
+          border-left: 4px solid #FF6B00;
+          padding: 20px;
+          margin: 30px 0;
+          border-radius: 4px;
+        }
+        .highlight-title {
+          font-size: 18px;
+          color: #FF6B00;
+          font-weight: bold;
+          margin: 0 0 10px 0;
+        }
+        .cta-button {
+          display: inline-block;
+          background-color: #FF6B00;
+          color: #ffffff;
+          padding: 15px 30px;
+          text-decoration: none;
+          border-radius: 6px;
+          font-weight: bold;
+          font-size: 16px;
+          margin: 20px 0;
+          transition: background-color 0.3s;
+        }
+        .cta-button:hover {
+          background-color: #e55a00;
+        }
+        .footer {
+          background-color: #f8f9fa;
+          padding: 20px;
+          text-align: center;
+          border-top: 1px solid #e0e0e0;
+          font-size: 12px;
+          color: #666666;
+        }
+        .branding {
+          font-size: 11px;
+          color: #999999;
+          margin-top: 10px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="email-container">
+        <div class="header">
+          <p class="logo">🧘 YogiDesk</p>
+        </div>
+
+        <div class="content">
+          <p class="greeting">Welcome to YogiDesk, ${userName}!</p>
+
+          <p class="message">
+            Congratulations! Your account for <strong>${businessName}</strong> has been successfully created.
+            We're excited to help you automate your business communications and boost your productivity.
+          </p>
+
+          <div class="highlight-box">
+            <p class="highlight-title">🎉 Your 14-Day Free Trial Has Started!</p>
+            <p class="message">
+              Explore all features, integrate WhatsApp, and see how YogiDesk can transform your customer interactions.
+              No credit card required to get started.
+            </p>
+          </div>
+
+          <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Start Exploring Dashboard</a>
+
+          <p class="message">
+            Need help getting started? Check out our <a href="https://yogidesk-ai.com/support" style="color: #002D62; text-decoration: none; font-weight: bold;">support resources</a> or contact our team.
+          </p>
+        </div>
+
+        <div class="footer">
+          <p>© 2024 YogiDesk. All rights reserved.</p>
+          <p class="branding">A product of Vyapar Wallah</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+// 🛠️ Send Welcome Email Function
+const sendWelcomeEmail = async (email, userName, businessName) => {
   try {
     if (!transporter || !emailFrom) {
-      console.error('❌ Nodemailer is not configured because required SMTP env variables are missing.');
+      console.error('❌ Nodemailer is not configured for welcome emails.');
       return false;
     }
 
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: '🔐 Your YogiDesk Verification Code',
-      html: otpEmailTemplate(userName, otp)
+      subject: '🎉 Welcome to YogiDesk - Your 14-Day Free Trial Starts Now!',
+      html: welcomeEmailTemplate(userName, businessName)
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ OTP Email sent successfully:', info.response);
+    console.log('✅ Welcome Email sent successfully:', info.response);
     return true;
   } catch (error) {
-    console.error('❌ Failed to send OTP email:', error.message);
+    console.error('❌ Failed to send welcome email:', error.message);
     return false;
   }
 };
@@ -202,4 +334,4 @@ const verifyConnection = async () => {
   }
 };
 
-module.exports = { transporter, sendOTP, verifyConnection };
+module.exports = { transporter, sendOTP, sendWelcomeEmail, verifyConnection };

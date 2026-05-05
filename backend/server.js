@@ -31,7 +31,7 @@ const corsOptions = {
 // Enable CORS before any other middleware or routes
 app.use(cors(corsOptions));
 
-// Manual OPTIONS handler for preflight requests
+// Manual OPTIONS handler for preflight requests (Enhanced)
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     res.header('Access-Control-Allow-Origin', 'https://yogidesk-ai.com');

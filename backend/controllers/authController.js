@@ -2,7 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
-const { sendOTP } = require('../config/emailConfig');
+const { sendOTP, sendWelcomeEmail } = require('../config/emailConfig');
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
 const generateToken = (userOrId, sessionId) => {
@@ -138,6 +138,9 @@ exports.verifyOTP = async (req, res) => {
     user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
+    // Send welcome email
+    sendWelcomeEmail(user.email, user.name, user.businessName);
+
     const token = generateToken(user, user.currentSessionId);
 
     res.status(200).json({
@@ -175,6 +178,9 @@ exports.verifySignupOTP = async (req, res) => {
     user.isVerified = true;
     user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
+
+    // Send welcome email
+    sendWelcomeEmail(user.email, user.name, user.businessName);
 
     const token = generateToken(user, user.currentSessionId);
 
