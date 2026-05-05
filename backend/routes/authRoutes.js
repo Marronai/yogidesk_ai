@@ -21,7 +21,7 @@ const { protect } = require('../middleware/authMiddleware');
 router.post('/register', register);
 router.post('/signup', register); 
 router.post('/login', loginStep1);
-router.post('/verify-otp', verifyOTP);
+router.post('/verify-login', verifyOTP);
 
 // --- GOOGLE AUTH ROUTES ---
 router.post('/google', googleLogin);
