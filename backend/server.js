@@ -20,14 +20,15 @@ try {
 }
 
 const corsOptions = {
-  origin: ['https://yogidesk-ai.com', 'https://www.yogidesk-ai.com', 'http://localhost:5173'],
+  origin: 'https://yogidesk-ai.com',
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
+
+// Global OPTIONS handler for preflight requests
 app.options('*', cors(corsOptions));
 
 // CORS + Body Parsers
@@ -63,9 +64,6 @@ try {
 } catch (error) {
   console.error('❌ Failed to load auth routes:', error.message);
 }
-
-// Explicit OPTIONS handler for auth routes (for preflight requests)
-app.options('/api/auth/*', cors(corsOptions));
 
 try {
   app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
