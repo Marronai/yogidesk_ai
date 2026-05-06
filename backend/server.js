@@ -52,8 +52,10 @@ app.use(session({
   secret: process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988',
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000
   }
 }));

@@ -66,6 +66,8 @@ const Login = () => {
         setLoading(true);
         const res = await axios.post(`${API_URL}/auth/google`, {
           tokenId: tokenResponse.access_token 
+        }, {
+          withCredentials: true
         });
         handleAuthSuccess(res.data);
       } catch (err) {
@@ -119,7 +121,9 @@ const Login = () => {
         sessionStorage.removeItem('token');
 
         // --- STEP 1: VERIFY EMAIL/PASS & SEND OTP ---
-        const res = await axios.post(`${API_URL}/auth/login`, formData); 
+        const res = await axios.post(`${API_URL}/auth/login`, formData, {
+          withCredentials: true
+        }); 
         
         if (res.data.success) {
           setStep(2); // Move to OTP Screen
@@ -136,6 +140,8 @@ const Login = () => {
         const res = await axios.post(`${API_URL}/auth/verify-login`, { 
           email: formData.email, 
           otp: finalOtp 
+        }, {
+          withCredentials: true
         });
 
         handleAuthSuccess(res.data);

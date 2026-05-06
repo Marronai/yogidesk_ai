@@ -8,22 +8,27 @@ const MainLayout = () => {
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
   useEffect(() => {
-    // Har 3 second me check karo ki session valid hai ya nahi
+    const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com/api';
+
     const checkSession = async () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
       try {
-        await axios.get('http://localhost:5000/api/auth/check-session', {
-          headers: { Authorization: `Bearer ${token}` }
+        await axios.get(`${API_URL}/auth/check-session`, {
+          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true
         });
         // Agar success hai to kuch mat karo, sab sahi hai
       } catch (error) {
-        // Agar error aaya (401 Unauthorized), matlab dusri jagah login hua hai
-        console.log("Session expired or invalid");
-        localStorage.clear();
-        alert("You have been logged out because you logged in on another device.");
-        window.location.href = '/login'; // Force Reload to Login
+        if (error.response?.status === 401) {
+          console.log("Session expired or invalid");
+          localStorage.clear();
+          alert("You have been logged out because you logged in on another device.");
+          window.location.href = '/login';
+        } else {
+          console.warn('Session check failed but not logging out:', error.message || error);
+        }
       }
     };
 

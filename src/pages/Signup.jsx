@@ -83,6 +83,8 @@ const Signup = () => {
         setLoading(true);
         const res = await axios.post(`${API_URL}/auth/google`, {
           tokenId: tokenResponse.access_token
+        }, {
+          withCredentials: true
         });
         handleAuthSuccess(res.data);
       } catch (err) {
@@ -116,7 +118,9 @@ const Signup = () => {
           return;
         }
 
-        const res = await axios.post(`${API_URL}/auth/register`, cleanData);
+        const res = await axios.post(`${API_URL}/auth/register`, cleanData, {
+          withCredentials: true
+        });
         
         if (res.data.success) {
           setStep(2); // Move to OTP Screen
@@ -132,6 +136,8 @@ const Signup = () => {
         const res = await axios.post(`${API_URL}/auth/verify-signup-otp`, { 
           email: formData.email, 
           otp: finalOtp 
+        }, {
+          withCredentials: true
         });
 
         handleAuthSuccess(res.data);
