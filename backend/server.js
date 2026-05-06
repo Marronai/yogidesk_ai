@@ -72,12 +72,7 @@ app.use((req, res, next) => {
 // API Routes
 try {
   app.use('/api/auth', require('./routes/authRoutes'));
-  console.log('✅ Auth routes loaded at /api/auth');
-
-  // DEBUG: Some proxies strip the /api prefix when proxy_pass is configured with a trailing slash.
-  // This additional mount helps confirm if requests are arriving as /auth/* instead of /api/auth/*.
-  app.use('/auth', require('./routes/authRoutes'));
-  console.log('✅ Auth routes also loaded at /auth for proxy debug');
+  console.log('✅ Auth routes loaded');
 } catch (error) {
   console.error('❌ Failed to load auth routes:', error.message);
 }
@@ -90,7 +85,7 @@ try {
 }
 
 // Debug health check route
-app.get('/test', (req, res) => res.send('Backend is Alive'));
+app.get('/api/test', (req, res) => res.send('Backend is Alive'));
 
 // 404 Handler
 app.use((req, res) => {
