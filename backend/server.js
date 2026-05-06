@@ -8,6 +8,14 @@ const session = require('express-session');
 const app = express();
 app.set('trust proxy', 1);
 
+// Enable CORS before any other middleware or routes
+app.use(cors({
+  origin: 'https://yogidesk-ai.com',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
+app.options('*', cors());
+
 // Database Connection
 const connectDB = require('./config/db');
 connectDB();
@@ -19,17 +27,6 @@ try {
 } catch (error) {
   console.error('❌ Passport configuration error:', error.message);
 }
-
-const corsOptions = {
-  origin: 'https://yogidesk-ai.com',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
-  optionsSuccessStatus: 200
-};
-
-// Enable CORS before any other middleware or routes
-app.use(cors(corsOptions));
 
 // Manual OPTIONS handler for preflight requests (Enhanced)
 app.use((req, res, next) => {
@@ -54,8 +51,9 @@ app.use(session({
   saveUninitialized: false,
   proxy: true,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
+    httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000
   }
 }));

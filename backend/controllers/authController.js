@@ -21,8 +21,17 @@ const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function'
 const generateToken = (userOrId, sessionId) => {
   const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
   const payload = typeof userOrId === 'object'
-    ? { id: userOrId._id, sessionId, email: userOrId.email, role: userOrId.role, name: userOrId.name }
-    : { id: userOrId, sessionId };
+    ? {
+        id: userOrId._id,
+        email: userOrId.email,
+        role: userOrId.role,
+        name: userOrId.name,
+        ...(sessionId ? { sessionId } : {})
+      }
+    : {
+        id: userOrId,
+        ...(sessionId ? { sessionId } : {})
+      };
   return jwt.sign(payload, secret, { expiresIn: '30d' });
 };
 
@@ -62,8 +71,8 @@ exports.register = async (req, res) => {
       role: 'trial_user',
       isVerified: false,
       otp,
-      otpExpires,
-      currentSessionId: crypto.randomBytes(16).toString('hex')
+      otpExpires
+      // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
     // Send OTP email
@@ -148,7 +157,7 @@ exports.verifyOTP = async (req, res) => {
     user.otp = undefined;
     user.otpExpires = undefined;
     user.isVerified = true;
-    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
     // Send welcome email
@@ -189,7 +198,7 @@ exports.verifySignupOTP = async (req, res) => {
     user.otp = undefined;
     user.otpExpires = undefined;
     user.isVerified = true;
-    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
     // Send welcome email
@@ -248,12 +257,12 @@ exports.googleLogin = async (req, res) => {
         avatar,
         password: crypto.randomBytes(16).toString('hex'),
         role: 'trial_user',
-        isVerified: true,
-        currentSessionId: crypto.randomBytes(16).toString('hex')
+        isVerified: true
+        // currentSessionId: crypto.randomBytes(16).toString('hex')
       });
     }
 
-    user.currentSessionId = crypto.randomBytes(16).toString('hex');
+    // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
     const token = generateToken(user, user.currentSessionId);
