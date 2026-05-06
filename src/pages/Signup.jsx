@@ -67,6 +67,20 @@ const Signup = () => {
         localStorage.setItem('user_id', decoded.id);
         localStorage.setItem('user_role', decoded.role || 'trial_user');
         localStorage.setItem('user_name', decoded.name || formData.name || 'User');
+        localStorage.setItem('user_email', data.user?.email || formData.email || '');
+        localStorage.setItem('user_business_category', data.user?.businessCategory || formData.businessCategory || 'Other');
+        if (typeof data.user?.trialDaysRemaining !== 'undefined') {
+          localStorage.setItem('user_trial_days_remaining', data.user.trialDaysRemaining);
+        }
+        if (data.user?.planExpiryDate) {
+          localStorage.setItem('user_plan_expiry', data.user.planExpiryDate);
+        }
+        if (data.user?.subscriptionStatus) {
+          localStorage.setItem('user_subscription_status', data.user.subscriptionStatus);
+        }
+        if (data.user?.planType) {
+          localStorage.setItem('user_plan_type', data.user.planType);
+        }
         
         // 🚀 Seedha Dashboard!
         navigate('/dashboard');
@@ -150,7 +164,7 @@ const Signup = () => {
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-white font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col lg:flex-row w-full bg-white font-sans overflow-hidden">
       
       {/* LEFT SIDE: BRANDING */}
       <div className="hidden lg:flex w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden p-12">
@@ -166,10 +180,10 @@ const Signup = () => {
              <Star size={12} className="fill-orange-300"/> Join 10,000+ Businesses
           </div>
           <h1 className="text-5xl font-black leading-tight mb-6">
-             Start Growing <br/> with <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Automation.</span>
+             Power your business with <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Vyapar Wallah.</span>
           </h1>
           <p className="text-slate-400 text-lg mb-10 leading-relaxed">
-             Direct dashboard access enabled. No OTP required for testing.
+             Launch faster with a 14-day free trial, built for clinics, salons, schools and local teams.
           </p>
           <ul className="space-y-5">
              {['Instant Dashboard Access', 'Admin Features Unlocked', 'WhatsApp API Ready'].map((item, i) => (
@@ -191,10 +205,10 @@ const Signup = () => {
         >
           <div className="mb-8 text-center lg:text-left">
              <h2 className="text-3xl font-black text-gray-900 mb-2">
-               {step === 1 ? "Create Account 🚀" : "Verify Your Email"}
+               {step === 1 ? "Create your Vyapar Wallah account" : "Enter your verification code"}
              </h2>
              <p className="text-gray-500">
-               {step === 1 ? "Sign up and jump straight into the dashboard." : `We've sent a 6-digit code to ${formData.email}`}
+               {step === 1 ? "Start your 14-day free trial and access the dashboard instantly." : `We've sent a 6-digit code to ${formData.email}`}
              </p>
           </div>
 

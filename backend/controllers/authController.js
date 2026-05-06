@@ -16,6 +16,35 @@ const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function'
       console.error('❌ Welcome email helper is unavailable.');
       return false;
     };
+const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function'
+  ? emailConfig.sendLoginAlert
+  : async () => {
+      console.error('❌ Login alert email helper is unavailable.');
+      return false;
+    };
+
+// 🛠️ HELPER: Trial countdown and user payload builder
+const getTrialDaysRemaining = (user) => {
+  const now = new Date();
+  const expiry = user.planExpiryDate ? new Date(user.planExpiryDate) : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const diff = expiry.getTime() - now.getTime();
+  return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
+};
+
+const buildUserPayload = (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  isVerified: user.isVerified,
+  businessName: user.businessName,
+  businessCategory: user.businessCategory,
+  planType: user.planType,
+  subscriptionStatus: user.subscriptionStatus,
+  trialStartDate: user.trialStartDate,
+  planExpiryDate: user.planExpiryDate,
+  trialDaysRemaining: getTrialDaysRemaining(user)
+});
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
 const generateToken = (userOrId, sessionId) => {
@@ -65,10 +94,14 @@ exports.register = async (req, res) => {
       email,
       password,
       phone: phone || '',
-      businessName: businessName || 'My Business',
+      businessName: businessName || `${name}'s Business`,
       businessType: businessType || 'Other',
       businessCategory: businessCategory || 'Other',
-      role: 'trial_user',
+      role: 'admin',
+      planType: 'free_trial',
+      subscriptionStatus: 'trial',
+      trialStartDate: new Date(),
+      planExpiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       isVerified: false,
       otp,
       otpExpires
@@ -160,15 +193,17 @@ exports.verifyOTP = async (req, res) => {
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
-    // Send welcome email
-    sendWelcomeEmail(user.email, user.name, user.businessName);
+    const deviceInfo = req.headers['user-agent'] || 'Unknown device';
+    const ipAddress = req.headers['x-forwarded-for'] || req.ip || 'Unknown IP';
+    sendLoginAlert(user.email, user.name, deviceInfo, ipAddress);
 
     const token = generateToken(user, user.currentSessionId);
+    const userPayload = buildUserPayload(user);
 
     res.status(200).json({
       success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified }
+      user: userPayload
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
@@ -205,11 +240,12 @@ exports.verifySignupOTP = async (req, res) => {
     sendWelcomeEmail(user.email, user.name, user.businessName);
 
     const token = generateToken(user, user.currentSessionId);
+    const userPayload = buildUserPayload(user);
 
     res.status(200).json({
       success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified }
+      user: userPayload
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
@@ -256,20 +292,26 @@ exports.googleLogin = async (req, res) => {
         googleId,
         avatar,
         password: crypto.randomBytes(16).toString('hex'),
-        role: 'trial_user',
+        role: 'admin',
+        planType: 'free_trial',
+        subscriptionStatus: 'trial',
+        trialStartDate: new Date(),
+        planExpiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
         isVerified: true
         // currentSessionId: crypto.randomBytes(16).toString('hex')
       });
+      sendWelcomeEmail(user.email, user.name, user.businessName);
     }
 
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
     const token = generateToken(user, user.currentSessionId);
+    const userPayload = buildUserPayload(user);
     res.status(200).json({
       success: true,
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+      user: userPayload
     });
   } catch (error) {
     res.status(500).json({ msg: 'Google auth failed', error: error.message });

@@ -4,14 +4,13 @@ const smtpHost = process.env.SMTP_HOST;
 const smtpPort = Number(process.env.SMTP_PORT);
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
-const emailFrom = process.env.EMAIL_FROM;
+const emailFrom = process.env.EMAIL_FROM || 'welcome@vyaparwallah.in';
 
 const missingEmailVars = [];
 if (!smtpHost) missingEmailVars.push('SMTP_HOST');
 if (!process.env.SMTP_PORT) missingEmailVars.push('SMTP_PORT');
 if (!smtpUser) missingEmailVars.push('SMTP_USER');
 if (!smtpPass) missingEmailVars.push('SMTP_PASS');
-if (!emailFrom) missingEmailVars.push('EMAIL_FROM');
 
 if (missingEmailVars.length > 0) {
   console.error(`❌ Missing email configuration variables in .env: ${missingEmailVars.join(', ')}.`);
@@ -41,7 +40,7 @@ const sendOTP = async (email, userName, otp) => {
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: 'Your YogiDesk OTP Code',
+      subject: 'Your Vyapar Wallah OTP Code',
       html: otpEmailTemplate(userName, otp)
     };
 
@@ -150,14 +149,14 @@ const otpEmailTemplate = (userName, otp) => {
     <body>
       <div class="email-container">
         <div class="header">
-          <p class="logo">🧘 YogiDesk</p>
+          <p class="logo">Vyapar Wallah</p>
         </div>
         
         <div class="content">
           <p class="greeting">Hello ${userName},</p>
           
           <p class="message">
-            Thank you for signing up with YogiDesk! To complete your account verification, please use the following One-Time Password (OTP):
+            Thank you for signing up with Vyapar Wallah! To complete your account verification, please use the following One-Time Password (OTP):
           </p>
           
           <div class="otp-box">
@@ -167,7 +166,7 @@ const otpEmailTemplate = (userName, otp) => {
           </div>
           
           <div class="security-note">
-            <strong>🔒 Security Note:</strong> Never share this OTP with anyone. YogiDesk support will never ask for your OTP.
+            <strong>🔒 Security Note:</strong> Never share this OTP with anyone. Vyapar Wallah support will never ask for your OTP.
           </div>
           
           <p class="message">
@@ -176,8 +175,8 @@ const otpEmailTemplate = (userName, otp) => {
         </div>
         
         <div class="footer">
-          <p>© 2024 YogiDesk. All rights reserved.</p>
-          <p>YogiDesk AI | Your Business Intelligence Partner</p>
+          <p>© 2024 Vyapar Wallah. All rights reserved.</p>
+          <p>Vyapar Wallah | Your Business Intelligence Partner</p>
         </div>
       </div>
     </body>
@@ -281,21 +280,21 @@ const welcomeEmailTemplate = (userName, businessName) => {
     <body>
       <div class="email-container">
         <div class="header">
-          <p class="logo">🧘 YogiDesk</p>
+          <p class="logo">Vyapar Wallah</p>
         </div>
 
         <div class="content">
-          <p class="greeting">Welcome to YogiDesk, ${userName}!</p>
+          <p class="greeting">Welcome to Vyapar Wallah, ${userName}!</p>
 
           <p class="message">
             Congratulations! Your account for <strong>${businessName}</strong> has been successfully created.
-            We're excited to help you automate your business communications and boost your productivity.
+            We're excited to help you automate customer communication and grow your business.
           </p>
 
           <div class="highlight-box">
             <p class="highlight-title">🎉 Your 14-Day Free Trial Has Started!</p>
             <p class="message">
-              Explore all features, integrate WhatsApp, and see how YogiDesk can transform your customer interactions.
+              Explore all features, integrate WhatsApp, and see how Vyapar Wallah can transform your customer interactions.
               No credit card required to get started.
             </p>
           </div>
@@ -308,7 +307,7 @@ const welcomeEmailTemplate = (userName, businessName) => {
         </div>
 
         <div class="footer">
-          <p>© 2024 YogiDesk. All rights reserved.</p>
+          <p>© 2024 Vyapar Wallah. All rights reserved.</p>
           <p class="branding">A product of Vyapar Wallah</p>
         </div>
       </div>
@@ -320,7 +319,7 @@ const welcomeEmailTemplate = (userName, businessName) => {
 // 🛠️ Send Welcome Email Function
 const sendWelcomeEmail = async (email, userName, businessName) => {
   try {
-    if (!transporter || !emailFrom) {
+    if (!transporter) {
       console.error('❌ Nodemailer is not configured for welcome emails.');
       return false;
     }
@@ -328,7 +327,7 @@ const sendWelcomeEmail = async (email, userName, businessName) => {
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: '🎉 Welcome to YogiDesk - Your 14-Day Free Trial Starts Now!',
+      subject: '🎉 Welcome to Vyapar Wallah - Your 14-Day Free Trial Starts Now!',
       html: welcomeEmailTemplate(userName, businessName)
     };
 
@@ -337,6 +336,152 @@ const sendWelcomeEmail = async (email, userName, businessName) => {
     return true;
   } catch (error) {
     console.error('❌ Failed to send welcome email:', error.message);
+    return false;
+  }
+};
+
+const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          background-color: #f8fafc;
+          padding: 20px;
+        }
+        .email-container {
+          max-width: 620px;
+          margin: 0 auto;
+          background-color: #ffffff;
+          border-radius: 12px;
+          overflow: hidden;
+          box-shadow: 0 16px 40px rgba(0,0,0,0.08);
+        }
+        .header {
+          background: linear-gradient(135deg, #FF6B00 0%, #003366 100%);
+          padding: 30px 20px;
+          text-align: center;
+        }
+        .logo {
+          font-size: 26px;
+          font-weight: 800;
+          color: #ffffff;
+          margin: 0;
+        }
+        .content {
+          padding: 36px 24px;
+          color: #1f2937;
+        }
+        .greeting {
+          font-size: 18px;
+          font-weight: 700;
+          margin: 0 0 12px;
+        }
+        .message {
+          font-size: 15px;
+          line-height: 1.75;
+          color: #4b5563;
+          margin: 16px 0;
+        }
+        .detail-box {
+          background: #f8fafc;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          padding: 18px 20px;
+          margin: 20px 0;
+        }
+        .detail-heading {
+          font-size: 13px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: #111827;
+          margin-bottom: 8px;
+        }
+        .detail-text {
+          font-size: 14px;
+          color: #374151;
+          margin: 0;
+        }
+        .button-wrap {
+          text-align: center;
+          margin: 25px 0;
+        }
+        .cta-button {
+          display: inline-block;
+          background-color: #FF6B00;
+          color: #ffffff;
+          text-decoration: none;
+          padding: 14px 26px;
+          border-radius: 999px;
+          font-weight: 700;
+          box-shadow: 0 12px 30px rgba(255,107,0,0.2);
+        }
+        .footer {
+          padding: 18px 20px 30px;
+          font-size: 12px;
+          color: #6b7280;
+          text-align: center;
+          background: #f3f4f6;
+        }
+        .footer .branding {
+          font-weight: 700;
+          color: #111827;
+          margin-top: 5px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="email-container">
+        <div class="header">
+          <p class="logo">Vyapar Wallah</p>
+        </div>
+        <div class="content">
+          <p class="greeting">Hi ${userName},</p>
+          <p class="message">We noticed a successful login to your Vyapar Wallah dashboard. If this was you, great! If not, please reset your password immediately.</p>
+          <div class="detail-box">
+            <p class="detail-heading">Login details</p>
+            <p class="detail-text"><strong>Device:</strong> ${deviceInfo}</p>
+            <p class="detail-text"><strong>IP Address:</strong> ${ipAddress}</p>
+            <p class="detail-text"><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+          </div>
+          <div class="button-wrap">
+            <a href="https://yogidesk-ai.com/forgot-password" class="cta-button">Reset your password</a>
+          </div>
+          <p class="message">If you did not log in, please contact support immediately or change your password from the dashboard.</p>
+        </div>
+        <div class="footer">
+          <p>© ${new Date().getFullYear()} Vyapar Wallah. All rights reserved.</p>
+          <p class="branding">A product of Vyapar Wallah</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+const sendLoginAlert = async (email, userName, deviceInfo, ipAddress) => {
+  try {
+    if (!transporter) {
+      console.error('❌ Nodemailer is not configured for login alerts.');
+      return false;
+    }
+
+    const mailOptions = {
+      from: emailFrom,
+      to: email,
+      subject: '🔐 New Login Alert for Your Vyapar Wallah Account',
+      html: loginAlertTemplate(userName, deviceInfo, ipAddress)
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Login alert email sent successfully:', info.response);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to send login alert email:', error.message);
     return false;
   }
 };
@@ -358,4 +503,4 @@ const verifyConnection = async () => {
   }
 };
 
-module.exports = { transporter, sendOTP, sendWelcomeEmail, verifyConnection };
+module.exports = { transporter, sendOTP, sendWelcomeEmail, sendLoginAlert, verifyConnection };

@@ -70,7 +70,7 @@ const Login = () => {
           withCredentials: true
         });
         handleAuthSuccess(res.data);
-      } catch (err) {
+      } catch (error) {
         alert("Google Login Failed");
       } finally {
         setLoading(false);
@@ -86,13 +86,25 @@ const Login = () => {
     // Decode token safely
     try {
         const decoded = jwtDecode(data.token);
-        localStorage.setItem('token', data.token);
-        if (!rememberMe) sessionStorage.setItem('token', data.token);
+        storage.setItem('token', data.token);
+        if (rememberMe) {
+          localStorage.setItem('token', data.token);
+        }
 
         localStorage.setItem('user_id', decoded.id);
         const role = decoded.role || data.user?.role || 'trial_user';
         localStorage.setItem('user_role', role);
         localStorage.setItem('user_name', decoded.name || data.user?.name || 'User');
+        localStorage.setItem('user_email', data.user?.email || '');
+        localStorage.setItem('user_business_category', data.user?.businessCategory || 'Other');
+        localStorage.setItem('user_subscription_status', data.user?.subscriptionStatus || 'trial');
+        localStorage.setItem('user_plan_type', data.user?.planType || 'free_trial');
+        if (typeof data.user?.trialDaysRemaining !== 'undefined') {
+          localStorage.setItem('user_trial_days_remaining', data.user.trialDaysRemaining);
+        }
+        if (data.user?.planExpiryDate) {
+          localStorage.setItem('user_plan_expiry', data.user.planExpiryDate);
+        }
 
         if (!rememberMe) {
           sessionStorage.setItem('user_id', decoded.id);
@@ -220,8 +232,8 @@ const Login = () => {
           
           {/* Logo & Header */}
           <div className="flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-orange-500/30">M</div>
-            <span className="text-xl font-bold tracking-tight text-gray-900">Marroncorp</span>
+            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-orange-500/30">V</div>
+            <span className="text-xl font-bold tracking-tight text-gray-900">Vyapar Wallah</span>
           </div>
 
           <div className="mb-8">

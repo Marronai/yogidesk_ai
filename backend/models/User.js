@@ -70,7 +70,7 @@ const UserSchema = new mongoose.Schema({
   trialStartDate: { type: Date, default: Date.now },
   planExpiryDate: {
     type: Date,
-    default: () => new Date(+new Date() + 5*24*60*60*1000) 
+    default: () => new Date(+new Date() + 14*24*60*60*1000)
   },
 
   // 🕒 SHIFT TIMING

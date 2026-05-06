@@ -9,6 +9,10 @@ import { Link } from 'react-router-dom';
 const DashboardHome = () => {
   const userName = localStorage.getItem('user_name') || 'Dr. Avinash';
   const category = localStorage.getItem('org_category') || 'hospital';
+  const trialDaysRemaining = parseInt(localStorage.getItem('user_trial_days_remaining') || '14', 10);
+  const isTrialExpired = trialDaysRemaining <= 0;
+  const subscriptionStatus = localStorage.getItem('user_subscription_status') || 'trial';
+  const planExpiryDate = localStorage.getItem('user_plan_expiry') || '';
 
   // Mock Data (Real world scenario)
   const stats = {
@@ -26,16 +30,19 @@ const DashboardHome = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Namaste, {userName} 🙏</h1>
           <p className="text-gray-500 mt-1">Here is your clinic's weekly performance.</p>
+          <div className={`mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold ${isTrialExpired ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
+            {isTrialExpired ? 'Trial expired – renew now' : `${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} left in free trial`}
+          </div>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             {/* Ghost Mode Indicator */}
             <div className={`px-4 py-2 rounded-full border flex items-center gap-2 ${stats.ghost_mode ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-gray-50 text-gray-500'}`}>
                 <Shield size={18} className={stats.ghost_mode ? 'fill-purple-700' : ''}/> 
                 <span className="text-sm font-bold">{stats.ghost_mode ? 'Ghost Mode Active' : 'Ghost Mode Off'}</span>
             </div>
 
-            <Link to="/campaigns" className="bg-brand hover:bg-brand-dark text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-brand/20 transition transform hover:-translate-y-0.5">
+            <Link to="/campaigns" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-orange-200/50 transition transform hover:-translate-y-0.5">
                 <Zap size={20} /> New Broadcast
             </Link>
         </div>
@@ -89,7 +96,47 @@ const DashboardHome = () => {
          </div>
       </div>
 
-      {/* 3. VISUAL INSIGHTS ROW (Pie Chart & Ads) */}
+      {/* 3. SUBSCRIPTION & PAYMENT STATUS */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-3 white-card p-6 border border-orange-100 bg-orange-50">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">Subscription Status</h3>
+              <p className="mt-2 text-sm text-gray-600 max-w-2xl">
+                {isTrialExpired
+                  ? 'Your free trial has ended. Upgrade now to keep sending messages and retain WhatsApp automation access.'
+                  : 'You are on a 14-day trial. Upgrade anytime to secure your preferred plan and continue without interruption.'}
+              </p>
+            </div>
+            <div className="inline-flex items-center gap-3 rounded-full bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm">
+              <span className={isTrialExpired ? 'text-red-600' : 'text-orange-600'}>
+                {isTrialExpired ? 'Trial Expired' : `${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} remaining`}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
+              <p className="text-sm text-gray-500">Current Plan</p>
+              <h4 className="mt-2 text-2xl font-bold text-gray-900">Free Trial</h4>
+              <p className="mt-2 text-sm text-gray-500">Access to core automation flows, lead capture, and campaign analytics.</p>
+            </div>
+            <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
+              <p className="text-sm text-gray-500">UPI Payment</p>
+              <h4 className="mt-2 text-2xl font-bold text-gray-900">vyapar@icici</h4>
+              <p className="mt-2 text-sm text-gray-500">Use the above UPI ID for manual renewal. Tap below to copy and complete payment instantly.</p>
+              <button
+                onClick={() => navigator.clipboard.writeText('vyapar@icici')}
+                className="mt-4 inline-flex items-center justify-center rounded-xl bg-[#FF6B00] px-4 py-3 text-sm font-semibold text-white hover:bg-orange-600 transition"
+              >
+                Copy UPI ID
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. VISUAL INSIGHTS ROW (Pie Chart & Ads) */}
       <div className="grid lg:grid-cols-3 gap-6">
         
         {/* Left: Template Health (Visual Pie Chart) */}
@@ -141,37 +188,39 @@ const DashboardHome = () => {
                 </span>
             </div>
 
-            <div className="p-6 grid gap-4">
-                {/* Ad Card 1 */}
-                <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">IMG</div>
-                        <div>
-                            <h4 className="font-bold text-gray-800">Dental Checkup Promo</h4>
-                            <p className="text-xs text-gray-500">Facebook Feed • Started 2 days ago</p>
+            <div className="p-6 overflow-x-auto">
+                <div className="min-w-[540px] grid gap-4">
+                    {/* Ad Card 1 */}
+                    <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">IMG</div>
+                            <div>
+                                <h4 className="font-bold text-gray-800">Dental Checkup Promo</h4>
+                                <p className="text-xs text-gray-500">Facebook Feed • Started 2 days ago</p>
+                            </div>
                         </div>
+                        <div className="text-right">
+                            <div className="text-xl font-bold text-gray-900">124</div>
+                            <p className="text-xs text-gray-500">Clicks Today</p>
+                        </div>
+                        <button className="text-red-500 hover:bg-red-50 p-2 rounded-full"><PauseCircle size={20}/></button>
                     </div>
-                    <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900">124</div>
-                        <p className="text-xs text-gray-500">Clicks Today</p>
-                    </div>
-                    <button className="text-red-500 hover:bg-red-50 p-2 rounded-full"><PauseCircle size={20}/></button>
-                </div>
 
-                {/* Ad Card 2 */}
-                <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-red-50 text-red-600 rounded-lg flex items-center justify-center font-bold text-xs">VID</div>
-                        <div>
-                            <h4 className="font-bold text-gray-800">Free Eye Test Camp</h4>
-                            <p className="text-xs text-gray-500">Instagram Reels • Started Today</p>
+                    {/* Ad Card 2 */}
+                    <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-red-50 text-red-600 rounded-lg flex items-center justify-center font-bold text-xs">VID</div>
+                            <div>
+                                <h4 className="font-bold text-gray-800">Free Eye Test Camp</h4>
+                                <p className="text-xs text-gray-500">Instagram Reels • Started Today</p>
+                            </div>
                         </div>
+                        <div className="text-right">
+                            <div className="text-xl font-bold text-gray-900">85</div>
+                            <p className="text-xs text-gray-500">Clicks Today</p>
+                        </div>
+                        <button className="text-green-500 hover:bg-green-50 p-2 rounded-full"><PlayCircle size={20}/></button>
                     </div>
-                    <div className="text-right">
-                        <div className="text-xl font-bold text-gray-900">85</div>
-                        <p className="text-xs text-gray-500">Clicks Today</p>
-                    </div>
-                    <button className="text-green-500 hover:bg-green-50 p-2 rounded-full"><PlayCircle size={20}/></button>
                 </div>
             </div>
         </div>
@@ -186,8 +235,8 @@ const DashboardHome = () => {
               <div key={i} className="flex-1 flex flex-col items-center gap-3 group">
                 <div className="w-full bg-gray-100 rounded-t-lg relative h-full flex items-end overflow-hidden group-hover:bg-gray-200 transition">
                     <div 
-                        className="w-full bg-brand rounded-t-lg transition-all duration-700 ease-out group-hover:bg-brand-dark" 
-                        style={{ height: `${h}%` }}
+                        className="w-full bg-[#FF6B00] rounded-t-lg transition-all duration-700 ease-out group-hover:bg-orange-600" 
+                        style={{ height: h + '%' }}
                     ></div>
                 </div>
                 <span className="text-xs text-gray-400 font-bold">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}</span>
