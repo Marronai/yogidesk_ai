@@ -30,6 +30,30 @@ const transporter = missingEmailVars.length === 0
     })
   : null;
 
+// 🛠️ Send OTP Email Function
+const sendOTP = async (email, userName, otp) => {
+  try {
+    if (!transporter || !emailFrom) {
+      console.error('❌ Nodemailer is not configured for OTP emails. Missing SMTP settings or EMAIL_FROM.');
+      return false;
+    }
+
+    const mailOptions = {
+      from: emailFrom,
+      to: email,
+      subject: 'Your YogiDesk OTP Code',
+      html: otpEmailTemplate(userName, otp)
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ OTP Email sent successfully:', info.response);
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to send OTP email:', error.message);
+    return false;
+  }
+};
+
 // 🛠️ Professional HTML Email Template for OTP
 const otpEmailTemplate = (userName, otp) => {
   return `

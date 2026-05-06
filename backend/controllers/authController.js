@@ -2,7 +2,20 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
-const { sendOTP, sendWelcomeEmail } = require('../config/emailConfig');
+
+const emailConfig = require('../config/emailConfig');
+const sendOTP = typeof emailConfig.sendOTP === 'function'
+  ? emailConfig.sendOTP
+  : async () => {
+      console.error('❌ OTP email helper is unavailable.');
+      return false;
+    };
+const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function'
+  ? emailConfig.sendWelcomeEmail
+  : async () => {
+      console.error('❌ Welcome email helper is unavailable.');
+      return false;
+    };
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
 const generateToken = (userOrId, sessionId) => {
