@@ -67,27 +67,23 @@ const App = () => {
           {/* Ye check karega ki banda Logged In hai ya nahi */}
           <Route element={<ProtectedRoute />}>
               
-              {/* ✅ Main Dashboard Routes */}
-              <Route path="/dashboard" element={<MainLayout />}>
-                <Route index element={<DashboardHome />} />
-                
-                
-                {/* Note: Sidebar me Link hona chahiye "/dashboard/inbox" */}
-                <Route path="inbox" element={<Inbox />} />
-                <Route path="contacts" element={<Contacts />} />
-                <Route path="support" element={<Support />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="ads-crm" element={<LeadsCRM />} />
-                <Route path="subscription" element={<Subscription />} />
-                <Route path="agent-dashboard" element={<AgentDashboard />} />
-                
+              {/* ✅ Main Dashboard Wrapper */}
+              <Route element={<MainLayout />}>
+                <Route path="/dashboard" element={<DashboardHome />} />
+                <Route path="/dashboard/inbox" element={<Inbox />} />
+                <Route path="/dashboard/contacts" element={<Contacts />} />
+                <Route path="/dashboard/support" element={<Support />} />
+                <Route path="/dashboard/settings" element={<Settings />} />
+                <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
+                <Route path="/dashboard/subscription" element={<Subscription />} />
+                <Route path="/dashboard/agent-dashboard" element={<AgentDashboard />} />
+                <Route path="/templates" element={<TemplateManager />} />
+                <Route path="/templates/create" element={<Templates />} />
               </Route>
 
               {/* ✅ Standalone Protected Tools (Bina Login ke nahi dikhenge) */}
               <Route path="/campaigns" element={<Campaigns />} />
               <Route path="/hospital/discharge" element={<HospitalDischarge />} />
-              <Route path="/templates" element={<TemplateManager />} />
-              <Route path="/templates/create" element={<Templates />} />
               <Route path="/team" element={<Team />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
 

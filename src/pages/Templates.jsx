@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import api from '../utils/api';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
@@ -14,6 +15,8 @@ const Templates = () => {
   
   // Naya state device choice ke liye
   const [device, setDevice] = useState('IPHONE'); // 'IPHONE' or 'ANDROID'
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
 
   const [template, setTemplate] = useState({
     name: '',
@@ -22,7 +25,7 @@ const Templates = () => {
     headerText: '',
     mediaPreview: null,
     bodyText: 'Hello {{1}}, how can we help you?',
-    footerText: 'Marroncorp.ai',
+    footerText: 'Yogi Desk',
     buttons: []
   });
 
@@ -73,6 +76,38 @@ const Templates = () => {
     return text.replace(/\{\{(\d+)\}\}/g, '<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">[{{$1}}]</span>');
   };
 
+  const handleSubmit = async () => {
+    if (!template.name.trim()) {
+      setError('Template name is required.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const payload = {
+        name: template.name.trim(),
+        category: template.category,
+        headerType: template.headerType,
+        headerText: template.headerText,
+        bodyText: template.bodyText,
+        footerText: template.footerText,
+        buttons: template.buttons,
+      };
+
+      const { data } = await api.post('/templates', payload);
+      setMessage('Template submitted successfully. Status: ' + (data.status || 'PENDING'));
+      navigate('/templates');
+    } catch (err) {
+      console.error('Template submit failed:', err);
+      setError(err?.response?.data?.message || 'Unable to submit template.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="p-6 lg:p-10 bg-[#F9FAFB] min-h-screen font-sans text-slate-900">
       <div className="max-w-[1440px] mx-auto">
@@ -83,13 +118,15 @@ const Templates = () => {
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create WhatsApp Template</h1>
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
-          <button className="px-8 py-3 bg-[#25D366] text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
-            Submit Template <ChevronRight size={18}/>
+          <button onClick={handleSubmit} disabled={saving} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
+            {saving ? 'Submitting...' : 'Submit Template'} <ChevronRight size={18}/>
           </button>
         </div>
 
+        {error && <div className="mb-4 text-sm text-red-600 font-semibold">{error}</div>}
+        {message && <div className="mb-4 text-sm text-emerald-700 font-semibold">{message}</div>}
+
         <div className="grid lg:grid-cols-12 gap-10">
-          
           {/* --- LEFT: CONFIGURATION --- */}
           <div className="lg:col-span-7 space-y-8">
             {/* 1. General Settings Card */}
@@ -245,7 +282,7 @@ const Templates = () => {
                         <ArrowLeft size={18}/>
                         <div className="w-9 h-9 bg-slate-200/20 rounded-full flex items-center justify-center"><User size={20}/></div>
                         <div className="leading-tight">
-                            <h3 className="font-bold text-[14px]">Marroncorp.ai</h3>
+                            <h3 className="font-bold text-[14px]">Yogi Desk</h3>
                             <p className="text-[9px] opacity-70">Official Business Account</p>
                         </div>
                       </div>

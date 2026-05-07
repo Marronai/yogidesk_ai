@@ -119,6 +119,20 @@ try {
   console.error('❌ Failed to load payment routes:', error.message);
 }
 
+try {
+  app.use('/api/templates', require('./routes/templateRoutes'));
+  console.log('✅ Template routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load template routes:', error.message);
+}
+
+try {
+  app.use('/api/webhook', require('./routes/webhookRoutes'));
+  console.log('✅ Webhook routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load webhook routes:', error.message);
+}
+
 // Debug health check route
 app.get('/api/test', (req, res) => res.send('Backend is Alive'));
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

@@ -1,17 +1,30 @@
-import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom'; // Navigation ke liye
+import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink } from 'lucide-react';
+import api from '../utils/api';
 
 const TemplateManager = () => {
-  const navigate = useNavigate(); // Hook initialize karein
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Dummy Data
-  const [templates, setTemplates] = useState([
-    { id: 1, name: 'welcome_message', language: 'en_US', category: 'MARKETING', status: 'APPROVED' },
-    { id: 2, name: 'payment_reminder', language: 'hi', category: 'UTILITY', status: 'PENDING' },
-    { id: 3, name: 'offer_diwali', language: 'en_US', category: 'MARKETING', status: 'REJECTED' },
-  ]);
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        const { data } = await api.get('/templates');
+        setTemplates(data || []);
+      } catch (err) {
+        console.error('Template fetch failed:', err);
+        setError('Unable to load templates at the moment.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTemplates();
+  }, []);
 
   // Filter Logic
   const filteredTemplates = useMemo(() => {
@@ -22,9 +35,10 @@ const TemplateManager = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'APPROVED': return 'text-emerald-600 bg-emerald-50 border-emerald-200'; 
+      case 'APPROVED': return 'text-emerald-600 bg-emerald-50 border-emerald-200';
       case 'PENDING': return 'text-amber-600 bg-amber-50 border-amber-200';
       case 'REJECTED': return 'text-rose-600 bg-rose-50 border-rose-200';
+      case 'DRAFT': return 'text-slate-600 bg-slate-50 border-slate-200';
       default: return 'text-slate-600 bg-slate-50';
     }
   };
@@ -85,7 +99,7 @@ const TemplateManager = () => {
               <tr>
                 <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Template Info</th>
                 <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">Live Status</th>
                 <th className="p-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
               </tr>
             </thead>
@@ -131,13 +145,19 @@ const TemplateManager = () => {
             </tbody>
           </table>
           
-          {filteredTemplates.length === 0 && (
+          {loading && (
+            <div className="p-20 text-center text-slate-500">Loading templates...</div>
+          )}
+          {!loading && filteredTemplates.length === 0 && (
             <div className="p-20 text-center">
               <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Search className="text-slate-300" size={30} />
               </div>
               <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">No matching templates</p>
             </div>
+          )}
+          {error && (
+            <div className="p-6 text-center text-rose-600 font-semibold">{error}</div>
           )}
         </div>
       </div>
