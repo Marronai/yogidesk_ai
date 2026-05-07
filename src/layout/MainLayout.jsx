@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
+import ErrorBoundary from '../components/ErrorBoundary';
 import api from '../utils/api';
 
 const MainLayout = () => {
@@ -62,7 +63,9 @@ const MainLayout = () => {
 
       <main className="flex-1 h-full overflow-y-auto p-4 sm:p-6 lg:p-8 transition-all duration-300">
         <div className="max-w-7xl mx-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
     </div>

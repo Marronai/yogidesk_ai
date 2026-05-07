@@ -1,7 +1,14 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink } from 'lucide-react';
+import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox } from 'lucide-react';
 import api from '../utils/api';
+
+const normalizeTemplates = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.templates)) return payload.templates;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
 
 const TemplateManager = () => {
   const navigate = useNavigate();
@@ -14,10 +21,11 @@ const TemplateManager = () => {
     const fetchTemplates = async () => {
       try {
         const { data } = await api.get('/templates');
-        setTemplates(data || []);
+        setTemplates(normalizeTemplates(data));
       } catch (err) {
         console.error('Template fetch failed:', err);
         setError('Unable to load templates at the moment.');
+        setTemplates([]);
       } finally {
         setLoading(false);
       }
@@ -28,8 +36,13 @@ const TemplateManager = () => {
 
   // Filter Logic
   const filteredTemplates = useMemo(() => {
-    return templates.filter(t => 
-      t.name.toLowerCase().includes(searchTerm.toLowerCase())
+    const templateList = Array.isArray(templates) ? templates : [];
+    const query = searchTerm.trim().toLowerCase();
+
+    if (!query) return templateList;
+
+    return templateList.filter((template) =>
+      String(template?.name || '').toLowerCase().includes(query)
     );
   }, [searchTerm, templates]);
 
@@ -45,9 +58,15 @@ const TemplateManager = () => {
 
   const handleDelete = (id) => {
     if (window.confirm("Are you sure? This will delete the template from your records and Meta.")) {
-      setTemplates(templates.filter(t => t.id !== id));
+      setTemplates((currentTemplates) => (
+        Array.isArray(currentTemplates)
+          ? currentTemplates.filter((template) => template?.id !== id)
+          : []
+      ));
     }
   };
+
+  const templateRows = Array.isArray(filteredTemplates) ? filteredTemplates : [];
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500">
@@ -104,27 +123,27 @@ const TemplateManager = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredTemplates.map((template) => (
-                <tr key={template.id} className="hover:bg-slate-50/50 transition-colors group">
+              {templateRows?.map((template, index) => (
+                <tr key={template?.id || template?.name || index} className="hover:bg-slate-50/50 transition-colors group">
                   <td className="p-5">
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-slate-100 text-slate-500 rounded-xl group-hover:bg-orange-100 group-hover:text-orange-600 transition-colors">
                         <FileText size={20} />
                       </div>
                       <div>
-                        <div className="font-bold text-slate-800">{template.name}</div>
-                        <div className="text-[10px] text-slate-400 font-black uppercase">{template.language}</div>
+                        <div className="font-bold text-slate-800">{template?.name || 'Untitled template'}</div>
+                        <div className="text-[10px] text-slate-400 font-black uppercase">{template?.language || 'Unknown language'}</div>
                       </div>
                     </div>
                   </td>
                   <td className="p-5">
                     <span className="text-[11px] font-black px-3 py-1 bg-slate-100 text-slate-500 rounded-lg uppercase tracking-tight">
-                      {template.category}
+                      {template?.category || 'Uncategorized'}
                     </span>
                   </td>
                   <td className="p-5">
-                    <span className={`px-3 py-1.5 rounded-full text-[10px] font-black border ${getStatusColor(template.status)}`}>
-                      {template.status}
+                    <span className={`px-3 py-1.5 rounded-full text-[10px] font-black border ${getStatusColor(template?.status)}`}>
+                      {template?.status || 'UNKNOWN'}
                     </span>
                   </td>
                   <td className="p-5 text-right flex justify-end gap-2">
@@ -134,7 +153,8 @@ const TemplateManager = () => {
                     </button>
                     {/* Delete Action */}
                     <button 
-                      onClick={() => handleDelete(template.id)}
+                      onClick={() => handleDelete(template?.id)}
+                      disabled={!template?.id}
                       className="text-slate-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-xl transition-all"
                     >
                       <Trash2 size={18} />
@@ -148,12 +168,17 @@ const TemplateManager = () => {
           {loading && (
             <div className="p-20 text-center text-slate-500">Loading templates...</div>
           )}
-          {!loading && filteredTemplates.length === 0 && (
+          {!loading && !error && templateRows.length === 0 && (
             <div className="p-20 text-center">
-              <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Search className="text-slate-300" size={30} />
+              <div className="bg-orange-50 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5">
+                <Inbox className="text-orange-300" size={34} />
               </div>
-              <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">No matching templates</p>
+              <p className="text-slate-800 font-black text-lg">
+                {searchTerm ? 'No matching templates' : 'No templates yet'}
+              </p>
+              <p className="text-slate-400 font-semibold text-sm mt-2">
+                {searchTerm ? 'Try a different search term.' : 'Create your first WhatsApp template to see it here.'}
+              </p>
             </div>
           )}
           {error && (
