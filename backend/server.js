@@ -90,8 +90,10 @@ app.use((req, res, next) => {
 });
 
 // API Routes
+const authRoutes = require('./routes/authRoutes');
+
 try {
-  app.use('/api/auth', require('./routes/authRoutes'));
+  app.use('/api/auth', authRoutes);
   console.log('✅ Auth routes loaded');
 } catch (error) {
   console.error('❌ Failed to load auth routes:', error.message);
@@ -113,6 +115,7 @@ try {
 
 // Debug health check route
 app.get('/api/test', (req, res) => res.send('Backend is Alive'));
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // TEMP DEBUG ROUTE: verify auth path mounting
 app.post('/api/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
