@@ -99,14 +99,14 @@ app.use((req, res, next) => {
 const authRoutes = require('./routes/authRoutes');
 
 try {
-  app.use('/auth', authRoutes);
+  app.use('/api/auth', authRoutes);
   console.log('✅ Auth routes loaded');
 } catch (error) {
   console.error('❌ Failed to load auth routes:', error.message);
 }
 
 try {
-  app.use('/whatsapp', require('./routes/whatsappRoutes'));
+  app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
   console.log('✅ WhatsApp routes loaded');
 } catch (error) {
   console.error('❌ Failed to load whatsapp routes:', error.message);
@@ -120,11 +120,11 @@ try {
 }
 
 // Debug health check route
-app.get('/test', (req, res) => res.send('Backend is Alive'));
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/test', (req, res) => res.send('Backend is Alive'));
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // TEMP DEBUG ROUTE: verify auth path mounting
-app.post('/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
+app.post('/api/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
 
 // 404 Handler
 app.use((req, res) => {
