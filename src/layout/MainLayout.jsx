@@ -1,24 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import axios from 'axios';
+import api from '../utils/api';
 
 const MainLayout = () => {
   const navigate = useNavigate();
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
   useEffect(() => {
-    const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com/api';
-
     const checkSession = async () => {
       const token = localStorage.getItem('token');
       if (!token) return;
 
       try {
-        await axios.get(`${API_URL}/auth/check-session`, {
-          headers: { Authorization: `Bearer ${token}` },
-          withCredentials: true
-        });
+        await api.get('/auth/check-session');
         // Agar success hai to kuch mat karo, sab sahi hai
       } catch (error) {
         if (error.response?.status === 401) {

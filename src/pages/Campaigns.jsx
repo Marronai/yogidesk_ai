@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { Send, Smartphone } from 'lucide-react';
 
 const Campaigns = () => {
@@ -8,12 +8,9 @@ const Campaigns = () => {
   const sendTestMessage = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      
       // 👇 YAHAN FRONTEND, BACKEND SE BAAT KARTA HAI
-      const res = await axios.post('http://localhost:5000/api/whatsapp/send-test', 
-        { phoneNumber: "919999999999" }, // ⚠️ Yahan apna verified test number daalein (91 ke saath)
-        { headers: { Authorization: `Bearer ${token}` } }
+      const res = await api.post('/whatsapp/send-test',
+        { phoneNumber: "919999999999" } // ⚠️ Yahan apna verified test number daalein (91 ke saath)
       );
 
       if(res.data.success) {

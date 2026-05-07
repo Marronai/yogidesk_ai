@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 import { 
   Search, FileSpreadsheet, Trash2, 
   Users, RefreshCw, Phone, Plus, Loader
@@ -35,10 +35,7 @@ const Contacts = () => {
   const fetchContacts = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const res = await axios.get('http://localhost:5000/api/contacts', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await api.get('/contacts');
 
       console.log("🔥 API Data:", res.data); // Console check
 
@@ -67,11 +64,9 @@ const Contacts = () => {
 
     setUploading(true);
     try {
-      const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/api/contacts/upload', formData, {
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data' 
+      await api.post('/contacts/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
         }
       });
       alert("Success! Contacts Imported.");
@@ -88,10 +83,7 @@ const Contacts = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this contact?")) return;
     try {
-        const token = localStorage.getItem('token');
-        await axios.delete(`http://localhost:5000/api/contacts/${id}`, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
+        await api.delete(`/contacts/${id}`);
         setContacts(contacts.filter(c => c._id !== id));
     } catch (error) {
         alert("Delete Failed");

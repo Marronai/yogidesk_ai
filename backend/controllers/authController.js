@@ -48,19 +48,17 @@ const buildUserPayload = (user) => ({
 });
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
-const generateToken = (userOrId, sessionId) => {
+const generateToken = (userOrId) => {
   const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
   const payload = typeof userOrId === 'object'
     ? {
         id: userOrId._id,
         email: userOrId.email,
         role: userOrId.role,
-        name: userOrId.name,
-        ...(sessionId ? { sessionId } : {})
+        name: userOrId.name
       }
     : {
-        id: userOrId,
-        ...(sessionId ? { sessionId } : {})
+        id: userOrId
       };
   return jwt.sign(payload, secret, { expiresIn: '30d' });
 };
@@ -200,7 +198,7 @@ exports.verifyOTP = async (req, res) => {
 
     sendLoginAlert(user.email, user.name, `${deviceInfo} — ${location}`, ipAddress);
 
-    const token = generateToken(user, user.currentSessionId);
+    const token = generateToken(user);
     const userPayload = buildUserPayload(user);
 
     res.status(200).json({
@@ -242,7 +240,7 @@ exports.verifySignupOTP = async (req, res) => {
     // Send welcome email
     sendWelcomeEmail(user.email, user.name, user.businessName);
 
-    const token = generateToken(user, user.currentSessionId);
+    const token = generateToken(user);
     const userPayload = buildUserPayload(user);
 
     res.status(200).json({
@@ -309,7 +307,7 @@ exports.googleLogin = async (req, res) => {
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
-    const token = generateToken(user, user.currentSessionId);
+    const token = generateToken(user);
     const userPayload = buildUserPayload(user);
     res.status(200).json({
       success: true,

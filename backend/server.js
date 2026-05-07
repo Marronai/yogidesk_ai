@@ -9,15 +9,19 @@ const session = require('express-session');
 
 // Initialize Express app first
 const app = express();
-app.set('trust proxy', 1);
 
-// Enable CORS before any other middleware or routes
-app.use(cors({
+// CORS Configuration
+const corsOptions = {
   origin: 'https://yogidesk-ai.com',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
-app.options('*', cors());
+};
+
+// Enable CORS at the very top
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+app.set('trust proxy', 1);
 
 // Database Connection
 const connectDB = require('./config/db');
