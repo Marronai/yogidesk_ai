@@ -5,7 +5,7 @@ const Subscription = () => {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
-  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com/api';
+  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
 
   const handleFileChange = (event) => {
     setFile(event.target.files[0]);

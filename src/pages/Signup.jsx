@@ -19,7 +19,7 @@ const Signup = () => {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
 
   // Backend URL
-  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com/api';
+  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
 
   const [formData, setFormData] = useState({
     name: '',

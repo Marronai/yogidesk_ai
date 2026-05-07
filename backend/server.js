@@ -89,11 +89,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Final path logger for debug
+app.use((req, res, next) => {
+  console.log('Final Path:', req.path);
+  next();
+});
+
 // API Routes
 const authRoutes = require('./routes/authRoutes');
 
 try {
-  app.use('/api/auth', authRoutes);
+  app.use('/auth', authRoutes);
   console.log('✅ Auth routes loaded');
 } catch (error) {
   console.error('❌ Failed to load auth routes:', error.message);
