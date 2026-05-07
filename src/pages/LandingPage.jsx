@@ -5,7 +5,7 @@ import {
   EyeOff, UserCog, ShieldAlert, Clock, Send, Menu, X, CheckCircle2, 
   Calculator, Play, Rocket, ChevronDown, ChevronUp, ArrowRight,
   FileText, QrCode, Settings, Facebook, Stethoscope, GraduationCap, Store,
-  Star, Globe, ShieldCheck, Heart, Search // ✅ Search Imported
+  Star, ShieldCheck, Heart, Search // ✅ Search Imported
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Footer from '../components/Footer';
@@ -418,47 +418,7 @@ const LandingPage = () => {
       </section>
 
       {/* 11. FOOTER */}
-      <footer className="bg-slate-950 text-white py-16 border-t border-slate-900">
-         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-4 gap-12">
-            <div className="col-span-1">
-               <div className="flex items-center gap-2 mb-6">
-                  <div className="w-8 h-8 bg-[#FF6B00] rounded-lg flex items-center justify-center font-bold text-white">M</div>
-                  <span className="font-bold text-xl">Yogidesk-ai</span>
-               </div>
-               <p className="text-slate-400 text-sm mb-6">Empowering businesses with intelligent WhatsApp automation.</p>
-               <div className="flex gap-4">
-                  <div className="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center hover:bg-[#FF6B00] transition cursor-pointer"><Facebook size={16}/></div>
-                  <div className="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center hover:bg-[#FF6B00] transition cursor-pointer"><Globe size={16}/></div>
-               </div>
-            </div>
-            <div>
-               <h4 className="font-bold mb-6 text-[#FF6B00]">Company</h4>
-               <ul className="space-y-3 text-slate-400 text-sm">
-                  <li><Link to="/about" className="hover:text-white">About Us</Link></li>
-                  <li><Link to="/contact" className="hover:text-white">Contact Us</Link></li>
-                  <li><Link to="/careers" className="hover:text-white">Careers</Link></li>
-               </ul>
-            </div>
-            <div>
-               <h4 className="font-bold mb-6 text-[#FF6B00]">Resources</h4>
-               <ul className="space-y-3 text-slate-400 text-sm">
-                  <li><Link to="/calculator" className="hover:text-white">ROI Calculator</Link></li>
-                  <li><Link to="/docs" className="hover:text-white">API Documentation</Link></li>
-                  <li><Link to="/qr-generator" className="hover:text-white">QR Code Generator</Link></li>
-               </ul>
-            </div>
-            <div>
-               <h4 className="font-bold mb-6 text-[#FF6B00]">Legal</h4>
-               <ul className="space-y-3 text-slate-400 text-sm">
-                  <li><Link to="/privacy" className="hover:text-white">Privacy Policy</Link></li>
-                  <li><Link to="/terms" className="hover:text-white">Terms of Service</Link></li>
-               </ul>
-            </div>
-         </div>
-         <div className="max-w-7xl mx-auto px-6 pt-8 mt-8 border-t border-slate-900 text-center text-slate-500 text-sm">
-            &copy; 2025 Yogidesk-ai. All rights reserved. Made in India 🇮🇳
-         </div>
-      </footer>
+      <Footer />
     </div>
   );
 };
@@ -521,7 +481,6 @@ const ConversionDemo = () => {
            </AnimatePresence>
         </div>
      </div>
-     <Footer />
   );
 };
 
