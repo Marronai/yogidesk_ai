@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const { protect } = require('../middleware/authMiddleware');
-const isAdmin = require('../middleware/isAdmin');
+const adminMiddleware = require('../middleware/adminMiddleware');
 
 const SUBSCRIPTION_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -45,9 +44,9 @@ const serializeClient = (user) => {
   };
 };
 
-router.get('/clients', protect, isAdmin, async (req, res) => {
+router.get('/clients-all', adminMiddleware, async (req, res) => {
   try {
-    const clients = await User.find({ role: { $ne: 'employee' } })
+    const clients = await User.find({ role: { $nin: ['admin', 'employee'] } })
       .select('name email subscriptionStartDate amountPaid isSubscribed subscriptionStatus createdAt')
       .sort({ createdAt: -1 });
 
@@ -58,7 +57,7 @@ router.get('/clients', protect, isAdmin, async (req, res) => {
   }
 });
 
-router.patch('/clients/:id/access', protect, isAdmin, async (req, res) => {
+router.patch('/clients/:id/access', adminMiddleware, async (req, res) => {
   try {
     const { enabled } = req.body;
     const client = await User.findById(req.params.id);

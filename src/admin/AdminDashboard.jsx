@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react';
-import api from '../utils/api';
+import axios from 'axios';
+import { API_URL } from '../utils/api';
 
 const statusStyles = {
   Active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -49,7 +50,11 @@ const AdminDashboard = () => {
     setError('');
 
     try {
-      const { data } = await api.get('/api/admin/clients');
+      const token = localStorage.getItem('admin_token');
+      const { data } = await axios.get(`${API_URL}/api/admin/clients-all`, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
+      });
       setClients(Array.isArray(data?.clients) ? data.clients : []);
     } catch (err) {
       console.error('Admin clients fetch failed:', err);
@@ -90,9 +95,15 @@ const AdminDashboard = () => {
     setUpdatingClientId(client.id);
 
     try {
-      const { data } = await api.patch(`/api/admin/clients/${client.id}/access`, {
-        enabled: nextValue,
-      });
+      const token = localStorage.getItem('admin_token');
+      const { data } = await axios.patch(
+        `${API_URL}/api/admin/clients/${client.id}/access`,
+        { enabled: nextValue },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
+        }
+      );
 
       setClients((currentClients) => currentClients.map((currentClient) => (
         currentClient.id === client.id ? data.client : currentClient

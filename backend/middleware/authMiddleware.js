@@ -22,6 +22,10 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ msg: 'Not authorized, token failed' });
     }
 
+    if (user.role !== 'admin' && user.subscriptionStatus === 'suspended') {
+      return res.status(403).json({ msg: 'Account access has been suspended.' });
+    }
+
     req.user = user;
     next();
   } catch (error) {

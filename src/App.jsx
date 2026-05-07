@@ -32,7 +32,9 @@ import Contact from './pages/Contact';
 import AuthSuccess from './pages/AuthSuccess';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Terms from './pages/Terms';
-import AdminDashboard from './pages/AdminDashboard';
+import AdminDashboard from './admin/AdminDashboard';
+import AdminLogin from './admin/AdminLogin';
+import AdminPrivateRoute from './admin/AdminPrivateRoute';
 
 const App = () => {
   // 🔑 Google Client ID ko environment variable se lo
@@ -59,12 +61,18 @@ const App = () => {
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
           
           <Route path="/auth-success" element={<AuthSuccess />} />  
           
 
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:resetToken" element={<ResetPassword />} />
+
+          {/* Admin Portal Routes */}
+          <Route element={<AdminPrivateRoute />}>
+            <Route path="/admin/dashboard" element={<AdminDashboard />} />
+          </Route>
           
           
           {/* ============================== */}
@@ -83,7 +91,6 @@ const App = () => {
                 <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
                 <Route path="/dashboard/subscription" element={<Subscription />} />
                 <Route path="/dashboard/agent-dashboard" element={<AgentDashboard />} />
-                <Route path="/dashboard/admin" element={<AdminDashboard />} />
                 <Route path="/templates" element={<TemplateManager />} />
                 <Route path="/templates/create" element={<Templates />} />
               </Route>

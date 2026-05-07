@@ -134,6 +134,7 @@ try {
 }
 
 try {
+  app.use('/api/admin/auth', require('./routes/adminAuthRoutes'));
   app.use('/api/admin', require('./routes/adminRoutes'));
   console.log('Admin routes loaded');
 } catch (error) {

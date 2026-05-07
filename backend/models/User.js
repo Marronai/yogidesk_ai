@@ -31,7 +31,7 @@ const UserSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['user', 'trial_user', 'admin', 'manager', 'employee'], 
-    default: 'trial_user'
+    default: 'user'
   },
   
   // 🏢 BUSINESS INFO
