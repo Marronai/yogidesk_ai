@@ -114,6 +114,9 @@ try {
 // Debug health check route
 app.get('/api/test', (req, res) => res.send('Backend is Alive'));
 
+// TEMP DEBUG ROUTE: verify auth path mounting
+app.post('/api/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
+
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({ msg: 'API endpoint not found' });
