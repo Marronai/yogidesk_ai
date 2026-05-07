@@ -8,6 +8,7 @@ import {
   Star, Globe, ShieldCheck, Heart, Search // ✅ Search Imported
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Footer from '../components/Footer';
 
 // 🔒 SECURITY & PERFORMANCE PATCH: 
 // Static Data ko component ke bahar rakha hai taaki har render par memory waste na ho.
@@ -520,6 +521,7 @@ const ConversionDemo = () => {
            </AnimatePresence>
         </div>
      </div>
+     <Footer />
   );
 };
 

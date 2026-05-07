@@ -30,6 +30,8 @@ import Templates from './pages/Templates';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import AuthSuccess from './pages/AuthSuccess';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import Terms from './pages/Terms';
 
 const App = () => {
   // 🔑 Google Client ID ko environment variable se lo
@@ -49,6 +51,8 @@ const App = () => {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<Terms />} />
           
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />
