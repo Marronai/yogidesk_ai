@@ -90,15 +90,13 @@ const Templates = () => {
       const payload = {
         name: template.name.trim(),
         category: template.category,
-        headerType: template.headerType,
-        headerText: template.headerText,
-        bodyText: template.bodyText,
-        footerText: template.footerText,
-        buttons: template.buttons,
+        language: 'en_US',
+        body: template.bodyText,
+        header: template.headerType === 'TEXT' ? { text: template.headerText } : null
       };
 
-      const { data } = await api.post('/templates', payload);
-      setMessage('Template submitted successfully. Status: ' + (data.status || 'PENDING'));
+      const { data } = await api.post('/whatsapp/submit-template', payload);
+      setMessage('Template submitted successfully. Status: PENDING');
       navigate('/templates');
     } catch (err) {
       console.error('Template submit failed:', err);

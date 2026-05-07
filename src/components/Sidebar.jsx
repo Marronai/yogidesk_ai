@@ -40,7 +40,12 @@ const Sidebar = () => {
   const daysLeft = calculateDaysLeft(expiryDate);
   const isPremium = subscriptionStatus === 'active';
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => {
+    if (path === '/templates') {
+      return location.pathname === '/templates' || location.pathname === '/templates/create';
+    }
+    return location.pathname === path;
+  };
 
   // Helper for Link styling
   const menuClass = (path) => `

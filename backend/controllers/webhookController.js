@@ -5,7 +5,7 @@ exports.verifyWebhook = (req, res) => {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN) {
+  if (mode === 'subscribe' && token === process.env.META_WEBHOOK_VERIFY_TOKEN) {
     return res.status(200).send(challenge);
   }
 
@@ -24,21 +24,18 @@ exports.handleWebhook = async (req, res) => {
       if (!Array.isArray(item.changes)) continue;
 
       for (const change of item.changes) {
-        const messageTemplate = change?.value?.message_template;
-        if (!messageTemplate || !messageTemplate.id) continue;
+        if (change.field === 'message_template') {
+          const messageTemplate = change?.value?.message_template;
+          if (!messageTemplate || !messageTemplate.id) continue;
 
-        const status = (messageTemplate.status || '').toUpperCase();
-        const updatedFields = {};
-
-        if (status) updatedFields.status = status;
-        if (messageTemplate.name) updatedFields.name = messageTemplate.name;
-
-        if (Object.keys(updatedFields).length > 0) {
-          await Template.findOneAndUpdate(
-            { metaTemplateId: messageTemplate.id },
-            { $set: updatedFields },
-            { new: true }
-          );
+          const status = (messageTemplate.status || '').toUpperCase();
+          if (status === 'APPROVED' || status === 'REJECTED') {
+            await Template.findOneAndUpdate(
+              { metaTemplateId: messageTemplate.id },
+              { $set: { status } },
+              { new: true }
+            );
+          }
         }
       }
     }
