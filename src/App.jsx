@@ -43,6 +43,9 @@ const App = () => {
     <GoogleOAuthProvider clientId={clientId}>
       <BrowserRouter>
         <Routes>
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<Terms />} />
+
           {/* ============================== */}
           {/* 1. PUBLIC ROUTES (Khule Routes)*/}
           {/* ============================== */}
@@ -51,8 +54,6 @@ const App = () => {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
-          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-          <Route path="/terms" element={<Terms />} />
           
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />

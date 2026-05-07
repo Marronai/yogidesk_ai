@@ -1,12 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api, { API_URL } from '../utils/api';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
   Settings, MessageSquare, ChevronRight, Link, Phone, Trash2,
   MoreVertical, PhoneCall, Video as VideoIcon, Tag, LayoutGrid, Plus,
-  Smartphone, Monitor
+  Smartphone, Monitor, Loader
 } from 'lucide-react';
 
 const Templates = () => {
@@ -77,8 +77,16 @@ const Templates = () => {
   };
 
   const handleSubmit = async () => {
+    console.log('Submit Clicked', template);
+    console.log('Sending to Meta...');
+
     if (!template.name.trim()) {
       setError('Template name is required.');
+      return;
+    }
+
+    if (!template.bodyText.trim()) {
+      setError('Template body text is required.');
       return;
     }
 
@@ -95,7 +103,12 @@ const Templates = () => {
         header: template.headerType === 'TEXT' ? { text: template.headerText } : null
       };
 
-      const { data } = await api.post('/whatsapp/submit-template', payload);
+      const baseUrl = API_URL.replace(/\/$/, '');
+      const apiPrefix = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
+      const submitUrl = `${apiPrefix}/whatsapp/submit-template`;
+      console.log('Using endpoint:', submitUrl);
+      const { data } = await api.post(submitUrl, payload);
+
       setMessage('Template submitted successfully. Status: PENDING');
       navigate('/templates');
     } catch (err) {
@@ -117,7 +130,16 @@ const Templates = () => {
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
           <button onClick={handleSubmit} disabled={saving} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
-            {saving ? 'Submitting...' : 'Submit Template'} <ChevronRight size={18}/>
+            {saving ? (
+              <>
+                <Loader size={18} className="animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              <>
+                Submit Template <ChevronRight size={18}/>
+              </>
+            )}
           </button>
         </div>
 
