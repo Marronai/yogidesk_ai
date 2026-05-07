@@ -133,6 +133,13 @@ try {
   console.error('❌ Failed to load webhook routes:', error.message);
 }
 
+try {
+  app.use('/api/admin', require('./routes/adminRoutes'));
+  console.log('Admin routes loaded');
+} catch (error) {
+  console.error('Failed to load admin routes:', error.message);
+}
+
 // Debug health check route
 app.get('/api/test', (req, res) => res.send('Backend is Alive'));
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

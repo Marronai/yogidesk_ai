@@ -16,7 +16,8 @@ import {
   HeartPulse,
   GraduationCap,
   Rocket,
-  FileText
+  FileText,
+  ShieldCheck
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -133,6 +134,12 @@ const Sidebar = () => {
           )}
 
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-6 mb-2 px-2">Management & Tools</p>
+
+          {userRole === 'admin' && (
+            <Link to="/dashboard/admin" className={menuClass('/dashboard/admin')}>
+              <ShieldCheck size={20} /><span>Admin Dashboard</span>
+            </Link>
+          )}
           
           {/* 🔥 TEAM MANAGEMENT */}
           {(userRole === 'admin' || userRole === 'manager') && (

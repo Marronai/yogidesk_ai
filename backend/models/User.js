@@ -67,6 +67,18 @@ const UserSchema = new mongoose.Schema({
     enum: ['trial', 'active', 'expired', 'pending_payment', 'suspended'],
     default: 'trial'
   },
+  subscriptionStartDate: {
+    type: Date,
+    default: null
+  },
+  isSubscribed: {
+    type: Boolean,
+    default: false
+  },
+  amountPaid: {
+    type: Number,
+    default: 0
+  },
   trialStartDate: { type: Date, default: Date.now },
   planExpiryDate: {
     type: Date,

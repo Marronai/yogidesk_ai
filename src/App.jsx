@@ -32,6 +32,7 @@ import Contact from './pages/Contact';
 import AuthSuccess from './pages/AuthSuccess';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Terms from './pages/Terms';
+import AdminDashboard from './pages/AdminDashboard';
 
 const App = () => {
   // 🔑 Google Client ID ko environment variable se lo
@@ -82,6 +83,7 @@ const App = () => {
                 <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
                 <Route path="/dashboard/subscription" element={<Subscription />} />
                 <Route path="/dashboard/agent-dashboard" element={<AgentDashboard />} />
+                <Route path="/dashboard/admin" element={<AdminDashboard />} />
                 <Route path="/templates" element={<TemplateManager />} />
                 <Route path="/templates/create" element={<Templates />} />
               </Route>

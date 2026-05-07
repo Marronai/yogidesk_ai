@@ -85,9 +85,13 @@ exports.verifyPayment = async (req, res) => {
             // 🔥 SUCCESS: Plan Update Logic
             const user = await User.findOne({ email: response.data.customer_details.customer_email });
             
+            const paidAt = new Date();
             user.subscriptionStatus = 'active';
+            user.isSubscribed = true;
+            user.subscriptionStartDate = paidAt;
+            user.amountPaid = response.data.order_amount || user.amountPaid || 0;
             // Aaj ki date se 30 din aage ki expiry set karo
-            user.planExpiryDate = new Date(+new Date() + 30*24*60*60*1000); 
+            user.planExpiryDate = new Date(+paidAt + 30*24*60*60*1000); 
             
             await user.save();
             return res.status(200).json({ msg: "Payment Verified & Plan Activated!" });
