@@ -105,6 +105,9 @@ const Login = () => {
         if (data.user?.planExpiryDate) {
           localStorage.setItem('user_plan_expiry', data.user.planExpiryDate);
         }
+        if (data.user?.trialStartDate) {
+          localStorage.setItem('user_trial_start_date', data.user.trialStartDate);
+        }
 
         if (!rememberMe) {
           sessionStorage.setItem('user_id', decoded.id);

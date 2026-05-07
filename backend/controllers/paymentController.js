@@ -1,6 +1,14 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const User = require('../models/User');
 const crypto = require('crypto');
+
+// Ensure upload folder exists
+const paymentProofFolder = path.join(__dirname, '../uploads/payment-proof');
+if (!fs.existsSync(paymentProofFolder)) {
+  fs.mkdirSync(paymentProofFolder, { recursive: true });
+}
 
 // 1. Create Payment Order
 exports.createOrder = async (req, res) => {
@@ -39,7 +47,27 @@ exports.createOrder = async (req, res) => {
     }
 };
 
-// 2. Verify Payment (Webhook/Return)
+// 2. Upload UPI payment proof for manual activation
+exports.uploadPaymentProof = async (req, res) => {
+    try {
+        const user = req.user;
+        if (!req.file) {
+            return res.status(400).json({ msg: 'Please upload a valid screenshot or receipt.' });
+        }
+
+        user.paymentProof = req.file.path;
+        user.subscriptionStatus = 'pending_payment';
+        user.paymentProofStatus = 'pending';
+        await user.save();
+
+        return res.status(200).json({ msg: 'Payment proof uploaded successfully. We will verify and activate your account shortly.' });
+    } catch (err) {
+        console.error('Payment proof upload error:', err.message);
+        res.status(500).json({ msg: 'Failed to upload payment proof.' });
+    }
+};
+
+// 3. Verify Payment (Webhook/Return)
 exports.verifyPayment = async (req, res) => {
     try {
         const { order_id } = req.body;

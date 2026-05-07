@@ -24,11 +24,11 @@ const Sidebar = () => {
   const navigate = useNavigate();
 
   // 🛠️ DATA RECOVERY
-  const userPlan = localStorage.getItem('user_plan') || 'lite';
+  const userPlan = localStorage.getItem('user_plan_type') || 'lite';
   const userRole = localStorage.getItem('user_role') || 'employee';
   const userIndustry = localStorage.getItem('user_industry') || 'general';
-  const subscriptionStatus = localStorage.getItem('subscription_status') || 'trial';
-  const expiryDate = localStorage.getItem('plan_expiry');
+  const subscriptionStatus = localStorage.getItem('user_subscription_status') || 'trial';
+  const expiryDate = localStorage.getItem('user_plan_expiry');
 
   const calculateDaysLeft = (date) => {
     if (!date) return 0;
@@ -56,8 +56,8 @@ const Sidebar = () => {
         
         {/* Logo Section */}
         <div className="p-6 flex items-center gap-3 flex-shrink-0 border-b border-gray-50">
-          <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-orange-500/20 text-center leading-10">M</div>
-          <span className="text-xl font-bold text-gray-800 tracking-wide">Marroncorp AI</span>
+          <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-orange-500/20 text-center leading-10">V</div>
+          <span className="text-xl font-bold text-gray-800 tracking-wide">Vyapar Wallah</span>
         </div>
 
         {/* 🚀 SUBSCRIPTION STATUS BADGE */}
@@ -95,6 +95,7 @@ const Sidebar = () => {
           
           <Link to="/dashboard/inbox" className={menuClass('/dashboard/inbox')}><MessageSquare size={20} /><span>Inbox</span></Link>
           <Link to="/dashboard/contacts" className={menuClass('/dashboard/contacts')}><Users size={20} /><span>Contacts</span></Link>
+          <Link to="/dashboard/subscription" className={menuClass('/dashboard/subscription')}><Crown size={20} /><span>Subscription</span></Link>
 
           {/* 🏥 HOSPITAL MODULE */}
           {userIndustry === 'hospital' && (

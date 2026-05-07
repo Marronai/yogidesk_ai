@@ -185,7 +185,7 @@ const otpEmailTemplate = (userName, otp) => {
 };
 
 // 🛠️ Professional Welcome Email Template for New Users
-const welcomeEmailTemplate = (userName, businessName) => {
+const welcomeEmailTemplate = (userName, businessName, email) => {
   return `
     <!DOCTYPE html>
     <html>
@@ -194,86 +194,89 @@ const welcomeEmailTemplate = (userName, businessName) => {
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          background-color: #ffffff;
+          background-color: #f5f7fb;
           padding: 20px;
           margin: 0;
         }
         .email-container {
-          max-width: 600px;
+          max-width: 620px;
           margin: 0 auto;
           background-color: #ffffff;
-          border-radius: 8px;
+          border-radius: 16px;
           overflow: hidden;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          border: 1px solid #e0e0e0;
+          box-shadow: 0 22px 60px rgba(16, 24, 40, 0.08);
+          border: 1px solid #e2e8f0;
         }
         .header {
-          background: linear-gradient(135deg, #FF6B00 0%, #002D62 100%);
+          background: linear-gradient(135deg, #ff6b00 0%, #0f3f74 100%);
           padding: 40px 20px;
           text-align: center;
         }
         .logo {
           font-size: 32px;
-          font-weight: bold;
+          font-weight: 800;
           color: #ffffff;
           margin: 0;
         }
         .content {
-          padding: 40px 20px;
+          padding: 36px 28px;
           text-align: center;
         }
         .greeting {
-          font-size: 24px;
-          color: #333333;
-          margin: 0 0 10px 0;
-          font-weight: 600;
+          font-size: 26px;
+          color: #111827;
+          margin: 0 0 12px 0;
+          font-weight: 700;
         }
         .message {
           font-size: 16px;
-          color: #666666;
-          line-height: 1.6;
-          margin: 20px 0;
+          color: #4b5563;
+          line-height: 1.8;
+          margin: 18px 0;
         }
-        .highlight-box {
-          background-color: #f8f9fa;
-          border-left: 4px solid #FF6B00;
-          padding: 20px;
+        .detail-box {
+          background: #f8fafc;
+          border: 1px solid #dbeafe;
+          border-radius: 14px;
+          padding: 22px;
           margin: 30px 0;
-          border-radius: 4px;
+          text-align: left;
         }
-        .highlight-title {
-          font-size: 18px;
-          color: #FF6B00;
-          font-weight: bold;
-          margin: 0 0 10px 0;
+        .detail-title {
+          font-size: 14px;
+          color: #0f172a;
+          font-weight: 700;
+          margin-bottom: 10px;
+        }
+        .detail-line {
+          margin: 8px 0;
+          color: #475569;
+          font-size: 15px;
         }
         .cta-button {
           display: inline-block;
-          background-color: #FF6B00;
+          background-color: #ff6b00;
           color: #ffffff;
-          padding: 15px 30px;
+          padding: 14px 32px;
           text-decoration: none;
-          border-radius: 6px;
-          font-weight: bold;
+          border-radius: 999px;
+          font-weight: 700;
           font-size: 16px;
-          margin: 20px 0;
-          transition: background-color 0.3s;
-        }
-        .cta-button:hover {
-          background-color: #e55a00;
+          margin: 18px 0;
         }
         .footer {
-          background-color: #f8f9fa;
-          padding: 20px;
+          background-color: #f8fafc;
+          padding: 24px 20px;
           text-align: center;
-          border-top: 1px solid #e0e0e0;
-          font-size: 12px;
-          color: #666666;
+          border-top: 1px solid #e2e8f0;
+          font-size: 13px;
+          color: #64748b;
         }
-        .branding {
-          font-size: 11px;
-          color: #999999;
-          margin-top: 10px;
+        .footer span {
+          display: block;
+          color: #1e293b;
+          font-weight: 600;
+          margin-top: 8px;
         }
       </style>
     </head>
@@ -284,31 +287,29 @@ const welcomeEmailTemplate = (userName, businessName) => {
         </div>
 
         <div class="content">
-          <p class="greeting">Welcome to Vyapar Wallah, ${userName}!</p>
-
+          <p class="greeting">Welcome aboard, ${userName}!</p>
           <p class="message">
-            Congratulations! Your account for <strong>${businessName}</strong> has been successfully created.
-            We're excited to help you automate customer communication and grow your business.
+            Your account for <strong>${businessName}</strong> is now active. Your registered email is <strong>${email}</strong>.
+            Start your 14-day free trial today and explore automated sales, customer replies, and business growth tools.
           </p>
 
-          <div class="highlight-box">
-            <p class="highlight-title">🎉 Your 14-Day Free Trial Has Started!</p>
-            <p class="message">
-              Explore all features, integrate WhatsApp, and see how Vyapar Wallah can transform your customer interactions.
-              No credit card required to get started.
-            </p>
+          <div class="detail-box">
+            <p class="detail-title">What you get</p>
+            <p class="detail-line">• 14-day free trial with full access</p>
+            <p class="detail-line">• Admin access for your business</p>
+            <p class="detail-line">• Ready-made WhatsApp workflows and campaign tools</p>
           </div>
 
-          <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Start Exploring Dashboard</a>
+          <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Go to Dashboard</a>
 
           <p class="message">
-            Need help getting started? Check out our <a href="https://yogidesk-ai.com/support" style="color: #002D62; text-decoration: none; font-weight: bold;">support resources</a> or contact our team.
+            If you need help setting up, our support team is ready to assist. Enjoy the journey with Vyapar Wallah!
           </p>
         </div>
 
         <div class="footer">
-          <p>© 2024 Vyapar Wallah. All rights reserved.</p>
-          <p class="branding">A product of Vyapar Wallah</p>
+          © 2026 Yogi Desk. All rights reserved.
+          <span>A product of Vyapar Wallah</span>
         </div>
       </div>
     </body>
@@ -328,7 +329,7 @@ const sendWelcomeEmail = async (email, userName, businessName) => {
       from: emailFrom,
       to: email,
       subject: '🎉 Welcome to Vyapar Wallah - Your 14-Day Free Trial Starts Now!',
-      html: welcomeEmailTemplate(userName, businessName)
+      html: welcomeEmailTemplate(userName, businessName, email)
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -349,88 +350,93 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
       <style>
         body {
           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-          background-color: #f8fafc;
+          background-color: #eef2ff;
           padding: 20px;
+          margin: 0;
         }
         .email-container {
           max-width: 620px;
           margin: 0 auto;
           background-color: #ffffff;
-          border-radius: 12px;
+          border-radius: 16px;
           overflow: hidden;
-          box-shadow: 0 16px 40px rgba(0,0,0,0.08);
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+          border: 1px solid #e2e8f0;
         }
         .header {
-          background: linear-gradient(135deg, #FF6B00 0%, #003366 100%);
-          padding: 30px 20px;
+          background: linear-gradient(135deg, #ff6b00 0%, #003366 100%);
+          padding: 30px 22px;
           text-align: center;
         }
         .logo {
-          font-size: 26px;
+          font-size: 28px;
           font-weight: 800;
           color: #ffffff;
           margin: 0;
         }
         .content {
-          padding: 36px 24px;
-          color: #1f2937;
+          padding: 34px 26px;
+          color: #111827;
         }
         .greeting {
-          font-size: 18px;
+          font-size: 20px;
           font-weight: 700;
-          margin: 0 0 12px;
+          margin: 0 0 14px;
         }
         .message {
           font-size: 15px;
-          line-height: 1.75;
-          color: #4b5563;
+          line-height: 1.8;
+          color: #475569;
           margin: 16px 0;
         }
         .detail-box {
           background: #f8fafc;
-          border: 1px solid #e5e7eb;
+          border: 1px solid #dbeafe;
           border-radius: 14px;
-          padding: 18px 20px;
-          margin: 20px 0;
+          padding: 20px;
+          margin: 24px 0;
+          text-align: left;
         }
         .detail-heading {
           font-size: 13px;
           font-weight: 700;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: #111827;
-          margin-bottom: 8px;
+          color: #0f172a;
+          margin-bottom: 10px;
         }
         .detail-text {
           font-size: 14px;
-          color: #374151;
-          margin: 0;
+          color: #334155;
+          margin: 6px 0;
         }
         .button-wrap {
           text-align: center;
-          margin: 25px 0;
+          margin: 26px 0;
         }
         .cta-button {
           display: inline-block;
-          background-color: #FF6B00;
+          background-color: #ff6b00;
           color: #ffffff;
           text-decoration: none;
-          padding: 14px 26px;
+          padding: 14px 34px;
           border-radius: 999px;
           font-weight: 700;
-          box-shadow: 0 12px 30px rgba(255,107,0,0.2);
+          font-size: 15px;
         }
         .footer {
-          padding: 18px 20px 30px;
-          font-size: 12px;
-          color: #6b7280;
+          padding: 20px;
           text-align: center;
-          background: #f3f4f6;
+          background: #f8fafc;
+          border-top: 1px solid #e2e8f0;
+          color: #64748b;
+          font-size: 13px;
         }
-        .footer .branding {
-          font-weight: 700;
-          color: #111827;
-          margin-top: 5px;
+        .footer span {
+          display: block;
+          margin-top: 6px;
+          color: #0f172a;
+          font-weight: 600;
         }
       </style>
     </head>
@@ -441,7 +447,7 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
         </div>
         <div class="content">
           <p class="greeting">Hi ${userName},</p>
-          <p class="message">We noticed a successful login to your Vyapar Wallah dashboard. If this was you, great! If not, please reset your password immediately.</p>
+          <p class="message">We noticed a successful login to your Vyapar Wallah dashboard. If this was you, great! If not, you should change your password immediately.</p>
           <div class="detail-box">
             <p class="detail-heading">Login details</p>
             <p class="detail-text"><strong>Device:</strong> ${deviceInfo}</p>
@@ -449,13 +455,13 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
             <p class="detail-text"><strong>Time:</strong> ${new Date().toLocaleString()}</p>
           </div>
           <div class="button-wrap">
-            <a href="https://yogidesk-ai.com/forgot-password" class="cta-button">Reset your password</a>
+            <a href="https://yogidesk-ai.com/forgot-password" class="cta-button">Change Password</a>
           </div>
-          <p class="message">If you did not log in, please contact support immediately or change your password from the dashboard.</p>
+          <p class="message">If you did not log in, please contact support immediately or reset your password from the app.</p>
         </div>
         <div class="footer">
-          <p>© ${new Date().getFullYear()} Vyapar Wallah. All rights reserved.</p>
-          <p class="branding">A product of Vyapar Wallah</p>
+          © 2026 Yogi Desk. All rights reserved.
+          <span>A product of Vyapar Wallah</span>
         </div>
       </div>
     </body>

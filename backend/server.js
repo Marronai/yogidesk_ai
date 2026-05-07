@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const xss = require('xss-clean');
+const rateLimit = require('express-rate-limit');
 const passport = require('passport');
 const session = require('express-session');
 
@@ -39,6 +42,19 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Security Middleware
+app.use(helmet());
+app.use(xss());
+
+// Rate limiting for API endpoints
+app.use('/api/', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { msg: 'Too many requests from this IP, please try again later.' }
+}));
 
 // CORS + Body Parsers
 app.use(express.json());
@@ -82,6 +98,13 @@ try {
   console.log('✅ WhatsApp routes loaded');
 } catch (error) {
   console.error('❌ Failed to load whatsapp routes:', error.message);
+}
+
+try {
+  app.use('/api/payments', require('./routes/paymentRoutes'));
+  console.log('✅ Payment routes loaded');
+} catch (error) {
+  console.error('❌ Failed to load payment routes:', error.message);
 }
 
 // Debug health check route

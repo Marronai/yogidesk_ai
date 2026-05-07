@@ -64,13 +64,22 @@ const UserSchema = new mongoose.Schema({
   },
   subscriptionStatus: {
     type: String,
-    enum: ['trial', 'active', 'expired', 'suspended'],
+    enum: ['trial', 'active', 'expired', 'pending_payment', 'suspended'],
     default: 'trial'
   },
   trialStartDate: { type: Date, default: Date.now },
   planExpiryDate: {
     type: Date,
     default: () => new Date(+new Date() + 14*24*60*60*1000)
+  },
+  paymentProof: {
+    type: String,
+    default: ''
+  },
+  paymentProofStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected', 'none'],
+    default: 'none'
   },
 
   // 🕒 SHIFT TIMING

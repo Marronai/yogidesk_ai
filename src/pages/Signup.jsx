@@ -81,6 +81,9 @@ const Signup = () => {
         if (data.user?.planType) {
           localStorage.setItem('user_plan_type', data.user.planType);
         }
+        if (data.user?.trialStartDate) {
+          localStorage.setItem('user_trial_start_date', data.user.trialStartDate);
+        }
         
         // 🚀 Seedha Dashboard!
         navigate('/dashboard');

@@ -10,6 +10,7 @@ const DashboardHome = () => {
   const userName = localStorage.getItem('user_name') || 'Dr. Avinash';
   const category = localStorage.getItem('org_category') || 'hospital';
   const trialDaysRemaining = parseInt(localStorage.getItem('user_trial_days_remaining') || '14', 10);
+  const trialStartDate = localStorage.getItem('user_trial_start_date') || '';
   const isTrialExpired = trialDaysRemaining <= 0;
   const subscriptionStatus = localStorage.getItem('user_subscription_status') || 'trial';
   const planExpiryDate = localStorage.getItem('user_plan_expiry') || '';
@@ -30,6 +31,9 @@ const DashboardHome = () => {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Namaste, {userName} 🙏</h1>
           <p className="text-gray-500 mt-1">Here is your clinic's weekly performance.</p>
+          {trialStartDate && (
+            <p className="text-sm text-slate-500 mt-2">Trial started on {new Date(trialStartDate).toLocaleDateString()}</p>
+          )}
           <div className={`mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold ${isTrialExpired ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
             {isTrialExpired ? 'Trial expired – renew now' : `${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} left in free trial`}
           </div>

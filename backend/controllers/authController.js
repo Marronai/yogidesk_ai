@@ -2,6 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
+const geoip = require('geoip-lite');
 
 const emailConfig = require('../config/emailConfig');
 const sendOTP = typeof emailConfig.sendOTP === 'function'
@@ -190,12 +191,14 @@ exports.verifyOTP = async (req, res) => {
     user.otp = undefined;
     user.otpExpires = undefined;
     user.isVerified = true;
-    // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
+    const ipAddress = (req.headers['x-forwarded-for'] || req.ip || 'Unknown IP').split(',')[0].trim();
+    const geo = ipAddress !== 'Unknown IP' ? geoip.lookup(ipAddress) : null;
+    const location = geo ? [geo.city, geo.region, geo.country].filter(Boolean).join(', ') : 'Unknown Location';
     const deviceInfo = req.headers['user-agent'] || 'Unknown device';
-    const ipAddress = req.headers['x-forwarded-for'] || req.ip || 'Unknown IP';
-    sendLoginAlert(user.email, user.name, deviceInfo, ipAddress);
+
+    sendLoginAlert(user.email, user.name, `${deviceInfo} — ${location}`, ipAddress);
 
     const token = generateToken(user, user.currentSessionId);
     const userPayload = buildUserPayload(user);

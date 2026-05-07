@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const passport = require('passport');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 
 const { 
   register, 
@@ -11,6 +12,22 @@ const {
   googleLogin
 } = require('../controllers/authController');
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { msg: 'Too many login attempts. Please try again after 15 minutes.' }
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { msg: 'Too many signup attempts. Please try again after 15 minutes.' }
+});
+
 const { protect } = require('../middleware/authMiddleware');
 
 // 🛠️ DEVELOPER TIP: Abhi ke liye Rate Limiters ko hata dete hain 
@@ -19,11 +36,11 @@ const { protect } = require('../middleware/authMiddleware');
 
 // --- SIGNUP & LOGIN ROUTES ---
 // 🚀 'createAccountLimiter' hata diya taaki testing mein block na ho
-router.post('/register', register);
-router.post('/signup', register); 
-router.post('/login', loginStep1);
-router.post('/verify-login', verifyOTP);
-router.post('/verify-signup-otp', verifySignupOTP);
+router.post('/register', signupLimiter, register);
+router.post('/signup', signupLimiter, register);
+router.post('/login', loginLimiter, loginStep1);
+router.post('/verify-login', loginLimiter, verifyOTP);
+router.post('/verify-signup-otp', loginLimiter, verifySignupOTP);
 // --- GOOGLE AUTH ROUTES ---
 router.post('/google', googleLogin);
 

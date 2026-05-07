@@ -13,6 +13,7 @@ import DashboardHome from './pages/DashboardHome';
 import LeadsCRM from './pages/LeadsCRM';
 import Team from './pages/Team';
 import Pricing from './pages/Pricing';
+import Subscription from './pages/Subscription';
 import LandingPage from './pages/LandingPage';
 import Inbox from './pages/Inbox';
 import AgentDashboard from './pages/AgentDashboard'; 
@@ -77,6 +78,7 @@ const App = () => {
                 <Route path="support" element={<Support />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="ads-crm" element={<LeadsCRM />} />
+                <Route path="subscription" element={<Subscription />} />
                 <Route path="agent-dashboard" element={<AgentDashboard />} />
                 
               </Route>
