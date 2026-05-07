@@ -106,7 +106,7 @@ try {
 }
 
 try {
-  app.use('/api/whatsapp', require('./routes/whatsappRoutes'));
+  app.use('/whatsapp', require('./routes/whatsappRoutes'));
   console.log('✅ WhatsApp routes loaded');
 } catch (error) {
   console.error('❌ Failed to load whatsapp routes:', error.message);
@@ -120,11 +120,11 @@ try {
 }
 
 // Debug health check route
-app.get('/api/test', (req, res) => res.send('Backend is Alive'));
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/test', (req, res) => res.send('Backend is Alive'));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // TEMP DEBUG ROUTE: verify auth path mounting
-app.post('/api/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
+app.post('/auth/debug-login', (req, res) => res.json({ msg: 'Path is correct' }));
 
 // 404 Handler
 app.use((req, res) => {
