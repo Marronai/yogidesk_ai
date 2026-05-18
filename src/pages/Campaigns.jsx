@@ -56,7 +56,11 @@ const Campaigns = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchCampaignData(); }, []);
+  useEffect(() => {
+    setPatients([]);
+    setLedgerMatches([]);
+    fetchCampaignData();
+  }, [userId]);
   useEffect(() => {
     const timer = setTimeout(() => lookupLedger(searchTerm), 250);
     return () => clearTimeout(timer);

@@ -30,7 +30,7 @@ if (supabaseUrl && supabaseServiceKey) {
 }
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
-const RATE_CARD = { UTILITY: 0.20, MARKETING: 0.90, AUTHENTICATION: 0.20 };
+const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
 const getUnitCost = (category) => RATE_CARD[String(category || 'UTILITY').toUpperCase()] || RATE_CARD.UTILITY;
@@ -301,7 +301,7 @@ app.post('/api/campaign/broadcast', async (req, res) => {
         if (!supabase) return res.status(500).json({ msg: "Database connection unavailable" });
 
         // 1. Calculate Costs (Flat rates, no GST breakdown shown to user)
-        const unitCost = templateCategory === 'UTILITY' ? 0.20 : 0.90;
+        const unitCost = templateCategory === 'UTILITY' ? 0.20 : 1.30;
         const totalCost = parseFloat((patientCount * unitCost).toFixed(2));
 
         // 2. Fetch User Balance

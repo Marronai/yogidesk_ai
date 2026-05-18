@@ -33,6 +33,7 @@ const YogiWallet = () => {
   const [amount, setAmount] = useState(200);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
 
   const userId = localStorage.getItem('user_id');
 
@@ -131,7 +132,13 @@ const YogiWallet = () => {
     const rechargeAmount = Number(amount);
     const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
 
-    if (!userId || !Number.isFinite(rechargeAmount) || rechargeAmount < 1) return;
+    setPaymentError('');
+    if (!userId || !Number.isFinite(rechargeAmount)) return;
+    if (rechargeAmount < 100) {
+      setPaymentError('Minimum recharge amount is ₹100.');
+      alert('Minimum recharge amount is ₹100.');
+      return;
+    }
     if (!razorpayKey) {
       alert('Razorpay key is missing. Please contact support.');
       return;
@@ -230,15 +237,20 @@ const YogiWallet = () => {
             <label className="mt-6 block text-xs font-black uppercase tracking-widest text-slate-400">Recharge Amount</label>
             <input
               type="number"
-              min={1}
+              min={100}
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-4 text-lg font-black text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
             />
+            {paymentError && (
+              <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                {paymentError}
+              </div>
+            )}
 
             <button
               type="submit"
-              disabled={paying || Number(amount) < 1}
+              disabled={paying}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Wallet size={18} /> {paying ? 'Opening Checkout...' : 'Recharge Wallet'}

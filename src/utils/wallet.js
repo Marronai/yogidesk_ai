@@ -2,7 +2,7 @@ const WALLET_STORAGE_KEY = 'yogi_wallet';
 
 export const MESSAGE_RATES = {
   utility: 0.2,
-  marketing: 0.9,
+  marketing: 1.3,
 };
 
 export const getWallet = () => {

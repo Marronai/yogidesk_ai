@@ -151,7 +151,7 @@ const DashboardHome = () => {
             <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
               <p className="text-sm text-gray-500">Fixed Pricing</p>
               <h4 className="mt-2 text-2xl font-bold text-gray-900">Transparent rates</h4>
-              <p className="mt-2 text-sm text-gray-500">Appointment reminders are fixed at Rs. 0.20/message. Promotional broadcasts are fixed at Rs. 0.90/message.</p>
+              <p className="mt-2 text-sm text-gray-500">Appointment reminders are fixed at Rs. 0.20/message. Promotional broadcasts are fixed at Rs. 1.30/message.</p>
             </div>
           </div>
         </div>

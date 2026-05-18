@@ -68,10 +68,10 @@ export const getTemplatesBySpecialty = (specialty) => {
 
 export const PRICING = {
   UTILITY: 0.20,
-  MARKETING: 0.90
+  MARKETING: 1.30
 };
 
 export const calculateCampaignCost = (count, category) => {
-  const unitPrice = PRICING[category] || 0.90;
+  const unitPrice = PRICING[category] || 1.30;
   return (count * unitPrice).toFixed(2);
 };

@@ -13,7 +13,7 @@ export const MEDICAL_SPECIALTIES = [
 export const PRICING_RULES = {
   UTILITY: 0.20,
   AUTHENTICATION: 0.20,
-  MARKETING: 0.90
+  MARKETING: 1.30
 };
 
 export const TEMPLATE_DATA = {
