@@ -1,23 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, ShieldCheck, KeyRound } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, ShieldCheck, KeyRound, Phone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
 import { supabase } from '../supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
+import { API_URL } from '../utils/api';
+import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
+import { handleGoogleSignIn } from '../config/supabaseClient';
 
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
+  const [pendingUser, setPendingUser] = useState(null);
   
   // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
   const [step, setStep] = useState(1);
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
-  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [formData, setFormData] = useState({ email: '', password: '', phone: '' });
 
   // --- CAROUSEL DATA (Updated to Yogi Desk Branding) ---
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -50,6 +55,39 @@ const Login = () => {
         e.target.previousSibling.focus();
       }
     }
+  };
+
+  const triggerLoginEmail = (user) => {
+    const payload = JSON.stringify({
+      email: user?.email || formData.email.trim().toLowerCase(),
+      name: user?.user_metadata?.full_name || user?.user_metadata?.name || 'Doctor',
+      event: 'login'
+    });
+
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(`${API_URL}/api/auth/dispatch-login-alert`, new Blob([payload], { type: 'application/json' }));
+      return;
+    }
+
+    fetch(`${API_URL}/api/auth/dispatch-login-alert`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  };
+
+  const startLoginPhoneVerification = async (user) => {
+    const phone = formData.phone || user?.user_metadata?.phone;
+    const confirmation = await startFirebasePhoneChallenge({
+      phone,
+      containerId: 'recaptcha-container',
+      verifierKey: 'login',
+    });
+    setPendingUser(user);
+    setPhoneConfirmation(confirmation);
+    setOtp(["", "", "", "", "", ""]);
+    setStep(2);
   };
 
   // 🌍 GOOGLE LOGIN HANDLER (Supabase Native Auth)
@@ -115,12 +153,18 @@ const Login = () => {
         if (error) throw error;
 
         if (data?.user) {
-          handleAuthSuccess(data.user);
+          await startLoginPhoneVerification(data.user);
         }
       } else {
-        // Fallback state if validation pipeline changes
-        alert("Verification completed. Redirecting...");
-        setStep(1);
+        const code = otp.join('');
+        if (!phoneConfirmation || code.length !== 6) {
+          alert("Please enter the 6-digit mobile OTP.");
+          return;
+        }
+
+        await phoneConfirmation.confirm(code);
+        triggerLoginEmail(pendingUser);
+        handleAuthSuccess(pendingUser);
       }
     } catch (error) {
       console.error(error);
@@ -203,8 +247,9 @@ const Login = () => {
           {/* 🔴 STEP 1: EMAIL & PASSWORD FORM */}
           {step === 1 && (
             <>
+              <div id="recaptcha-container"></div>
               {/* Google Button */}
-              <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
+              <button type="button" onClick={handleGoogleSignIn} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
                 Sign in with Google
               </button>
@@ -233,6 +278,14 @@ const Login = () => {
                   </div>
                 </div>
 
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Admin Mobile OTP</label>
+                  <div className="relative group">
+                    <Phone className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#FF6B00] transition-colors" size={20} />
+                    <input name="phone" type="tel" onChange={handleChange} placeholder="10-digit mobile number" required maxLength="10" className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 p-3.5 outline-none focus:border-[#FF6B00]"/>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between mt-2">
                   <label className="flex items-center cursor-pointer">
                     <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-[#FF6B00] focus:ring-[#FF6B00] accent-[#FF6B00]" />
@@ -252,6 +305,7 @@ const Login = () => {
           {/* 🔴 STEP 2: OTP COMPONENT FALLBACK */}
           {step === 2 && (
             <motion.form initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} onSubmit={handleSubmit} className="space-y-6">
+               <div id="recaptcha-container"></div>
                <div className="flex gap-2 justify-center">
                   {otp.map((data, index) => (
                     <input

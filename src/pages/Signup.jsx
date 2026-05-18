@@ -5,15 +5,21 @@ import {
   Star, CheckCircle, Eye, EyeOff, Briefcase 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { handleGoogleSignIn } from '../config/supabaseClient';
 
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { supabase } from '../supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
+import { API_URL } from '../utils/api';
+import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 
 const Signup = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
+  const [pendingUser, setPendingUser] = useState(null);
+  const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
 
   // Signup Steps State (1 = Details, 2 = Confirm/Activation Screen)
   const [step, setStep] = useState(1);
@@ -29,6 +35,47 @@ const Signup = () => {
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSmsOtpChange = (element, index) => {
+    if (isNaN(element.value)) return;
+    const nextOtp = [...smsOtp];
+    nextOtp[index] = element.value;
+    setSmsOtp(nextOtp);
+    if (element.value && element.nextSibling) element.nextSibling.focus();
+  };
+
+  const triggerWelcomeEmail = (email = formData.email) => {
+    const payload = JSON.stringify({
+      email: email.trim().toLowerCase(),
+      name: formData.name.trim(),
+      businessName: formData.businessName.trim(),
+      template: 'welcome'
+    });
+
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(`${API_URL}/api/auth/dispatch-welcome-email`, new Blob([payload], { type: 'application/json' }));
+      return;
+    }
+
+    fetch(`${API_URL}/api/auth/dispatch-welcome-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  };
+
+  const startSignupPhoneVerification = async (user) => {
+    const confirmation = await startFirebasePhoneChallenge({
+      phone: formData.phone,
+      containerId: 'recaptcha-container',
+      verifierKey: 'signup',
+    });
+    setPendingUser(user || null);
+    setPhoneConfirmation(confirmation);
+    setSmsOtp(["", "", "", "", "", ""]);
+    setStep(3);
   };
 
   // ✅ HELPER: LocalStorage token configuration dashboard navigation ke liye
@@ -100,15 +147,32 @@ const Signup = () => {
         if (error) throw error;
 
         if (data?.session?.user) {
-          handleAuthSuccess(data.session.user);
+          await startSignupPhoneVerification(data.session.user);
           return;
         }
 
         // Public Profiles table backup logic (Optional profile trigger)
         if (data?.user) {
-          setStep(2); // Move to Activation screen interface
-          alert(`🎉 Yogi Desk Account Triggered! Verification email sent to ${cleanEmail}`);
+          await startSignupPhoneVerification(data.user);
+          alert(`Yogi Desk account created. Enter the mobile OTP to finish activation for ${cleanEmail}.`);
         }
+      } else if (step === 3) {
+        const code = smsOtp.join('');
+        if (!phoneConfirmation || code.length !== 6) {
+          alert("Please enter the 6-digit mobile OTP.");
+          return;
+        }
+
+        await phoneConfirmation.confirm(code);
+        triggerWelcomeEmail(cleanEmail);
+
+        if (pendingUser?.id && pendingUser?.aud === 'authenticated') {
+          handleAuthSuccess(pendingUser);
+          return;
+        }
+
+        setStep(2);
+        alert(`Verification complete. Please use the activation email sent to ${cleanEmail}.`);
       } else {
         // --- STEP 2: BYPASS/MANUAL SIGNIN FROM COOLDOWN SCREEN ---
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -180,7 +244,7 @@ const Signup = () => {
 
           <button 
             type="button"
-            onClick={handleGoogleLogin}
+            onClick={handleGoogleSignIn}
             className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6"
           >
             <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
@@ -194,6 +258,7 @@ const Signup = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div id="recaptcha-container"></div>
             {step === 1 ? (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -269,6 +334,41 @@ const Signup = () => {
                 <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-6">
                   {loading ? <Loader2 size={20} className="animate-spin" /> : "Create Yogi Desk Account"} 
                   {!loading && <ArrowRight size={20}/>}
+                </button>
+              </>
+            ) : step === 3 ? (
+              <>
+                <div className="text-center p-6 bg-orange-50 border border-orange-100 rounded-xl mb-4">
+                   <p className="text-sm text-orange-700 font-medium">
+                     Enter the Firebase SMS OTP sent to your WhatsApp mobile number.
+                   </p>
+                </div>
+
+                <div className="flex gap-2 justify-center">
+                  {smsOtp.map((value, index) => (
+                    <input
+                      key={index}
+                      type="text"
+                      maxLength="1"
+                      value={value}
+                      onChange={(event) => handleSmsOtpChange(event.target, index)}
+                      onFocus={(event) => event.target.select()}
+                      className="w-12 h-14 border border-gray-300 rounded-xl text-center text-xl font-bold focus:border-[#FF6B00] focus:ring-2 focus:ring-orange-100 outline-none transition-all"
+                    />
+                  ))}
+                </div>
+
+                <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-4">
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify Mobile & Send Welcome Email"} 
+                  {!loading && <ArrowRight size={20}/>}
+                </button>
+
+                <button 
+                  type="button" 
+                  onClick={() => setStep(1)} 
+                  className="w-full text-gray-500 py-2 rounded-xl font-medium transition hover:text-gray-700"
+                >
+                  Back to Edit Details
                 </button>
               </>
             ) : (

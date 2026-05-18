@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Mail, RefreshCw, UserPlus, Users } from 'lucide-react';
+import { AlertTriangle, KeyRound, Mail, Phone, RefreshCw, UserPlus, Users, X } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { API_URL } from '../utils/api';
+import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 
 const seatCaps = { starter: 1, growth: 2, hospital: 5 };
 
@@ -10,6 +12,12 @@ const Team = () => {
   const [form, setForm] = useState({ name: '', email: '' });
   const [alert, setAlert] = useState('');
   const [loading, setLoading] = useState(false);
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [adminPhone, setAdminPhone] = useState('');
+  const [adminOtp, setAdminOtp] = useState('');
+  const [inviteDraft, setInviteDraft] = useState(null);
+  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
 
   const plan = (wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase();
   const maxSeats = seatCaps[plan] || seatCaps.starter;
@@ -42,6 +50,50 @@ const Team = () => {
 
   useEffect(() => { fetchTeam(); }, []);
 
+  const dispatchTeamInviteEmail = (invite) => {
+    const payload = JSON.stringify(invite);
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(`${API_URL}/api/team/dispatch-invite-email`, new Blob([payload], { type: 'application/json' }));
+      return;
+    }
+
+    fetch(`${API_URL}/api/team/dispatch-invite-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  };
+
+  const saveVerifiedInvite = async ({ user, nameInput, emailInput }) => {
+    const { data, error } = await supabase
+      .from('team_members')
+      .insert([{ admin_id: user.id, name: nameInput, email: emailInput, status: 'PENDING' }])
+      .select('id, name, email, status, created_at')
+      .single();
+
+    if (error) {
+      setAlert(error.message || 'Invite failed.');
+      return;
+    }
+
+    setMembers((prev) => [data, ...prev]);
+    const inviteLink = `${window.location.origin}/accept-invite?email=${encodeURIComponent(emailInput)}`;
+    dispatchTeamInviteEmail({
+      email: emailInput,
+      name: nameInput,
+      inviteLink,
+      adminId: user.id,
+    });
+    console.log(`Yogi Desk invite setup link: ${inviteLink}`);
+    setAlert(`Invite saved and email dispatch triggered for ${emailInput}.`);
+    setForm({ name: '', email: '' });
+    setGateOpen(false);
+    setInviteDraft(null);
+    setAdminOtp('');
+    setPhoneConfirmation(null);
+  };
+
   const handleInvite = async (event) => {
     event.preventDefault();
     setAlert('');
@@ -64,22 +116,46 @@ const Team = () => {
       return;
     }
 
-    const { data, error } = await supabase
-      .from('team_members')
-      .insert([{ admin_id: user.id, name: nameInput, email: emailInput, status: 'PENDING' }])
-      .select('id, name, email, status, created_at')
-      .single();
+    setInviteDraft({ user, nameInput, emailInput });
+    setAdminPhone(user?.user_metadata?.phone || localStorage.getItem('user_phone') || '');
+    setAdminOtp('');
+    setPhoneConfirmation(null);
+    setGateOpen(true);
+  };
 
-    if (error) {
-      setAlert(error.message || 'Invite failed.');
+  const sendAdminOtp = async () => {
+    try {
+      setGateLoading(true);
+      const confirmation = await startFirebasePhoneChallenge({
+        phone: adminPhone,
+        containerId: 'team-recaptcha-container',
+        verifierKey: 'team-invite',
+      });
+      setPhoneConfirmation(confirmation);
+      setAlert('Admin OTP sent. Enter the code to unlock the invite.');
+    } catch (error) {
+      setAlert(error.message || 'Unable to start phone verification.');
+    } finally {
+      setGateLoading(false);
+    }
+  };
+
+  const verifyAndSaveInvite = async () => {
+    if (!inviteDraft) return;
+    if (!phoneConfirmation || adminOtp.trim().length !== 6) {
+      setAlert('Please send and enter the 6-digit admin OTP.');
       return;
     }
 
-    setMembers((prev) => [data, ...prev]);
-    const inviteLink = `http://localhost:5173/accept-invite?email=${emailInput}`;
-    console.log(`Yogi Desk invite setup link: ${inviteLink}`);
-    setAlert(`Invite saved. Local setup link: ${inviteLink}`);
-    setForm({ name: '', email: '' });
+    try {
+      setGateLoading(true);
+      await phoneConfirmation.confirm(adminOtp.trim());
+      await saveVerifiedInvite(inviteDraft);
+    } catch (error) {
+      setAlert(error.message || 'Admin phone verification failed.');
+    } finally {
+      setGateLoading(false);
+    }
   };
 
   return (
@@ -103,6 +179,63 @@ const Team = () => {
         <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
           <AlertTriangle size={18} />
           {alert}
+        </div>
+      )}
+
+      {gateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-black text-slate-900">Verify Admin Mobile</h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Complete Firebase OTP validation before sending this team invite.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGateOpen(false)}
+                className="rounded-xl bg-slate-100 p-2 text-slate-500 hover:bg-slate-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              <div id="team-recaptcha-container"></div>
+              <div className="relative">
+                <Phone size={18} className="absolute left-3.5 top-3.5 text-slate-400" />
+                <input
+                  value={adminPhone}
+                  onChange={(e) => setAdminPhone(e.target.value)}
+                  placeholder="Admin mobile number"
+                  className="w-full rounded-2xl border border-slate-200 py-3 pl-10 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={sendAdminOtp}
+                disabled={gateLoading}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-5 py-3 text-sm font-black text-orange-700 hover:bg-orange-100 disabled:opacity-60"
+              >
+                <Phone size={17} />
+                Send Admin OTP
+              </button>
+              <input
+                value={adminOtp}
+                onChange={(e) => setAdminOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Enter 6-digit OTP"
+                className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-center text-lg font-black tracking-[0.35em] outline-none focus:border-orange-400"
+              />
+              <button
+                type="button"
+                onClick={verifyAndSaveInvite}
+                disabled={gateLoading}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-700 disabled:opacity-60"
+              >
+                <KeyRound size={18} />
+                Verify & Send Invite
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
