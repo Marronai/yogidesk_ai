@@ -44,8 +44,7 @@ serve(async (req) => {
     const mode = url.searchParams.get('hub.mode');
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
-    const verifyToken = Deno.env.get('META_WEBHOOK_VERIFY_TOKEN');
-    if (mode === 'subscribe' && token && token === verifyToken) return new Response(challenge || '', { status: 200 });
+    if (mode === 'subscribe' && token === 'YogiDesk_Doctor_Secure_2026') return new Response(challenge || '', { status: 200 });
     return new Response('Forbidden', { status: 403 });
   }
 

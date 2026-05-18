@@ -39,6 +39,19 @@ app.get('/api/health', (req, res) => {
 
 // ====== META WEBHOOK ENDPOINTS ======
 
+// GET Method: Meta WhatsApp webhook verification
+app.get('/api/whatsapp-webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === 'YogiDesk_Doctor_Secure_2026') {
+        return res.status(200).send(challenge);
+    }
+
+    return res.sendStatus(403);
+});
+
 // 1. GET Method: Meta Dashboard verification loop
 // 1. GET Method: Meta Dashboard verification loop
 app.get('/api/webhook/meta', (req, res) => {
