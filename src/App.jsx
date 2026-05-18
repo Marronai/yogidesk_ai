@@ -1,6 +1,5 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { GoogleOAuthProvider } from '@react-oauth/google'; // ✅ Import Provider
 
 // Layouts & Guards
 import MainLayout from './layout/MainLayout';
@@ -14,9 +13,9 @@ import LeadsCRM from './pages/LeadsCRM';
 import Team from './pages/Team';
 import Pricing from './pages/Pricing';
 import Subscription from './pages/Subscription';
+import YogiWallet from './pages/YogiWallet';
 import LandingPage from './pages/LandingPage';
 import Inbox from './pages/Inbox';
-import AgentDashboard from './pages/AgentDashboard'; 
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Contacts from './pages/Contacts'; 
@@ -30,20 +29,16 @@ import Templates from './pages/Templates';
 import About from './pages/About';
 import Contact from './pages/Contact';
 import AuthSuccess from './pages/AuthSuccess';
+import AcceptInvite from './pages/AcceptInvite';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Terms from './pages/Terms';
 import AdminDashboard from './admin/AdminDashboard';
 import AdminLogin from './admin/AdminLogin';
 import AdminPrivateRoute from './admin/AdminPrivateRoute';
+import TermsConditions from './pages/TermsConditions';
 
 const App = () => {
-  // 🔑 Google Client ID ko environment variable se lo
-  // Agar .env file load nahi hui to hardcoded string use karega (Backup)
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || "YOUR_GOOGLE_CLIENT_ID_HERE";
-
   return (
-    // ✅ FIX: Puri App ko GoogleOAuthProvider se wrap kiya
-    <GoogleOAuthProvider clientId={clientId}>
       <BrowserRouter>
         <Routes>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -57,10 +52,12 @@ const App = () => {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/terms" element={<TermsConditions />} />
           
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           
           <Route path="/auth-success" element={<AuthSuccess />} />  
@@ -68,6 +65,7 @@ const App = () => {
 
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password/:resetToken" element={<ResetPassword />} />
+          
 
           {/* Admin Portal Routes */}
           <Route element={<AdminPrivateRoute />}>
@@ -90,15 +88,16 @@ const App = () => {
                 <Route path="/dashboard/settings" element={<Settings />} />
                 <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
                 <Route path="/dashboard/subscription" element={<Subscription />} />
-                <Route path="/dashboard/agent-dashboard" element={<AgentDashboard />} />
+                <Route path="/dashboard/wallet" element={<YogiWallet />} />
+                <Route path="/campaigns" element={<Campaigns />} />
                 <Route path="/templates" element={<TemplateManager />} />
+                <Route path="/team" element={<Team />} />
+                {/* Route for the creation builder */}
                 <Route path="/templates/create" element={<Templates />} />
               </Route>
 
               {/* ✅ Standalone Protected Tools (Bina Login ke nahi dikhenge) */}
-              <Route path="/campaigns" element={<Campaigns />} />
               <Route path="/hospital/discharge" element={<HospitalDischarge />} />
-              <Route path="/team" element={<Team />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
 
           </Route>
@@ -111,7 +110,6 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
-    </GoogleOAuthProvider>
   );
 };
 

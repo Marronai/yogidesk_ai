@@ -31,7 +31,7 @@ class User(Base):
     plan_type = Column(String, default="lite") # lite, elite, bronze, premium
     
     # 🔥 NEW FIELD: Organization Category (Dynamic Dashboard ke liye)
-    org_category = Column(String, default="retail") # retail, hospital, school, real_estate
+    org_category = Column(String, default="clinic") # clinic, hospital, doctor, healthcare_team
 
     # 👥 Team Hierarchy
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -73,7 +73,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     plan_type: str = "lite"
-    org_category: str = "retail" # 🔥 Default retail
+    org_category: str = "clinic" # 🔥 Default clinic
 
 class LoginRequest(BaseModel):
     email: str
@@ -124,7 +124,7 @@ def get_db():
 # --- 5. ROUTES ---
 
 @app.get("/")
-def home(): return {"message": "Marroncorp AI Backend v3.0 is Live! 🚀"}
+def home(): return {"message": "Yogi Desk AI Healthcare Backend v3.0 is Live!"}
 
 # ✅ AUTHENTICATION (Updated for Category)
 @app.post("/register")

@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { API_URL } from '../utils/api';
+import { supabase } from '../supabaseClient';
+import { simulateMetaApproval } from '../utils/metaApprovalSimulator';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
@@ -18,18 +19,58 @@ const Templates = () => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
+  const [activeBodyLang, setActiveBodyLang] = useState('english'); // For UI tabs to edit content
+
   const [template, setTemplate] = useState({
     name: '',
     category: 'MARKETING',
     headerType: 'NONE',
+    headerUrl: '', // This will store the URL of the uploaded media for Meta API
     headerText: '',
     mediaPreview: null,
-    bodyText: 'Hello {{1}}, how can we help you?',
+    english: 'Hello {{1}}, how can we help you?', // Multi-language body fields
+    hinglish: '',
+    hindi: '',
     footerText: 'Yogi Desk',
     buttons: []
   });
 
+  const [planTier, setPlanTier] = useState('Starter Clinic');
+  const [templateCount, setTemplateCount] = useState(0);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchLimits = async () => {
+      const userId = localStorage.getItem('user_id');
+      if (!userId) return;
+
+      // Fetch current plan from wallets table
+      const { data: walletData } = await supabase
+        .from('wallets')
+        .select('plan_tier')
+        .eq('user_id', userId)
+        .single();
+      
+      if (walletData?.plan_tier) setPlanTier(walletData.plan_tier);
+
+      // Fetch current count from Supabase to verify limits
+      const { data: templatesData, error: countError } = await supabase
+        .from('whatsapp_templates')
+        .select('id')
+        .eq('user_id', userId);
+      
+      if (!countError && Array.isArray(templatesData)) {
+        setTemplateCount(templatesData.length);
+      }
+    };
+    fetchLimits();
+  }, []);
+
+  const planLimits = {
+    'Starter Clinic': 20,
+    'Growth Clinic': 50,
+    'Multi-Specialty Hospital': 100
+  };
 
   const categories = [
     { id: 'MARKETING', label: 'Marketing' },
@@ -50,10 +91,11 @@ const Templates = () => {
     reader.readAsDataURL(file);
   };
 
-  const insertPlaceholder = (type) => {
-    const matches = template.bodyText.match(/\{\{(\d+)\}\}/g);
-    const nextNum = matches ? matches.length + 1 : 1;
-    setTemplate({ ...template, bodyText: `${template.bodyText} {{${nextNum}}}` });
+  const insertPlaceholder = () => {
+    const currentBody = template[activeBodyLang];
+    const matchesCurrent = currentBody.match(/\{\{(\d+)\}\}/g);
+    const nextNum = matchesCurrent ? matchesCurrent.length + 1 : 1;
+    setTemplate({ ...template, [activeBodyLang]: `${currentBody} {{${nextNum}}}` });
   };
 
   const addButton = (type) => {
@@ -73,7 +115,23 @@ const Templates = () => {
   };
 
   const renderWhatsAppLook = (text) => {
-    return text.replace(/\{\{(\d+)\}\}/g, '<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">[{{$1}}]</span>');
+    if (!text) return '';
+    // Healthcare-specific token mapping for placeholder replacement
+    const tokenMap = {
+      '1': '[Patient Name]',
+      '2': '[Appt Time]',
+      '3': '[Clinic Name]'
+    };
+    // Replace healthcare placeholders with readable token names
+    return text.replace(/\{\{(\d+)\}\}/g, (match, num) => {
+      const tokenName = tokenMap[num] || `[Param ${num}]`;
+      return `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">${tokenName}</span>`;
+    })
+               .replace(/\*(.*?)\*/g, '<strong>$1</strong>') // Bold
+               .replace(/_(.*?)_/g, '<em>$1</em>') // Italic
+               .replace(/~(.*?)~/g, '<s>$1</s>') // Strikethrough
+               .replace(/```(.*?)```/g, '<pre>$1</pre>') // Monospace
+               .replace(/\n/g, '<br/>'); // Handle newlines
   };
 
   const handleSubmit = async () => {
@@ -85,36 +143,103 @@ const Templates = () => {
       return;
     }
 
-    if (!template.bodyText.trim()) {
-      setError('Template body text is required.');
+    const currentLimit = planLimits[planTier] || 20;
+    if (templateCount >= currentLimit) {
+      setError(`⚠️ Template Limit Reached! Upgrade to Growth or Hospital plan to create more than ${currentLimit} templates.`);
+      alert(`⚠️ Template Limit Reached! Your plan (${planTier}) limit is ${currentLimit}.`);
+      return;
+    }
+
+    // Determine which language body to send and its corresponding Meta language code
+    let bodyToSubmit = '';
+    let languageToSubmit = '';
+
+    if (template.english.trim()) { bodyToSubmit = template.english.trim(); languageToSubmit = 'en'; }
+    else if (template.hinglish.trim()) { bodyToSubmit = template.hinglish.trim(); languageToSubmit = 'hi_Latn'; } // Hinglish uses hi_Latn for Latin script Hindi
+    else if (template.hindi.trim()) { bodyToSubmit = template.hindi.trim(); languageToSubmit = 'hi'; }
+
+    if (!bodyToSubmit) {
+      setError('At least one language body text must be provided.');
       return;
     }
 
     setSaving(true);
     setError('');
     setMessage('');
-
+    
     try {
-      const payload = {
-        name: template.name.trim(),
-        category: template.category,
-        language: 'en_US',
-        body: template.bodyText,
-        header: template.headerType === 'TEXT' ? { text: template.headerText } : null
-      };
+      const userId = localStorage.getItem('user_id');
+      if (!userId) throw new Error('User ID not found. Please login again.');
+      const mediaHeaderTypes = ['IMAGE', 'VIDEO', 'DOCUMENT'];
+      const headerType = template.headerType || 'NONE';
+      const headerMediaUrl = mediaHeaderTypes.includes(headerType) ? String(template.headerUrl || '').trim() : '';
+      const buttonPayload = template.buttons
+        .map((btn) => {
+          const text = String(btn.text || '').trim();
+          if (btn.type === 'URL') {
+            const url = String(btn.url || '').trim();
+            return text && url ? { type: 'URL', text, url } : null;
+          }
+          const phone_number = String(btn.phone || '').trim();
+          return text && phone_number ? { type: 'PHONE_NUMBER', text, phone_number } : null;
+        })
+        .filter(Boolean);
 
-      const baseUrl = API_URL.replace(/\/$/, '');
-      const apiPrefix = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
-      const submitUrl = `${apiPrefix}/whatsapp/submit-template`;
-      console.log('Using endpoint:', submitUrl);
-      const { data } = await api.post(submitUrl, payload);
+      // STEP A: Insert into Supabase whatsapp_templates table
+      const { data: insertedTemplate, error: insertError } = await supabase
+        .from('whatsapp_templates')
+        .insert([
+          {
+            user_id: userId,
+            template_name: template.name.trim(),
+            category: template.category,
+            language: languageToSubmit,
+            body_content: bodyToSubmit,
+            status: 'PENDING',
+            header_type: headerType,
+            header_text: headerType === 'TEXT' ? template.headerText.trim() : null,
+            header_media_url: headerMediaUrl || null,
+            footer_text: template.footerText.trim() || null,
+            buttons: buttonPayload,
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select();
 
-      setMessage('Template submitted successfully. Status: PENDING');
-      navigate('/templates');
+      if (insertError) {
+        console.error('Supabase insert error:', insertError);
+        throw insertError;
+      }
+
+      if (!insertedTemplate || insertedTemplate.length === 0) {
+        throw new Error('Template insertion returned no data');
+      }
+
+      const templateId = insertedTemplate[0].id;
+      console.log('✅ Template inserted into database:', templateId);
+
+      // STEP B: Show sleek UI toast notification
+      setMessage('📩 Template submitted to Meta for verification. Status: Pending.');
+      console.log('📩 Template submitted to Meta for verification. Status: Pending.');
+
+      // STEP C: Trigger simulateMetaApproval function
+      console.log('⏳ Simulating Meta approval webhook check (5 seconds)...');
+      simulateMetaApproval(templateId, userId).then((result) => {
+        if (result.success) {
+          // STEP D: Re-fetch templates and show approved badge
+          console.log('✅ Template status updated to APPROVED');
+          setMessage('✅ Template approved by Meta! Status: Approved.');
+          
+          // Navigate back to templates after a brief delay so user sees the success message
+          setTimeout(() => navigate('/templates'), 2000);
+        } else {
+          console.error('Meta approval simulation failed:', result.error);
+        }
+      });
+
     } catch (err) {
       console.error('Template submit failed:', err);
-      setError(err?.response?.data?.message || 'Unable to submit template.');
-    } finally {
+      setError(err?.response?.data?.message || err.message || 'Unable to submit template.');
       setSaving(false);
     }
   };
@@ -201,28 +326,54 @@ const Templates = () => {
                     <div className="flex flex-wrap gap-3">
                       {['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'].map((type) => (
                         <button key={type} onClick={() => { setTemplate({ ...template, headerType: type, mediaPreview: null }); if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) fileInputRef.current.click(); }}
-                          className={`flex-1 min-w-[100px] py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${template.headerType === type ? 'border-green-500 bg-green-50/50 text-green-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
+                          className={`flex-1 min-w-[100px] py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${template.headerType === type ? 'border-orange-500 bg-orange-50/50 text-orange-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
                         >
                           {type === 'IMAGE' ? <ImageIcon size={20}/> : type === 'VIDEO' ? <Video size={20}/> : type === 'DOCUMENT' ? <FileText size={20}/> : type === 'TEXT' ? <Type size={20}/> : <X size={20}/>}
                           <span className="text-[10px] font-black tracking-tighter uppercase">{type}</span>
                         </button>
                       ))}
                     </div>
-                    <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                    {['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType) && (
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        className="hidden" 
+                        onChange={handleFileUpload} 
+                        accept={template.headerType === 'IMAGE' ? 'image/*' : template.headerType === 'VIDEO' ? 'video/*' : 'application/pdf'} 
+                      />
+                    )}
+                    {template.headerType === 'TEXT' && (
+                      <input 
+                        type="text" 
+                        placeholder="Enter header text" 
+                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-orange-500/5 focus:border-orange-500 outline-none transition-all font-medium text-slate-700 mt-4"
+                        value={template.headerText}
+                        onChange={(e) => setTemplate({...template, headerText: e.target.value})}
+                      />
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">2. Select Body Language</label>
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                      {['english', 'hinglish', 'hindi'].map((lang) => (
+                        <button key={lang} onClick={() => setActiveBodyLang(lang)} className={`px-4 py-1.5 rounded-lg text-[10px] font-black transition-all ${activeBodyLang === lang ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{lang.toUpperCase()}</button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="space-y-4">
                     <div className="flex justify-between items-center">
                       <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">2. Message Body</label>
-                      <div className="flex gap-2">
-                         {['Name', 'Order ID'].map((p) => (
-                           <button key={p} onClick={() => insertPlaceholder(p)} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all border border-slate-200 flex items-center gap-1">
+                      <div className="flex gap-2 flex-wrap">
+                         {['Patient Name', 'Appt Time', 'Clinic Name'].map((p) => (
+                           <button key={p} onClick={() => insertPlaceholder()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all border border-slate-200 flex items-center gap-1">
                              <Plus size={12}/> {p}
                            </button>
                          ))}
                       </div>
                     </div>
-                    <textarea className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder="Write your message here..." value={template.bodyText} onChange={(e) => setTemplate({ ...template, bodyText: e.target.value })} />
+                    <textarea className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder={`Write your message in ${activeBodyLang}...`} value={template[activeBodyLang]} onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })} />
                   </div>
 
                   <div className="space-y-2">
@@ -323,10 +474,10 @@ const Templates = () => {
                          <div className={`max-w-[88%] shadow-sm ${device === 'IPHONE' ? 'rounded-2xl' : 'rounded-lg'} bg-white overflow-hidden rounded-tl-none`}>
                             {/* Media Section */}
                             {template.headerType !== 'NONE' && (
-                                <div className="w-full bg-slate-100 aspect-video flex items-center justify-center overflow-hidden">
+                                <div className="w-full bg-slate-100 aspect-video flex items-center justify-center overflow-hidden relative">
                                   {template.mediaPreview ? (
                                       template.headerType === 'IMAGE' ? <img src={template.mediaPreview} className="w-full h-full object-cover" alt="header"/> :
-                                      <div className="flex flex-col items-center text-slate-400"><FileText size={32}/></div>
+                                      <div className="flex flex-col items-center text-slate-400"><FileText size={32}/><span className="text-[10px] mt-1">{template.headerType}</span></div>
                                   ) : (
                                       <div className="text-slate-300 flex flex-col items-center italic text-[10px]"><Upload size={18}/><span className="mt-1">Preview</span></div>
                                   )}
@@ -334,8 +485,9 @@ const Templates = () => {
                             )}
 
                             {/* Body Section */}
-                            <div className="p-3 relative min-h-[60px]">
-                                <div className="text-[#111b21] text-[13.5px] leading-[1.4] whitespace-pre-wrap tracking-tight" dangerouslySetInnerHTML={{ __html: renderWhatsAppLook(template.bodyText) }} />
+                            <div className="p-3 relative min-h-[60px] break-words">
+                                {template.headerType === 'TEXT' && template.headerText && <div className="text-[#111b21] text-[13.5px] leading-[1.4] font-bold mb-1">{template.headerText}</div>}
+                                <div className="text-[#111b21] text-[13.5px] leading-[1.4] whitespace-pre-wrap tracking-tight" dangerouslySetInnerHTML={{ __html: renderWhatsAppLook(template[activeBodyLang]) }} />
                                 {template.footerText && <div className="text-[#667781] text-[10.5px] pt-1.5 mt-2 border-t border-slate-50">{template.footerText}</div>}
                                 <div className="text-right text-[9px] text-[#667781] mt-1 italic">12:45 PM ✓✓</div>
                             </div>

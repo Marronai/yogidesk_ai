@@ -24,14 +24,6 @@ const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function'
       return false;
     };
 
-// 🛠️ HELPER: Trial countdown and user payload builder
-const getTrialDaysRemaining = (user) => {
-  const now = new Date();
-  const expiry = user.planExpiryDate ? new Date(user.planExpiryDate) : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
-  const diff = expiry.getTime() - now.getTime();
-  return diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)) : 0;
-};
-
 const buildUserPayload = (user) => ({
   id: user._id,
   name: user.name,
@@ -42,9 +34,7 @@ const buildUserPayload = (user) => ({
   businessCategory: user.businessCategory,
   planType: user.planType,
   subscriptionStatus: user.subscriptionStatus,
-  trialStartDate: user.trialStartDate,
-  planExpiryDate: user.planExpiryDate,
-  trialDaysRemaining: getTrialDaysRemaining(user)
+  wallet: user.wallet || { balance: 50, is_first_recharge: true }
 });
 
 // 🛠️ HELPER: Token Generator (Fallback safe)
@@ -93,14 +83,13 @@ exports.register = async (req, res) => {
       email,
       password,
       phone: phone || '',
-      businessName: businessName || `${name}'s Business`,
-      businessType: businessType || 'Other',
-      businessCategory: businessCategory || 'Other',
+      businessName: businessName || `${name}'s Clinic`,
+      businessType: businessType || 'Clinic',
+      businessCategory: businessCategory || 'Clinic',
       role: 'user',
-      planType: 'free_trial',
-      subscriptionStatus: 'trial',
-      trialStartDate: new Date(),
-      planExpiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      planType: 'starter_clinic',
+      subscriptionStatus: 'wallet_active',
+      wallet: { balance: 50, is_first_recharge: true },
       isVerified: false,
       otp,
       otpExpires
@@ -294,10 +283,9 @@ exports.googleLogin = async (req, res) => {
         avatar,
         password: crypto.randomBytes(16).toString('hex'),
         role: 'user',
-        planType: 'free_trial',
-        subscriptionStatus: 'trial',
-        trialStartDate: new Date(),
-        planExpiryDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        planType: 'starter_clinic',
+        subscriptionStatus: 'wallet_active',
+        wallet: { balance: 50, is_first_recharge: true },
         isVerified: true
         // currentSessionId: crypto.randomBytes(16).toString('hex')
       });
@@ -320,3 +308,4 @@ exports.googleLogin = async (req, res) => {
 };
 
 // ... baaki Google login same rahega
+

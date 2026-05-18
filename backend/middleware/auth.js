@@ -19,17 +19,9 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ msg: "User not found" });
       }
 
-      // 🔥 A. SUBSCRIPTION/TRIAL CHECK (Ye rehne diya hai kyunki ye business logic hai)
+      // 🔥 A. ACCOUNT SUSPENSION CHECK
       if (user.role !== 'admin' && user.subscriptionStatus === 'suspended') {
         return res.status(403).json({ msg: "Account access has been suspended." });
-      }
-
-      const now = new Date();
-      if (user.planExpiryDate && now > user.planExpiryDate) {
-        return res.status(403).json({ 
-          msg: "Your 5-day trial or plan has expired. Please upgrade to continue.",
-          isExpired: true 
-        });
       }
 
       // ❌❌ DELETED: SESSION CHECK LOGIC REMOVED ❌❌

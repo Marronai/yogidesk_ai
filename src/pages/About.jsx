@@ -19,19 +19,19 @@ const About = () => {
   ];
 
   const values = [
-    { icon: <Smile size={32} className="text-[#FF6B00]" />, title: "Customer First", desc: "Every feature we build solves a real business problem." },
+    { icon: <Smile size={32} className="text-[#FF6B00]" />, title: "Patient First", desc: "Every feature we build solves a real healthcare communication problem." },
     { icon: <ShieldCheck size={32} className="text-blue-500" />, title: "Trust & Transparency", desc: "No hidden charges. Clear pricing. Honest communication." },
-    { icon: <TrendingUp size={32} className="text-green-500" />, title: "Growth-Focused", desc: "We grow only when our clients grow." },
+    { icon: <TrendingUp size={32} className="text-green-500" />, title: "Care-Focused", desc: "We grow only when our healthcare teams serve patients better." },
     { icon: <Zap size={32} className="text-yellow-500" />, title: "Continuous Improvement", desc: "We constantly improve our platform based on client feedback." },
   ];
 
   const industries = [
     { icon: <Heart size={24}/>, name: "Clinics & Hospitals" },
-    { icon: <GraduationCap size={24}/>, name: "Coaching & Education" },
-    { icon: <ShoppingBag size={24}/>, name: "E-commerce & D2C" },
-    { icon: <Building size={24}/>, name: "Real Estate" },
-    { icon: <Users size={24}/>, name: "Local Shops" },
-    { icon: <Rocket size={24}/>, name: "Startups & Agencies" },
+    { icon: <GraduationCap size={24}/>, name: "Doctors & Specialists" },
+    { icon: <ShoppingBag size={24}/>, name: "Diagnostic Centers" },
+    { icon: <Building size={24}/>, name: "Hospitals" },
+    { icon: <Users size={24}/>, name: "Healthcare Teams" },
+    { icon: <Rocket size={24}/>, name: "Wellness Clinics" },
   ];
 
   return (
@@ -41,8 +41,8 @@ const About = () => {
       <nav className="fixed w-full z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">M</div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Marroncorp</span>
+            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">Y</div>
+            <span className="text-xl font-bold tracking-tight text-slate-900">Yogi Desk AI</span>
           </Link>
           <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
             <Link to="/" className="hover:text-[#FF6B00] transition">Home</Link>
@@ -64,11 +64,11 @@ const About = () => {
            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{duration:0.6}}>
              <span className="inline-block py-1 px-3 rounded-full bg-orange-100 text-[#FF6B00] text-xs font-bold uppercase tracking-widest mb-6">Our Mission</span>
              <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 leading-tight">
-                We Help Businesses Respond Faster, <br/> 
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-600">Sell Smarter & Grow Confidently.</span>
+                We Help Healthcare Teams Respond Faster, <br/> 
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-600">Care Smarter & Grow Confidently.</span>
              </h1>
              <p className="text-xl text-slate-500 leading-relaxed max-w-3xl mx-auto">
-                "Customers don’t wait. Businesses lose leads when replies are late." <br/>
+                "Patients don't wait. Clinics lose appointments when replies are late." <br/>
                 We are here to change that forever.
              </p>
            </motion.div>
@@ -82,7 +82,7 @@ const About = () => {
                <h2 className="text-3xl font-bold mb-6 text-slate-900">The Problem We Saw</h2>
                <div className="space-y-6 text-lg text-slate-600 leading-relaxed">
                   <p>
-                    Marroncorp started with a clear problem: <b>Businesses were getting leads, but they couldn't reply fast enough.</b>
+                    Yogi Desk AI started with a clear problem: <b>clinics were getting patient enquiries, but they couldn't reply fast enough.</b>
                   </p>
                   <ul className="space-y-3">
                      <li className="flex items-center gap-3"><X className="text-red-500" size={20}/> Phone calls were missed.</li>
@@ -90,7 +90,7 @@ const About = () => {
                      <li className="flex items-center gap-3"><X className="text-red-500" size={20}/> Follow-ups were forgotten.</li>
                   </ul>
                   <p className="border-l-4 border-[#FF6B00] pl-4 italic text-slate-800">
-                     "As customers moved on, businesses lost revenue — silently."
+                     "As patients moved on, clinics lost appointments silently."
                   </p>
                </div>
             </motion.div>
@@ -99,7 +99,7 @@ const About = () => {
                <div className="absolute top-0 right-0 w-64 h-64 bg-[#FF6B00] rounded-full blur-[100px] opacity-20"></div>
                <h3 className="text-2xl font-bold mb-6">So We Built The Solution.</h3>
                <p className="text-slate-300 mb-6 leading-relaxed">
-                  We decided to fix this using the <b>Official WhatsApp API</b>, combined with smart automation and simple tools that even non-technical teams can use.
+                  We decided to fix this using the <b>Official WhatsApp API</b>, combined with smart automation and simple tools that doctors, hospitals, and healthcare teams can use.
                </p>
                <div className="grid grid-cols-2 gap-6 mt-8">
                   <div className="bg-slate-800 p-4 rounded-xl">
@@ -135,8 +135,8 @@ const About = () => {
       {/* 5. INDUSTRIES WE SERVE */}
       <section className="py-24 bg-gray-50">
          <div className="max-w-7xl mx-auto px-6 text-center">
-            <h2 className="text-4xl font-bold text-slate-900 mb-4">Built for Businesses Like Yours</h2>
-            <p className="text-slate-500 mb-12">Whether you’re a small clinic or a scaling startup, we are designed for you.</p>
+            <h2 className="text-4xl font-bold text-slate-900 mb-4">Built for Healthcare Teams Like Yours</h2>
+            <p className="text-slate-500 mb-12">Whether you're a small clinic or a growing hospital, we are designed for you.</p>
             
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                {industries.map((ind, i) => (
@@ -202,10 +202,10 @@ const About = () => {
          <div className="max-w-3xl mx-auto px-6">
             <h2 className="text-4xl font-black text-slate-900 mb-6">Let’s Grow Together 🚀</h2>
             <p className="text-xl text-slate-500 mb-10">
-               Ready to stop losing leads and start converting conversations into customers?
+               Ready to stop losing patient enquiries and start converting conversations into appointments?
             </p>
             <Link to="/signup" className="inline-flex items-center gap-2 bg-[#FF6B00] hover:bg-orange-600 text-white px-10 py-4 rounded-xl text-lg font-bold transition shadow-xl shadow-orange-200 transform hover:scale-105">
-               Start Free Trial
+               Start with ₹50 Credits
             </Link>
          </div>
       </section>
@@ -213,7 +213,7 @@ const About = () => {
       {/* FOOTER */}
       <footer className="bg-slate-950 text-white py-12 text-center border-t border-slate-900">
          <p className="text-slate-500 flex items-center justify-center gap-2">
-           © 2025 Marroncorp AI. Made with <Heart size={16} className="text-red-500 fill-red-500"/> in India.
+           © 2026 Yogi Desk AI. Made with <Heart size={16} className="text-red-500 fill-red-500"/> in India.
          </p>
       </footer>
     </div>

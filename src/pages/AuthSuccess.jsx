@@ -1,40 +1,38 @@
 import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { jwtDecode } from 'jwt-decode';
+import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+import { persistSupabaseSession } from '../utils/authSession';
 
 const AuthSuccess = () => {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   useEffect(() => {
-    const token = searchParams.get('token');
-    
-    if (token) {
+    const completeSupabaseOAuth = async () => {
       try {
-        // ✅ Decode token to get user info
-        const decoded = jwtDecode(token);
-        
-        // ✅ Store in localStorage (same as regular signup)
-        localStorage.setItem('token', token);
-        localStorage.setItem('user_role', decoded.role || 'trial_user');
-        localStorage.setItem('user_name', decoded.name || 'User');
-        
-        console.log('✅ Google login successful:', decoded.email);
-        
-        // ✅ Redirect to dashboard after 1 second
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        const user = data.session?.user;
+        if (!user) {
+          throw new Error('Supabase session missing after OAuth redirect');
+        }
+
+        persistSupabaseSession(user, { welcomeGift: true });
+        localStorage.setItem('user_subscription_status', 'active');
+        console.log('Google login successful:', user.email);
+
         setTimeout(() => {
           navigate('/dashboard');
         }, 1000);
       } catch (error) {
-        console.error('❌ Token decode error:', error);
+        console.error('Supabase OAuth completion error:', error);
         navigate('/login?error=invalid_token');
       }
-    } else {
-      console.error('❌ No token received from Google');
-      navigate('/login?error=token_missing');
-    }
-  }, [searchParams, navigate]);
+    };
+
+    completeSupabaseOAuth();
+  }, [navigate]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-orange-50 to-white">

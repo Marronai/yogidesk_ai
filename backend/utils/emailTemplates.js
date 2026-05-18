@@ -16,7 +16,7 @@ const welcomeEmailTemplate = (name, loginLink) => {
         </p>
 
         <p style="color: #555555; line-height: 1.6; font-size: 15px; margin-bottom: 20px;">
-          YogiDesk is your ultimate WhatsApp API Dashboard. You can now automate responses, manage campaigns, and grow your business effortlessly.
+          Yogi Desk AI is your healthcare WhatsApp API dashboard. You can now automate responses, manage patient campaigns, and support your healthcare team effortlessly.
           <br><br>
           Your account is fully active. Click the button below to access your dashboard:
         </p>
@@ -44,8 +44,8 @@ const welcomeEmailTemplate = (name, loginLink) => {
 
         <p style="text-align: center; font-size: 12px; color: #aaaaaa; margin-top: 20px;">
           Regards,<br>
-          <strong>Team YogiDesk AI</strong><br>
-          Marroncorp Technologies
+          <strong>Team Yogi Desk AI</strong><br>
+          Yogi Desk
         </p>
       </div>
     </div>
@@ -56,7 +56,7 @@ const welcomeEmailTemplate = (name, loginLink) => {
 const otpEmailTemplate = (otp) => {
   return `
     <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-      <h2>Verify your YogiDesk Account</h2>
+      <h2>Verify your Yogi Desk AI Account</h2>
       <p>Use the OTP below to complete your signup process.</p>
       <h1 style="color: #007bff; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
       <p>This OTP is valid for 10 minutes.</p>

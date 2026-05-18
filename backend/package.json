@@ -1,7 +1,7 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "Yogidesk AI Backend",
+  "description": "Yogi Desk AI Backend",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {

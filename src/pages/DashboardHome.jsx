@@ -1,254 +1,190 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  Send, CheckCircle, MessageSquare, Users, 
-  Zap, TrendingUp, Facebook, Globe, ArrowUpRight,
-  PieChart, Shield, AlertCircle, PlayCircle, PauseCircle
+import {
+  Facebook,
+  Gift,
+  PauseCircle,
+  PieChart,
+  PlayCircle,
+  Send,
+  Shield,
+  TrendingUp,
+  Users,
+  Wallet,
+  Zap,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { ensureWallet, MESSAGE_RATES } from '../utils/wallet';
+import { supabase } from '../supabaseClient';
+
+const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 
 const DashboardHome = () => {
-  const userName = localStorage.getItem('user_name') || 'Dr. Avinash';
-  const category = localStorage.getItem('org_category') || 'hospital';
-  const trialDaysRemaining = parseInt(localStorage.getItem('user_trial_days_remaining') || '14', 10);
-  const trialStartDate = localStorage.getItem('user_trial_start_date') || '';
-  const isTrialExpired = trialDaysRemaining <= 0;
-  const subscriptionStatus = localStorage.getItem('user_subscription_status') || 'trial';
-  const planExpiryDate = localStorage.getItem('user_plan_expiry') || '';
+  const category = localStorage.getItem('user_business_category') || 'Clinic';
+  const wallet = ensureWallet();
+  const [profile, setProfile] = useState({
+    role: normalizeRole(),
+    name: localStorage.getItem('user_name') || 'Doctor',
+  });
 
-  // Mock Data (Real world scenario)
-  const stats = {
-    weekly_sent: 8500,
-    weekly_limit: 10000,
-    leads_today: 12,
-    ghost_mode: true
-  };
+  useEffect(() => {
+    let active = true;
+    const loadProfile = async () => {
+      const { data } = await supabase.auth.getUser();
+      const meta = data?.user?.user_metadata || {};
+      const role = normalizeRole(meta.role || meta.user_role || meta.account_role);
+      const name = meta.staff_name || meta.full_name || meta.name || data?.user?.email || profile.name;
+      if (active) setProfile({ role, name });
+    };
+    loadProfile();
+    return () => { active = false; };
+  }, []);
+
+  const isStaff = profile.role === 'STAFF';
+  const stats = { weekly_sent: 8500, leads_today: 12, ghost_mode: true };
 
   return (
     <div className="space-y-8 animate-fade-in pb-10">
-      
-      {/* 1. HEADER & GHOST MODE STATUS */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Namaste, {userName} 🙏</h1>
-          <p className="text-gray-500 mt-1">Here is your clinic's weekly performance.</p>
-          {trialStartDate && (
-            <p className="text-sm text-slate-500 mt-2">Trial started on {new Date(trialStartDate).toLocaleDateString()}</p>
+          <h1 className="text-3xl font-bold text-gray-900">Namaste, {profile.name}</h1>
+          <p className="text-gray-500 mt-1">Here is your {category} workspace performance.</p>
+          {!isStaff && wallet.welcome_gift_active && (
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
+              <Gift size={16} />
+              Welcome Gift: Rs. 50.00 Free WhatsApp Credits Active
+            </div>
           )}
-          <div className={`mt-4 inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold ${isTrialExpired ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>
-            {isTrialExpired ? 'Trial expired – renew now' : `${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} left in free trial`}
-          </div>
         </div>
-        
+
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-            {/* Ghost Mode Indicator */}
-            <div className={`px-4 py-2 rounded-full border flex items-center gap-2 ${stats.ghost_mode ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-gray-50 text-gray-500'}`}>
-                <Shield size={18} className={stats.ghost_mode ? 'fill-purple-700' : ''}/> 
-                <span className="text-sm font-bold">{stats.ghost_mode ? 'Ghost Mode Active' : 'Ghost Mode Off'}</span>
-            </div>
-
-            <Link to="/campaigns" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-orange-200/50 transition transform hover:-translate-y-0.5">
-                <Zap size={20} /> New Broadcast
-            </Link>
+          <div className={`px-4 py-2 rounded-full border flex items-center gap-2 ${stats.ghost_mode ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-gray-50 text-gray-500'}`}>
+            <Shield size={18} className={stats.ghost_mode ? 'fill-purple-700' : ''} />
+            <span className="text-sm font-bold">{stats.ghost_mode ? 'Ghost Mode Active' : 'Ghost Mode Off'}</span>
+          </div>
+          <Link to="/campaigns" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-orange-200/50 transition transform hover:-translate-y-0.5">
+            <Zap size={20} /> New Broadcast
+          </Link>
         </div>
       </div>
 
-      {/* 2. VITAL STATS ROW (Limit & Volume) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-         
-         {/* Card 1: Weekly Volume */}
-         <div className="white-card p-6 flex items-center justify-between">
-            <div>
-                <p className="text-gray-500 text-sm font-medium mb-1">Messages Sent (This Week)</p>
-                <h3 className="text-3xl font-extrabold text-gray-900">{stats.weekly_sent.toLocaleString()}</h3>
-                <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded flex w-fit mt-2">
-                    <TrendingUp size={12} className="mr-1"/> +15% Growth
-                </span>
-            </div>
-            <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl">
-                <Send size={28}/>
-            </div>
-         </div>
+      <div className={`grid grid-cols-1 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-6`}>
+        <div className="white-card p-6 flex items-center justify-between">
+          <div>
+            <p className="text-gray-500 text-sm font-medium mb-1">Messages Sent (This Week)</p>
+            <h3 className="text-3xl font-extrabold text-gray-900">{stats.weekly_sent.toLocaleString()}</h3>
+            <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded flex w-fit mt-2">
+              <TrendingUp size={12} className="mr-1" /> +15% Growth
+            </span>
+          </div>
+          <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><Send size={28} /></div>
+        </div>
 
-         {/* Card 2: Daily Limit (Progress Bar Visual) */}
-         <div className="white-card p-6 flex flex-col justify-center">
+        {!isStaff && (
+          <div className="white-card p-6 flex flex-col justify-center">
             <div className="flex justify-between items-end mb-2">
-                <div>
-                    <p className="text-gray-500 text-sm font-medium">Message Limit Used</p>
-                    <h3 className="text-2xl font-extrabold text-gray-900">85% <span className="text-sm text-gray-400 font-normal">/ 10k Limit</span></h3>
-                </div>
-                <div className="p-2 bg-orange-50 text-brand rounded-xl">
-                    <Zap size={20}/>
-                </div>
+              <div>
+                <p className="text-gray-500 text-sm font-medium">Wallet Balance</p>
+                <h3 className="text-3xl font-extrabold text-gray-900">Rs. {wallet.balance.toFixed(2)}</h3>
+              </div>
+              <div className="p-2 bg-orange-50 text-brand rounded-xl"><Wallet size={20} /></div>
             </div>
-            {/* Progress Bar */}
             <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-                <div className="bg-gradient-to-r from-orange-400 to-red-500 h-3 rounded-full" style={{width: '85%'}}></div>
+              <div className="bg-gradient-to-r from-orange-400 to-red-500 h-3 rounded-full" style={{ width: `${Math.min(100, wallet.balance)}%` }} />
             </div>
-            <p className="text-xs text-red-500 mt-2 font-medium">⚠️ You are reaching your daily limit.</p>
-         </div>
+            <p className="text-xs text-gray-500 mt-2 font-medium">Utility Rs. {MESSAGE_RATES.utility.toFixed(2)}/msg · Marketing Rs. {MESSAGE_RATES.marketing.toFixed(2)}/msg</p>
+          </div>
+        )}
 
-         {/* Card 3: Leads from Ads */}
-         <div className="white-card p-6 flex items-center justify-between border-l-4 border-l-green-500">
-            <div>
-                <p className="text-gray-500 text-sm font-medium mb-1">New Patients from Ads</p>
-                <h3 className="text-3xl font-extrabold text-gray-900">{stats.leads_today}</h3>
-                <p className="text-xs text-gray-400 mt-1">Since today morning</p>
-            </div>
-            <div className="p-4 bg-green-50 text-green-600 rounded-2xl">
-                <Users size={28}/>
-            </div>
-         </div>
+        <div className="white-card p-6 flex items-center justify-between border-l-4 border-l-green-500">
+          <div>
+            <p className="text-gray-500 text-sm font-medium mb-1">New Patients from Ads</p>
+            <h3 className="text-3xl font-extrabold text-gray-900">{stats.leads_today}</h3>
+            <span className="text-xs text-gray-400 mt-1">Since today morning</span>
+          </div>
+          <div className="p-4 bg-green-50 text-green-600 rounded-2xl"><Users size={28} /></div>
+        </div>
       </div>
 
-      {/* 3. SUBSCRIPTION & PAYMENT STATUS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-3 white-card p-6 border border-orange-100 bg-orange-50">
+      {!isStaff && (
+        <div className="white-card p-6 border border-orange-100 bg-orange-50">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
             <div>
-              <h3 className="text-xl font-bold text-gray-900">Subscription Status</h3>
-              <p className="mt-2 text-sm text-gray-600 max-w-2xl">
-                {isTrialExpired
-                  ? 'Your free trial has ended. Upgrade now to keep sending messages and retain WhatsApp automation access.'
-                  : 'You are on a 14-day trial. Upgrade anytime to secure your preferred plan and continue without interruption.'}
-              </p>
+              <h3 className="text-xl font-bold text-gray-900">Prepaid Wallet Engine</h3>
+              <p className="mt-2 text-sm text-gray-600 max-w-2xl">Your broadcasts are powered by prepaid WhatsApp credits. Recharge before campaigns to keep patient reminders and offers running.</p>
             </div>
-            <div className="inline-flex items-center gap-3 rounded-full bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm">
-              <span className={isTrialExpired ? 'text-red-600' : 'text-orange-600'}>
-                {isTrialExpired ? 'Trial Expired' : `${trialDaysRemaining} day${trialDaysRemaining === 1 ? '' : 's'} remaining`}
-              </span>
-            </div>
+            <Link to="/dashboard/wallet" className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-orange-700 shadow-sm">
+              <Wallet size={18} /> Recharge Wallet
+            </Link>
           </div>
-
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
-              <p className="text-sm text-gray-500">Current Plan</p>
-              <h4 className="mt-2 text-2xl font-bold text-gray-900">Free Trial</h4>
-              <p className="mt-2 text-sm text-gray-500">Access to core automation flows, lead capture, and campaign analytics.</p>
+              <p className="text-sm text-gray-500">Message Deduction Rules</p>
+              <h4 className="mt-2 text-2xl font-bold text-gray-900">Pay per message</h4>
+              <p className="mt-2 text-sm text-gray-500">Utility reminders cost Rs. {MESSAGE_RATES.utility.toFixed(2)} / msg. Marketing offers cost Rs. {MESSAGE_RATES.marketing.toFixed(2)} / msg.</p>
             </div>
             <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
-              <p className="text-sm text-gray-500">UPI Payment</p>
-              <h4 className="mt-2 text-2xl font-bold text-gray-900">vyapar@icici</h4>
-              <p className="mt-2 text-sm text-gray-500">Use the above UPI ID for manual renewal. Tap below to copy and complete payment instantly.</p>
-              <button
-                onClick={() => navigator.clipboard.writeText('vyapar@icici')}
-                className="mt-4 inline-flex items-center justify-center rounded-xl bg-[#FF6B00] px-4 py-3 text-sm font-semibold text-white hover:bg-orange-600 transition"
-              >
-                Copy UPI ID
-              </button>
+              <p className="text-sm text-gray-500">UPI Payment Gateway</p>
+              <h4 className="mt-2 text-2xl font-bold text-gray-900">yogidesk@icici</h4>
+              <p className="mt-2 text-sm text-gray-500">Recharge with Rs. 200 or more to become eligible for instant cashback.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        <div className="white-card p-6 flex flex-col">
+          <h3 className="font-bold text-gray-800 text-lg mb-6 flex items-center gap-2"><PieChart size={20} className="text-gray-400" /> WhatsApp Template Status</h3>
+          <div className="flex items-center gap-8">
+            <div className="relative w-32 h-32 rounded-full" style={{ background: 'conic-gradient(#22c55e 0% 70%, #ef4444 70% 85%, #eab308 85% 100%)' }}>
+              <div className="absolute inset-4 bg-white rounded-full flex items-center justify-center"><span className="text-2xl font-bold text-gray-800">12</span></div>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-green-500 rounded-full" /><span className="text-gray-600">Approved (8)</span></div>
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-red-500 rounded-full" /><span className="text-gray-600">Rejected (2)</span></div>
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-yellow-500 rounded-full" /><span className="text-gray-600">Pending (2)</span></div>
+            </div>
+          </div>
+          <div className="mt-6 bg-gray-50 p-3 rounded-lg text-xs text-gray-500">Tip: Use clinical, appointment-focused wording for faster template approvals.</div>
+        </div>
+
+        <div className="lg:col-span-2 white-card p-0 overflow-hidden">
+          <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+            <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Facebook size={20} className="text-blue-600" /> Live Ad Campaigns</h3>
+            <span className="text-xs bg-green-100 text-green-700 font-bold px-3 py-1 rounded-full animate-pulse">Live Now</span>
+          </div>
+          <div className="p-6 overflow-x-auto">
+            <div className="min-w-[540px] grid gap-4">
+              {[
+                ['Dental Checkup Promo', 'Facebook Feed · Started 2 days ago', 'IMG', '124', <PauseCircle key="pause" size={20} />],
+                ['Free Eye Test Camp', 'Instagram Reels · Started Today', 'VID', '85', <PlayCircle key="play" size={20} />],
+              ].map(([title, meta, type, clicks, icon]) => (
+                <div key={title} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">{type}</div>
+                    <div><h4 className="font-bold text-gray-800">{title}</h4><p className="text-xs text-gray-500">{meta}</p></div>
+                  </div>
+                  <div className="text-right"><div className="text-xl font-bold text-gray-900">{clicks}</div><p className="text-xs text-gray-500">Clicks Today</p></div>
+                  <button className="text-orange-500 hover:bg-orange-50 p-2 rounded-full">{icon}</button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 4. VISUAL INSIGHTS ROW (Pie Chart & Ads) */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        
-        {/* Left: Template Health (Visual Pie Chart) */}
-        <div className="white-card p-6 flex flex-col">
-            <h3 className="font-bold text-gray-800 text-lg mb-6 flex items-center gap-2">
-                <PieChart size={20} className="text-gray-400"/> WhatsApp Template Status
-            </h3>
-            
-            <div className="flex items-center gap-8">
-                {/* CSS Pie Chart (No Library Needed) */}
-                <div className="relative w-32 h-32 rounded-full" 
-                     style={{
-                        background: 'conic-gradient(#22c55e 0% 70%, #ef4444 70% 85%, #eab308 85% 100%)'
-                     }}>
-                     <div className="absolute inset-4 bg-white rounded-full flex items-center justify-center">
-                        <span className="text-2xl font-bold text-gray-800">12</span>
-                     </div>
-                </div>
-                
-                {/* Legend */}
-                <div className="space-y-3 text-sm">
-                    <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 bg-green-500 rounded-full"></span>
-                        <span className="text-gray-600">Approved (8)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 bg-red-500 rounded-full"></span>
-                        <span className="text-gray-600">Rejected (2)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <span className="w-3 h-3 bg-yellow-500 rounded-full"></span>
-                        <span className="text-gray-600">Pending (2)</span>
-                    </div>
-                </div>
-            </div>
-            <div className="mt-6 bg-gray-50 p-3 rounded-lg text-xs text-gray-500">
-                Tip: Avoid using promotional words like "Discount" to get fast approval.
-            </div>
-        </div>
-
-        {/* Center: Live Ads Manager (Visual List) */}
-        <div className="lg:col-span-2 white-card p-0 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                    <Facebook size={20} className="text-blue-600"/> Live Ad Campaigns
-                </h3>
-                <span className="text-xs bg-green-100 text-green-700 font-bold px-3 py-1 rounded-full animate-pulse">
-                    ● Live Now
-                </span>
-            </div>
-
-            <div className="p-6 overflow-x-auto">
-                <div className="min-w-[540px] grid gap-4">
-                    {/* Ad Card 1 */}
-                    <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">IMG</div>
-                            <div>
-                                <h4 className="font-bold text-gray-800">Dental Checkup Promo</h4>
-                                <p className="text-xs text-gray-500">Facebook Feed • Started 2 days ago</p>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-xl font-bold text-gray-900">124</div>
-                            <p className="text-xs text-gray-500">Clicks Today</p>
-                        </div>
-                        <button className="text-red-500 hover:bg-red-50 p-2 rounded-full"><PauseCircle size={20}/></button>
-                    </div>
-
-                    {/* Ad Card 2 */}
-                    <div className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-red-50 text-red-600 rounded-lg flex items-center justify-center font-bold text-xs">VID</div>
-                            <div>
-                                <h4 className="font-bold text-gray-800">Free Eye Test Camp</h4>
-                                <p className="text-xs text-gray-500">Instagram Reels • Started Today</p>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <div className="text-xl font-bold text-gray-900">85</div>
-                            <p className="text-xs text-gray-500">Clicks Today</p>
-                        </div>
-                        <button className="text-green-500 hover:bg-green-50 p-2 rounded-full"><PlayCircle size={20}/></button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-      </div>
-
-      {/* 4. WEEKLY GRAPH (Simple CSS Bars) */}
       <div className="white-card p-6">
         <h3 className="font-bold text-gray-800 text-lg mb-6">Message Sent History (Last 7 Days)</h3>
         <div className="h-48 flex items-end justify-between gap-4 px-4">
-            {[45, 70, 30, 85, 55, 95, 40].map((h, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-3 group">
-                <div className="w-full bg-gray-100 rounded-t-lg relative h-full flex items-end overflow-hidden group-hover:bg-gray-200 transition">
-                    <div 
-                        className="w-full bg-[#FF6B00] rounded-t-lg transition-all duration-700 ease-out group-hover:bg-orange-600" 
-                        style={{ height: h + '%' }}
-                    ></div>
-                </div>
-                <span className="text-xs text-gray-400 font-bold">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}</span>
+          {[45, 70, 30, 85, 55, 95, 40].map((height, index) => (
+            <div key={index} className="flex-1 flex flex-col items-center gap-3 group">
+              <div className="w-full bg-gray-100 rounded-t-lg relative h-full flex items-end overflow-hidden group-hover:bg-gray-200 transition">
+                <div className="w-full bg-[#FF6B00] rounded-t-lg transition-all duration-700 ease-out group-hover:bg-orange-600" style={{ height: `${height}%` }} />
               </div>
-            ))}
+              <span className="text-xs text-gray-400 font-bold">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][index]}</span>
+            </div>
+          ))}
         </div>
       </div>
-
     </div>
   );
 };

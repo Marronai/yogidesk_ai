@@ -4,7 +4,7 @@ const smtpHost = process.env.SMTP_HOST;
 const smtpPort = Number(process.env.SMTP_PORT);
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
-const emailFrom = process.env.EMAIL_FROM || 'welcome@vyaparwallah.in';
+const emailFrom = process.env.EMAIL_FROM || 'welcome@yogidesk.com';
 
 const missingEmailVars = [];
 if (!smtpHost) missingEmailVars.push('SMTP_HOST');
@@ -40,7 +40,7 @@ const sendOTP = async (email, userName, otp) => {
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: 'Your Vyapar Wallah OTP Code',
+      subject: 'Your Yogi Desk AI OTP Code',
       html: otpEmailTemplate(userName, otp)
     };
 
@@ -149,14 +149,14 @@ const otpEmailTemplate = (userName, otp) => {
     <body>
       <div class="email-container">
         <div class="header">
-          <p class="logo">Vyapar Wallah</p>
+          <p class="logo">Yogi Desk AI</p>
         </div>
         
         <div class="content">
           <p class="greeting">Hello ${userName},</p>
           
           <p class="message">
-            Thank you for signing up with Vyapar Wallah! To complete your account verification, please use the following One-Time Password (OTP):
+            Thank you for signing up with Yogi Desk AI! To complete your account verification, please use the following One-Time Password (OTP):
           </p>
           
           <div class="otp-box">
@@ -166,7 +166,7 @@ const otpEmailTemplate = (userName, otp) => {
           </div>
           
           <div class="security-note">
-            <strong>🔒 Security Note:</strong> Never share this OTP with anyone. Vyapar Wallah support will never ask for your OTP.
+            <strong>🔒 Security Note:</strong> Never share this OTP with anyone. Yogi Desk AI support will never ask for your OTP.
           </div>
           
           <p class="message">
@@ -175,8 +175,8 @@ const otpEmailTemplate = (userName, otp) => {
         </div>
         
         <div class="footer">
-          <p>© 2024 Vyapar Wallah. All rights reserved.</p>
-          <p>Vyapar Wallah | Your Business Intelligence Partner</p>
+          <p>© 2026 Yogi Desk AI. All rights reserved.</p>
+          <p>Yogi Desk AI | Your Healthcare Communication Partner</p>
         </div>
       </div>
     </body>
@@ -283,33 +283,33 @@ const welcomeEmailTemplate = (userName, businessName, email) => {
     <body>
       <div class="email-container">
         <div class="header">
-          <p class="logo">Vyapar Wallah</p>
+          <p class="logo">Yogi Desk AI</p>
         </div>
 
         <div class="content">
           <p class="greeting">Welcome aboard, ${userName}!</p>
           <p class="message">
             Your account for <strong>${businessName}</strong> is now active. Your registered email is <strong>${email}</strong>.
-            Start your 14-day free trial today and explore automated sales, customer replies, and business growth tools.
+            Your Yogi Wallet includes prepaid WhatsApp credits for appointment replies, patient follow-ups, and healthcare team tools.
           </p>
 
           <div class="detail-box">
             <p class="detail-title">What you get</p>
-            <p class="detail-line">• 14-day free trial with full access</p>
-            <p class="detail-line">• Admin access for your business</p>
+            <p class="detail-line">� Prepaid wallet access with transparent message rates</p>
+            <p class="detail-line">• Admin access for your healthcare team</p>
             <p class="detail-line">• Ready-made WhatsApp workflows and campaign tools</p>
           </div>
 
           <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Go to Dashboard</a>
 
           <p class="message">
-            If you need help setting up, our support team is ready to assist. Enjoy the journey with Vyapar Wallah!
+            If you need help setting up, our support team is ready to assist. Enjoy the journey with Yogi Desk AI!
           </p>
         </div>
 
         <div class="footer">
           © 2026 Yogi Desk. All rights reserved.
-          <span>A product of Vyapar Wallah</span>
+          <span>A product of Yogi Desk</span>
         </div>
       </div>
     </body>
@@ -328,7 +328,7 @@ const sendWelcomeEmail = async (email, userName, businessName) => {
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: '🎉 Welcome to Vyapar Wallah - Your 14-Day Free Trial Starts Now!',
+      subject: '🎉 Welcome to Yogi Desk AI - Your Clinic Workspace Is Ready!',
       html: welcomeEmailTemplate(userName, businessName, email)
     };
 
@@ -443,11 +443,11 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
     <body>
       <div class="email-container">
         <div class="header">
-          <p class="logo">Vyapar Wallah</p>
+          <p class="logo">Yogi Desk AI</p>
         </div>
         <div class="content">
           <p class="greeting">Hi ${userName},</p>
-          <p class="message">We noticed a successful login to your Vyapar Wallah dashboard. If this was you, great! If not, you should change your password immediately.</p>
+          <p class="message">We noticed a successful login to your Yogi Desk AI dashboard. If this was you, great! If not, you should change your password immediately.</p>
           <div class="detail-box">
             <p class="detail-heading">Login details</p>
             <p class="detail-text"><strong>Device:</strong> ${deviceInfo}</p>
@@ -461,7 +461,7 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
         </div>
         <div class="footer">
           © 2026 Yogi Desk. All rights reserved.
-          <span>A product of Vyapar Wallah</span>
+          <span>A product of Yogi Desk</span>
         </div>
       </div>
     </body>
@@ -479,7 +479,7 @@ const sendLoginAlert = async (email, userName, deviceInfo, ipAddress) => {
     const mailOptions = {
       from: emailFrom,
       to: email,
-      subject: '🔐 New Login Alert for Your Vyapar Wallah Account',
+      subject: '🔐 New Login Alert for Your Yogi Desk AI Account',
       html: loginAlertTemplate(userName, deviceInfo, ipAddress)
     };
 
@@ -510,3 +510,6 @@ const verifyConnection = async () => {
 };
 
 module.exports = { transporter, sendOTP, sendWelcomeEmail, sendLoginAlert, verifyConnection };
+
+
+

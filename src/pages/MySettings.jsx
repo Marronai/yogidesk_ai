@@ -176,7 +176,7 @@ const Settings = () => {
             </div>
 
             <div className="mt-5 rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800">
-              Your WhatsApp credentials should be permanent Meta Cloud API credentials for the connected business.
+              Your WhatsApp credentials should be permanent Meta Cloud API credentials for the connected clinic or healthcare team.
             </div>
           </section>
 

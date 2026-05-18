@@ -25,10 +25,10 @@ const Terms = () => {
           <section>
             <div className="flex items-center mb-4">
               <span className="bg-black text-white w-8 h-8 rounded-full flex items-center justify-center mr-3 font-bold">02</span>
-              <h2 className="text-2xl font-bold">Usage Policy & Free Trial</h2>
+              <h2 className="text-2xl font-bold">Usage Policy & Wallet Credits</h2>
             </div>
             <p className="text-gray-700 ml-11">
-              Yogi Desk provides a <strong>14-day Free Trial</strong>. Upon expiry, continued access requires a subscription. You are responsible for all content sent through your WhatsApp Business account.
+              Yogi Desk AI runs on prepaid wallet credits. You are responsible for maintaining sufficient balance and for all content sent through your WhatsApp Business account.
             </p>
           </section>
 
@@ -45,7 +45,7 @@ const Terms = () => {
           <section className="bg-orange-50 p-6 border-l-4 border-[#FF6B00]">
             <h3 className="font-bold text-lg mb-2">Important Disclaimer</h3>
             <p className="text-gray-700 text-sm">
-              Vyapar Wallah is a technology provider. We are not responsible for account bans or message delivery failures caused by Meta's internal algorithms or policy changes.
+              Yogi Desk AI is a technology provider for clinics, doctors, hospitals, and healthcare teams. We are not responsible for account bans or message delivery failures caused by Meta's internal algorithms or policy changes.
             </p>
           </section>
         </div>

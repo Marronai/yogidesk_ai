@@ -1,166 +1,129 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import axios from 'axios';
-import { jwtDecode } from 'jwt-decode';
 import { 
   User, Building, Mail, Lock, Phone, ArrowRight, Loader2, 
   Star, CheckCircle, Eye, EyeOff, Briefcase 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useGoogleLogin } from '@react-oauth/google';
+
+// ⭐ Supabase Client Import (Aapne jo file banayi thi)
+import { supabase } from '../supabaseClient';
+import { persistSupabaseSession } from '../utils/authSession';
 
 const Signup = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Signup Steps State (1 = Details, 2 = OTP)
+  // Signup Steps State (1 = Details, 2 = Confirm/Activation Screen)
   const [step, setStep] = useState(1);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-
-  // Backend URL
-  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
-
   const [formData, setFormData] = useState({
     name: '',
     businessName: '',
     email: '',
     phone: '',
     password: '',
-    businessType: 'Retail',
-    businessCategory: 'Other'
+    businessType: 'Clinic',
+    businessCategory: ''
   });
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // 🔢 OTP INPUT HANDLER (Improved)
-  const handleOtpChange = (element, index) => {
-    if (isNaN(element.value)) return false;
-    
-    const newOtp = [...otp];
-    newOtp[index] = element.value;
-    setOtp(newOtp);
-
-    // Auto focus next input
-    if (element.value && element.nextSibling) {
-      element.nextSibling.focus();
-    }
-  };
-
-  // 🔙 BACKSPACE HANDLER (New UX Fix)
-  const handleKeyDown = (e, index) => {
-    if (e.key === "Backspace") {
-      if (!otp[index] && e.target.previousSibling) {
-        e.target.previousSibling.focus();
-      }
-    }
-  };
-
-  // ✅ HELPER: Login success hone par data save karo aur Dashboard bhejo
-  const handleAuthSuccess = (data) => {
+  // ✅ HELPER: LocalStorage token configuration dashboard navigation ke liye
+  const handleAuthSuccess = (supabaseUser) => {
     try {
-      if (data.token) {
-        const decoded = jwtDecode(data.token);
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user_id', decoded.id);
-        localStorage.setItem('user_role', decoded.role || 'trial_user');
-        localStorage.setItem('user_name', decoded.name || formData.name || 'User');
-        localStorage.setItem('user_email', data.user?.email || formData.email || '');
-        localStorage.setItem('user_business_category', data.user?.businessCategory || formData.businessCategory || 'Other');
-        if (typeof data.user?.trialDaysRemaining !== 'undefined') {
-          localStorage.setItem('user_trial_days_remaining', data.user.trialDaysRemaining);
-        }
-        if (data.user?.planExpiryDate) {
-          localStorage.setItem('user_plan_expiry', data.user.planExpiryDate);
-        }
-        if (data.user?.subscriptionStatus) {
-          localStorage.setItem('user_subscription_status', data.user.subscriptionStatus);
-        }
-        if (data.user?.planType) {
-          localStorage.setItem('user_plan_type', data.user.planType);
-        }
-        if (data.user?.trialStartDate) {
-          localStorage.setItem('user_trial_start_date', data.user.trialStartDate);
-        }
+      if (supabaseUser) {
+        persistSupabaseSession(supabaseUser, {
+          name: formData.name,
+          businessCategory: formData.businessCategory,
+          welcomeGift: true,
+        });
         
         // 🚀 Seedha Dashboard!
         navigate('/dashboard');
       }
     } catch (error) {
-      console.error("Token Save Error", error);
+      console.error("Local Storage Token Save Error", error);
     }
   };
 
-  // Google Login Logic
-  const handleGoogleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      try {
-        setLoading(true);
-        const res = await axios.post(`${API_URL}/auth/google`, {
-          tokenId: tokenResponse.access_token
-        }, {
-          withCredentials: true
-        });
-        handleAuthSuccess(res.data);
-      } catch (err) {
-        alert(err.response?.data?.msg || "Google Signup Failed");
-      } finally {
-        setLoading(false);
-      }
-    },
-    onError: () => alert("Google Signup Failed"),
-  });
+  // Google Login Logic (Supabase Auth Module)
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth-success`
+        }
+      });
+      if (error) throw error;
+    } catch (err) {
+      alert(err.message || "Google Signup Failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // Manual Signup Logic
+  // 🔥 MAIN MANUAL SIGNUP LOGIC (Supabase Auth Injected)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
+    const cleanEmail = formData.email.trim().toLowerCase();
+    const cleanPhone = formData.phone.replace(/\D/g, '').slice(-10);
+
+    if (cleanPhone && cleanPhone.length !== 10) {
+      alert("Please enter a valid 10-digit phone number");
+      setLoading(false);
+      return;
+    }
+
     try {
       if (step === 1) {
-        // --- STEP 1: REGISTER & SEND OTP ---
-        const cleanData = {
-          ...formData,
-          name: formData.name.trim(),
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.replace(/\D/g, '').slice(-10) // Clean phone to 10 digits
-        };
+        // --- STEP 1: REGISTER WITH SUPABASE AUTH ---
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name.trim(),
+              business_name: formData.businessName.trim(),
+              business_category: formData.businessCategory,
+              phone: cleanPhone
+            }
+          }
+        });
 
-        // Validate phone number
-        if (cleanData.phone && cleanData.phone.length !== 10) {
-          alert("Please enter a valid 10-digit phone number");
-          setLoading(false);
+        if (error) throw error;
+
+        if (data?.session?.user) {
+          handleAuthSuccess(data.session.user);
           return;
         }
 
-        const res = await axios.post(`${API_URL}/auth/register`, cleanData, {
-          withCredentials: true
-        });
-        
-        if (res.data.success) {
-          setStep(2); // Move to OTP Screen
-          // OTP fill karne ke liye array reset karo
-          setOtp(["", "", "", "", "", ""]);
-          // User friendly message
-          alert(`OTP Sent to ${formData.email}`);
+        // Public Profiles table backup logic (Optional profile trigger)
+        if (data?.user) {
+          setStep(2); // Move to Activation screen interface
+          alert(`🎉 Yogi Desk Account Triggered! Verification email sent to ${cleanEmail}`);
         }
       } else {
-        // --- STEP 2: VERIFY OTP ---
-        const finalOtp = otp.join("");
-        
-        const res = await axios.post(`${API_URL}/auth/verify-signup-otp`, { 
-          email: formData.email, 
-          otp: finalOtp 
-        }, {
-          withCredentials: true
+        // --- STEP 2: BYPASS/MANUAL SIGNIN FROM COOLDOWN SCREEN ---
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: formData.password,
         });
 
-        handleAuthSuccess(res.data);
+        if (signInError) {
+          alert("Account is waiting for verification link or password incorrect.");
+        } else {
+          handleAuthSuccess(signInData.user);
+        }
       }
     } catch (error) {
-      alert(error.response?.data?.msg || "Signup Failed. Please try again.");
+      alert(error.message || "Signup Failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -180,16 +143,16 @@ const Signup = () => {
           className="relative z-10 max-w-lg text-white"
         >
           <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/10 px-4 py-1.5 rounded-full text-xs font-bold text-orange-300 mb-8 uppercase tracking-wider">
-             <Star size={12} className="fill-orange-300"/> Join 10,000+ Businesses
+             <Star size={12} className="fill-orange-300"/> Join 10,000+ Doctors & Clinics
           </div>
           <h1 className="text-5xl font-black leading-tight mb-6">
-             Power your business with <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Vyapar Wallah.</span>
+             Power your clinic with <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Yogi Desk.</span>
           </h1>
           <p className="text-slate-400 text-lg mb-10 leading-relaxed">
-             Launch faster with a 14-day free trial, built for clinics, salons, schools and local teams.
+             Start with prepaid WhatsApp credits, built for doctors, clinics, hospitals and healthcare teams.
           </p>
           <ul className="space-y-5">
-             {['Instant Dashboard Access', 'Admin Features Unlocked', 'WhatsApp API Ready'].map((item, i) => (
+             {['Instant Patient Dashboard Access', 'Admin Appointment Tools Unlocked', 'WhatsApp Meta API Ready'].map((item, i) => (
                 <li key={i} className="flex items-center gap-3 text-lg font-medium text-slate-200">
                    <div className="bg-[#FF6B00]/20 p-1 rounded-full"><CheckCircle size={20} className="text-[#FF6B00]"/></div> 
                    {item}
@@ -208,16 +171,16 @@ const Signup = () => {
         >
           <div className="mb-8 text-center lg:text-left">
              <h2 className="text-3xl font-black text-gray-900 mb-2">
-               {step === 1 ? "Create your Vyapar Wallah account" : "Enter your verification code"}
+               {step === 1 ? "Create your Yogi Desk account" : "Activate your account"}
              </h2>
              <p className="text-gray-500">
-               {step === 1 ? "Start your 14-day free trial and access the dashboard instantly." : `We've sent a 6-digit code to ${formData.email}`}
+               {step === 1 ? "Create your clinic workspace and receive Rs. 50 WhatsApp credits." : `We've sent an activation tracking link to ${formData.email}`}
              </p>
           </div>
 
           <button 
             type="button"
-            onClick={() => handleGoogleLogin()}
+            onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6"
           >
             <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
@@ -240,7 +203,7 @@ const Signup = () => {
                     </div>
                     <div className="relative">
                        <Building size={18} className="absolute left-3.5 top-3.5 text-gray-400"/>
-                       <input name="businessName" onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" placeholder="Company" required/>
+                       <input name="businessName" onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" placeholder="Clinic/Hospital Name" required/>
                     </div>
                 </div>
 
@@ -256,7 +219,7 @@ const Signup = () => {
                       type="tel" 
                       onChange={handleChange} 
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" 
-                      placeholder="Phone Number (10 digits)" 
+                      placeholder="WhatsApp Number (10 digits)" 
                       pattern="[0-9]{10}" 
                       maxLength="10"
                       required
@@ -272,11 +235,15 @@ const Signup = () => {
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" 
                       required
                     >
-                      <option value="Hospital">Hospital</option>
-                      <option value="Clinic">Clinic</option>
-                      <option value="Coaching">Coaching</option>
-                      <option value="Salon">Salon</option>
-                      <option value="Other">Other</option>
+                      <option value="" disabled>Select Medical Specialization</option>
+                      <option value="Dentist">Dentist</option>
+                      <option value="Cardiologist">Cardiologist</option>
+                      <option value="Diabetologist">Diabetologist</option>
+                      <option value="General Physician">General Physician</option>
+                      <option value="Pediatrician">Pediatrician</option>
+                      <option value="Gynecologist">Gynecologist</option>
+                      <option value="Dermatologist">Dermatologist</option>
+                      <option value="Others">Others</option>
                     </select>
                 </div>
 
@@ -300,32 +267,21 @@ const Signup = () => {
                 </div>
 
                 <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-6">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Send Verification Code"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Create Yogi Desk Account"} 
                   {!loading && <ArrowRight size={20}/>}
                 </button>
               </>
             ) : (
               <>
-                {/* OTP Input Fields */}
-                <div className="flex justify-center gap-2 mb-6">
-                  {otp.map((digit, index) => (
-                    <input
-                      key={index}
-                      type="text"
-                      maxLength="1"
-                      value={digit}
-                      onChange={(e) => handleOtpChange(e.target, index)}
-                      onKeyDown={(e) => handleKeyDown(e, index)}
-                      className="w-12 h-12 text-center text-2xl font-bold bg-gray-50 border-2 border-gray-200 rounded-xl focus:border-[#FF6B00] focus:outline-none transition-colors"
-                      ref={(ref) => {
-                        if (ref && index === 0 && otp.every(d => d === "")) ref.focus();
-                      }}
-                    />
-                  ))}
+                {/* Visual Placeholder for Link Activation confirmation */}
+                <div className="text-center p-6 bg-orange-50 border border-orange-100 rounded-xl mb-4">
+                   <p className="text-sm text-orange-700 font-medium">
+                     Please click on the confirmation link sent to your email box to activate database records.
+                   </p>
                 </div>
 
-                <button disabled={loading || otp.some(d => d === "")} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-6 disabled:opacity-50 disabled:cursor-not-allowed">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify & Create Account"} 
+                <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-4">
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "I've Verified, Let's Login"} 
                   {!loading && <ArrowRight size={20}/>}
                 </button>
 
@@ -334,7 +290,7 @@ const Signup = () => {
                   onClick={() => setStep(1)} 
                   className="w-full text-gray-500 py-2 rounded-xl font-medium transition hover:text-gray-700"
                 >
-                  ← Back to Details
+                  ← Back to Edit Details
                 </button>
               </>
             )}

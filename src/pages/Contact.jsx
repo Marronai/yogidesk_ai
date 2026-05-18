@@ -19,8 +19,8 @@ const Contact = () => {
       <nav className="fixed w-full z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">M</div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Marroncorp</span>
+            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">Y</div>
+            <span className="text-xl font-bold tracking-tight text-slate-900">Yogi Desk AI</span>
           </Link>
           <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
             <Link to="/" className="hover:text-[#FF6B00]">Home</Link>
@@ -43,9 +43,9 @@ const Contact = () => {
             <div className="space-y-10">
                <div>
                  <span className="text-[#FF6B00] font-bold tracking-widest uppercase text-sm mb-2 block">Get In Touch</span>
-                 <h1 className="text-5xl font-black text-slate-900 mb-4">Let's Talk Business.</h1>
+                 <h1 className="text-5xl font-black text-slate-900 mb-4">Let's Talk Healthcare.</h1>
                  <p className="text-xl text-slate-500">
-                    Have questions about pricing, API integration, or custom enterprise plans? We are here to help.
+                    Have questions about pricing, API integration, or custom healthcare team plans? We are here to help.
                  </p>
                </div>
                
@@ -64,8 +64,8 @@ const Contact = () => {
                      <div className="bg-gray-100 p-3 rounded-xl"><Mail size={24} className="text-slate-700"/></div>
                      <div>
                         <h3 className="font-bold text-slate-900">Email Us</h3>
-                        <p className="text-slate-500">marroncorp.ai@gmail.com</p>
-                        <p className="text-slate-500">sales@marroncorp.ai</p>
+                        <p className="text-slate-500">support@yogidesk.com</p>
+                        <p className="text-slate-500">sales@yogidesk.com</p>
                      </div>
                   </div>
 
@@ -104,7 +104,7 @@ const Contact = () => {
                       </div>
                       <div className="space-y-2">
                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email</label>
-                         <input type="email" className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 focus:border-[#FF6B00] focus:ring-2 focus:ring-orange-100 outline-none transition" placeholder="john@company.com" required/>
+                            <input type="email" className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200 focus:border-[#FF6B00] focus:ring-2 focus:ring-orange-100 outline-none transition" placeholder="doctor@clinic.com" required/>
                       </div>
                       <div className="space-y-2">
                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Message</label>
@@ -123,7 +123,7 @@ const Contact = () => {
 
       {/* FOOTER */}
       <footer className="bg-slate-950 text-white py-12 text-center border-t border-slate-900">
-         <p className="text-slate-500">© 2025 Marroncorp AI. All rights reserved.</p>
+         <p className="text-slate-500">© 2026 Yogi Desk AI. All rights reserved.</p>
       </footer>
     </div>
   );

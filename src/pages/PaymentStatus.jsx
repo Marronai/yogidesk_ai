@@ -69,7 +69,7 @@ const PaymentStatus = () => {
             </div>
             <h2 className="text-4xl font-black text-slate-900 tracking-tight leading-none">All Set! 🚀</h2>
             <p className="text-slate-500 font-bold mt-4 leading-relaxed">
-              Payment successful. Your Yogidesk Premium features are now unlocked.
+              Payment successful. Your Yogi Desk AI Premium features are now unlocked.
             </p>
             <div className="mt-8 flex items-center gap-2 text-green-600 font-black text-xs uppercase tracking-widest animate-pulse">
               Redirecting to Dashboard <ArrowRight size={16}/>

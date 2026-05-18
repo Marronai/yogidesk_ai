@@ -71,8 +71,8 @@ const ForgotPassword = () => {
         >
           {/* Logo Area */}
           <div className="flex items-center gap-2 mb-8">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-orange-500/30">M</div>
-            <span className="text-xl font-bold tracking-tight text-gray-900">Marroncorp</span>
+            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-orange-500/30">Y</div>
+            <span className="text-xl font-bold tracking-tight text-gray-900">Yogi Desk AI</span>
           </div>
 
           <div className="mb-8">

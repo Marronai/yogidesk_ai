@@ -53,7 +53,7 @@ const HospitalDischarge = () => {
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-black text-gray-900 tracking-tight">Patient Management</h1>
-          <p className="text-gray-500 font-medium italic">Marroncorp AI Healthcare Suite</p>
+          <p className="text-gray-500 font-medium italic">Yogi Desk AI Healthcare Suite</p>
         </div>
         <button 
           onClick={() => setShowModal(true)}

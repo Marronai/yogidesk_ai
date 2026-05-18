@@ -47,8 +47,8 @@ exports.sendTestMessage = async (req, res) => {
 
 // 2. Submit Template Function
 exports.submitTemplate = async (req, res) => {
-    try {
-        const { name, category, language, body, header } = req.body;
+    try { // Added footer and buttons
+        const { name, category, language, body, header, footer, buttons } = req.body;
 
         if (!name || !category || !language || !body) {
             return res.status(400).json({ message: 'Missing required fields: name, category, language, body' });
@@ -61,16 +61,40 @@ exports.submitTemplate = async (req, res) => {
             }
         ];
 
-        if (header && header.text) {
+        // Handle Header component
+        if (header) {
             components.unshift({
                 type: 'HEADER',
-                format: 'TEXT',
-                text: header.text
+                format: header.type, // TEXT, IMAGE, VIDEO, DOCUMENT
+                ...(header.type === 'TEXT' && { text: header.text }),
+                ...(header.type !== 'TEXT' && { example: { header_handle: [header.link] } }) // For media, Meta expects example with link
+            });
+        }
+
+        // Handle Body component (already added above)
+
+        // Handle Footer component
+        if (footer && footer.text) {
+            components.push({
+                type: 'FOOTER',
+                text: footer.text
+            });
+        }
+
+        // Handle Buttons component
+        if (buttons && buttons.length > 0) {
+            components.push({
+                type: 'BUTTONS',
+                buttons: buttons.map(btn => ({
+                    type: btn.type === 'URL' ? 'URL' : 'PHONE_NUMBER', // Meta API uses PHONE_NUMBER
+                    text: btn.text,
+                    ...(btn.type === 'URL' && { url: btn.url }),
+                    ...(btn.type === 'PHONE_NUMBER' && { phone_number: btn.phone_number })
+                }))
             });
         }
 
         const url = `https://graph.facebook.com/v19.0/${process.env.META_WABA_ID}/message_templates`;
-
         const data = {
             name: name.trim(),
             language,
@@ -86,12 +110,15 @@ exports.submitTemplate = async (req, res) => {
         };
 
         const response = await axios.post(url, data, config);
-
+        
         // Save to DB
         const Template = require('../models/Template');
         const newTemplate = await Template.create({
             name: name.trim(),
             bodyText: body,
+            // Assuming we only save the submitted language's body for now
+            // If multi-language storage is needed, the Template model needs to be updated
+            // english: body, hinglish: '', hindi: '',
             headerType: header ? 'TEXT' : 'NONE',
             headerText: header ? header.text : '',
             category,

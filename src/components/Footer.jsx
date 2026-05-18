@@ -11,10 +11,10 @@ const Footer = () => {
           <div className="md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
               <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center text-white font-bold text-xl">Y</div>
-              <span className="text-xl font-bold">Yogidesk-ai</span>
+              <span className="text-xl font-bold">Yogi Desk AI</span>
             </div>
             <p className="text-slate-400 text-sm leading-relaxed">
-              The complete WhatsApp automation platform for businesses. Scale your customer communication with AI-powered tools.
+              The complete WhatsApp automation platform for clinics, doctors, hospitals, and healthcare teams.
             </p>
             <div className="flex gap-4 mt-6">
               <a href="#" className="text-slate-400 hover:text-[#FF6B00] transition"><Facebook size={20} /></a>
@@ -60,8 +60,8 @@ const Footer = () => {
 
         {/* Bottom Section */}
         <div className="border-t border-slate-800 mt-12 pt-8 text-center">
-          <p className="text-slate-400 text-sm">© 2026 Yogidesk-ai. All rights reserved.</p>
-          <p className="text-slate-500 text-xs mt-2">A product of Vyapar Wallah</p>
+          <p className="text-slate-400 text-sm">© 2026 Yogi Desk AI. All rights reserved.</p>
+          <p className="text-slate-500 text-xs mt-2">A product of Yogi Desk</p>
         </div>
       </div>
     </footer>

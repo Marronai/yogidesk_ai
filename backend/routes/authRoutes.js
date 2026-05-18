@@ -62,7 +62,7 @@ router.get('/google/callback',
                 { 
                     id: req.user._id, 
                     email: req.user.email,
-                    role: req.user.role || 'trial_user',
+                    role: req.user.role || 'doctor',
                     name: req.user.name
                 },
                 secret,
