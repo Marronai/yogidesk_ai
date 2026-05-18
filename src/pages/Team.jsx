@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, KeyRound, Mail, Phone, RefreshCw, UserPlus, Users, X } from 'lucide-react';
-import { supabase } from '../supabaseClient';
+import { supabase } from '../config/supabaseClient';
 import { API_URL } from '../utils/api';
 import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 

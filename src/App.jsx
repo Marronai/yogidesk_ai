@@ -7,7 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 
 // Pages
 import Login from './pages/Login';
-import Signup from './pages/Signup';
+import SignUp from './pages/SignUp';
 import DashboardHome from './pages/DashboardHome';
 import LeadsCRM from './pages/LeadsCRM';
 import Team from './pages/Team';
@@ -56,7 +56,7 @@ const App = () => {
           
           {/* Auth Routes */}
           <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+          <Route path="/signup" element={<SignUp />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           

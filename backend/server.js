@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const emailConfig = require('./config/emailConfig');
 
 const app = express();
 
@@ -27,6 +28,10 @@ const RATE_CARD = { UTILITY: 0.25, MARKETING: 1.30, AUTHENTICATION: 0.25 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
 const getUnitCost = (category) => RATE_CARD[String(category || 'UTILITY').toUpperCase()] || RATE_CARD.UTILITY;
+const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function' ? emailConfig.sendWelcomeEmail : async () => false;
+const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function' ? emailConfig.sendLoginAlert : async () => false;
+const mailTransporter = emailConfig.transporter;
+const emailFrom = process.env.EMAIL_FROM || 'welcome@yogidesk.com';
 
 // ====== HEALTH CHECK ENDPOINT ======
 app.get('/api/health', (req, res) => {
@@ -35,6 +40,60 @@ app.get('/api/health', (req, res) => {
     service: 'Yogi Desk API',
     audience: 'Doctors and Clinics',
   });
+});
+
+app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
+    try {
+        const { email, name, businessName } = req.body || {};
+        if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+        const sent = await sendWelcomeEmail(email, name || 'Doctor', businessName || 'Yogi Desk Clinic');
+        return res.status(sent ? 200 : 202).json({ success: sent });
+    } catch (error) {
+        console.error('Welcome email dispatch error:', error.message);
+        return res.status(202).json({ success: false });
+    }
+});
+
+app.post('/api/auth/dispatch-login-alert', async (req, res) => {
+    try {
+        const { email, name } = req.body || {};
+        if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+        const ipAddress = (req.headers['x-forwarded-for'] || req.ip || 'Unknown IP').split(',')[0].trim();
+        const deviceInfo = req.headers['user-agent'] || 'Verified browser login';
+        const sent = await sendLoginAlert(email, name || 'Doctor', deviceInfo, ipAddress);
+        return res.status(sent ? 200 : 202).json({ success: sent });
+    } catch (error) {
+        console.error('Login email dispatch error:', error.message);
+        return res.status(202).json({ success: false });
+    }
+});
+
+app.post('/api/team/dispatch-invite-email', async (req, res) => {
+    try {
+        const { email, name, inviteLink } = req.body || {};
+        if (!email || !inviteLink) return res.status(400).json({ success: false, msg: 'Email and invite link are required' });
+        if (!mailTransporter) return res.status(202).json({ success: false, msg: 'SMTP unavailable' });
+
+        await mailTransporter.sendMail({
+            from: emailFrom,
+            to: email,
+            subject: 'You have been invited to Yogi Desk',
+            html: `
+              <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:14px">
+                <h2 style="margin:0 0 12px;color:#111827">Yogi Desk team invite</h2>
+                <p style="color:#4b5563;line-height:1.6">Hi ${name || 'there'}, your clinic admin has invited you to join their Yogi Desk workspace.</p>
+                <p><a href="${inviteLink}" style="display:inline-block;background:#ff6b00;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700">Accept Invite</a></p>
+              </div>
+            `
+        });
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error('Team invite email dispatch error:', error.message);
+        return res.status(202).json({ success: false });
+    }
 });
 
 // ====== META WEBHOOK ENDPOINTS ======

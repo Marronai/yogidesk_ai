@@ -1,25 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   User, Building, Mail, Lock, Phone, ArrowRight, Loader2, 
   Star, CheckCircle, Eye, EyeOff, Briefcase 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { handleGoogleSignIn } from '../config/supabaseClient';
+import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
-import { supabase } from '../supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import { API_URL } from '../utils/api';
 import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 
-const Signup = () => {
+const SignUp = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [phoneConfirmation, setPhoneConfirmation] = useState(null);
   const [pendingUser, setPendingUser] = useState(null);
   const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
+  const [isGoogleIntake, setIsGoogleIntake] = useState(false);
 
   // Signup Steps State (1 = Details, 2 = Confirm/Activation Screen)
   const [step, setStep] = useState(1);
@@ -36,6 +36,27 @@ const Signup = () => {
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data?.session?.user;
+      if (!mounted || !user) return;
+      setPendingUser(user);
+      setIsGoogleIntake(Boolean(user.app_metadata?.provider === 'google'));
+      if (user.app_metadata?.provider === 'google') setStep(4);
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || user.user_metadata?.full_name || user.user_metadata?.name || '',
+        email: prev.email || user.email || '',
+      }));
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSmsOtpChange = (element, index) => {
     if (isNaN(element.value)) return;
@@ -100,12 +121,9 @@ const Signup = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth-success`
-        }
-      });
+      setIsGoogleIntake(true);
+      setStep(4);
+      const { error } = await handleGoogleSignIn(`${window.location.origin}/signup`);
       if (error) throw error;
     } catch (err) {
       alert(err.message || "Google Signup Failed");
@@ -156,6 +174,32 @@ const Signup = () => {
           await startSignupPhoneVerification(data.user);
           alert(`Yogi Desk account created. Enter the mobile OTP to finish activation for ${cleanEmail}.`);
         }
+      } else if (step === 4) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const googleUser = sessionData?.session?.user || pendingUser;
+        if (!googleUser?.id) {
+          alert("Please complete Google authentication first.");
+          return;
+        }
+
+        await supabase.auth.updateUser({
+          data: {
+            full_name: formData.name.trim() || googleUser.user_metadata?.full_name || 'Doctor',
+            business_name: formData.businessName.trim(),
+            business_category: formData.businessCategory,
+            phone: cleanPhone
+          }
+        });
+        await startSignupPhoneVerification({
+          ...googleUser,
+          user_metadata: {
+            ...(googleUser.user_metadata || {}),
+            full_name: formData.name.trim() || googleUser.user_metadata?.full_name,
+            business_name: formData.businessName.trim(),
+            business_category: formData.businessCategory,
+            phone: cleanPhone
+          }
+        });
       } else if (step === 3) {
         const code = smsOtp.join('');
         if (!phoneConfirmation || code.length !== 6) {
@@ -164,7 +208,7 @@ const Signup = () => {
         }
 
         await phoneConfirmation.confirm(code);
-        triggerWelcomeEmail(cleanEmail);
+        triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email);
 
         if (pendingUser?.id && pendingUser?.aud === 'authenticated') {
           handleAuthSuccess(pendingUser);
@@ -244,7 +288,7 @@ const Signup = () => {
 
           <button 
             type="button"
-            onClick={handleGoogleSignIn}
+            onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6"
           >
             <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
@@ -259,8 +303,15 @@ const Signup = () => {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div id="recaptcha-container"></div>
-            {step === 1 ? (
+            {step === 1 || step === 4 ? (
               <>
+                {step === 4 && (
+                  <div className="text-center p-4 bg-orange-50 border border-orange-100 rounded-xl">
+                    <p className="text-sm text-orange-700 font-medium">
+                      Complete clinic details, then verify your mobile OTP.
+                    </p>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="relative">
                        <User size={18} className="absolute left-3.5 top-3.5 text-gray-400"/>
@@ -272,10 +323,12 @@ const Signup = () => {
                     </div>
                 </div>
 
+                {step === 1 && (
                 <div className="relative">
                     <Mail size={18} className="absolute left-3.5 top-3.5 text-gray-400"/>
                     <input name="email" type="email" onChange={handleChange} className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" placeholder="Email Address" required/>
                 </div>
+                )}
 
                 <div className="relative">
                     <Phone size={18} className="absolute left-3.5 top-3.5 text-gray-400"/>
@@ -312,6 +365,7 @@ const Signup = () => {
                     </select>
                 </div>
 
+                {step === 1 && (
                 <div className="relative">
                     <Lock size={18} className="absolute left-3.5 top-3.5 text-gray-400"/>
                     <input 
@@ -330,9 +384,10 @@ const Signup = () => {
                       {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
                 </div>
+                )}
 
                 <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-6">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Create Yogi Desk Account"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : step === 4 ? "Send Firebase OTP" : "Create Yogi Desk Account"} 
                   {!loading && <ArrowRight size={20}/>}
                 </button>
               </>
@@ -405,4 +460,4 @@ const Signup = () => {
   );
 };
 
-export default Signup;
+export default SignUp;

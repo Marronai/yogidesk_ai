@@ -4,11 +4,10 @@ import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, Shiel
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
-import { supabase } from '../supabaseClient';
+import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import { API_URL } from '../utils/api';
 import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
-import { handleGoogleSignIn } from '../config/supabaseClient';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -94,12 +93,7 @@ const Login = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth-success`
-        }
-      });
+      const { error } = await handleGoogleSignIn();
       if (error) throw error;
     } catch (error) {
       alert("Google Login Failed: " + error.message);
@@ -249,7 +243,7 @@ const Login = () => {
             <>
               <div id="recaptcha-container"></div>
               {/* Google Button */}
-              <button type="button" onClick={handleGoogleSignIn} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
+              <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
                 Sign in with Google
               </button>
