@@ -15,10 +15,19 @@ export const persistSupabaseSession = (user, overrides = {}) => {
     metadata.business_category ||
     metadata.businessCategory ||
     'Clinic';
+  const clinicName =
+    overrides.clinicName ||
+    overrides.businessName ||
+    metadata.clinic_name ||
+    metadata.business_name ||
+    metadata.businessName ||
+    '';
 
   localStorage.setItem('user_id', user.id);
   localStorage.setItem('user_email', user.email || overrides.email || '');
   localStorage.setItem('user_name', userName);
+  localStorage.setItem('clinic_name', clinicName || `${userName}'s Clinic`);
+  localStorage.setItem('user_phone', overrides.phone || metadata.phone || '');
   localStorage.setItem('user_role', 'doctor');
   localStorage.setItem('user_business_category', businessCategory);
   localStorage.setItem('token', `supabase-bypass-token-${user.id}`);

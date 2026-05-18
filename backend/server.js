@@ -14,8 +14,10 @@ app.use(express.urlencoded({ extended: true }));
 // ====== SUPABASE INITIALIZATION ======
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let supabase;
+let supabaseAdmin;
 if (supabaseUrl && supabaseAnonKey) {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
     console.log("⚡ Supabase Client Initialized Successfully!");
@@ -23,8 +25,12 @@ if (supabaseUrl && supabaseAnonKey) {
     console.log("⚠️ Warning: Supabase Credentials Missing in .env");
 }
 
+if (supabaseUrl && supabaseServiceKey) {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+}
+
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
-const RATE_CARD = { UTILITY: 0.25, MARKETING: 1.30, AUTHENTICATION: 0.25 };
+const RATE_CARD = { UTILITY: 0.20, MARKETING: 0.90, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
 const getUnitCost = (category) => RATE_CARD[String(category || 'UTILITY').toUpperCase()] || RATE_CARD.UTILITY;
@@ -44,8 +50,20 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     try {
-        const { email, name, businessName } = req.body || {};
+        const { email, name, businessName, userId } = req.body || {};
         if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+        if (supabaseAdmin && userId) {
+            await supabaseAdmin.from('wallets').upsert({
+                user_id: userId,
+                balance: 50.00,
+                is_first_recharge: true,
+                welcome_gift_active: true,
+                current_plan: 'starter',
+                plan_tier: 'starter',
+                lifetime_contacts_count: 0
+            }, { onConflict: 'user_id', ignoreDuplicates: true });
+        }
 
         const sent = await sendWelcomeEmail(email, name || 'Doctor', businessName || 'Yogi Desk Clinic');
         return res.status(sent ? 200 : 202).json({ success: sent });
@@ -283,7 +301,7 @@ app.post('/api/campaign/broadcast', async (req, res) => {
         if (!supabase) return res.status(500).json({ msg: "Database connection unavailable" });
 
         // 1. Calculate Costs (Flat rates, no GST breakdown shown to user)
-        const unitCost = templateCategory === 'UTILITY' ? 0.25 : 1.30;
+        const unitCost = templateCategory === 'UTILITY' ? 0.20 : 0.90;
         const totalCost = parseFloat((patientCount * unitCost).toFixed(2));
 
         // 2. Fetch User Balance

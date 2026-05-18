@@ -39,8 +39,8 @@ const Team = () => {
     }
 
     const [{ data: walletData }, { data: teamData }] = await Promise.all([
-      supabase.from('wallets').select('current_plan, plan_tier').eq('user_id', user.id).single(),
-      supabase.from('team_members').select('id, name, email, status, created_at').order('created_at', { ascending: false }),
+      supabase.from('wallets').select('current_plan, plan_tier').eq('user_id', user.id).maybeSingle(),
+      supabase.from('team_members').select('id, name, email, status, created_at').eq('admin_id', user.id).order('created_at', { ascending: false }),
     ]);
 
     if (walletData) setWallet(walletData);
@@ -188,7 +188,7 @@ const Team = () => {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-black text-slate-900">Verify Admin Mobile</h2>
-                <p className="mt-1 text-sm font-semibold text-slate-500">Complete Firebase OTP validation before sending this team invite.</p>
+                <p className="mt-1 text-sm font-semibold text-slate-500">Complete OTP validation before sending this team invite.</p>
               </div>
               <button
                 type="button"

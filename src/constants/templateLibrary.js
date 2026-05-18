@@ -11,9 +11,9 @@ export const MEDICAL_SPECIALTIES = [
 ];
 
 export const PRICING_RULES = {
-  UTILITY: 0.25, // Updated rate
-  AUTHENTICATION: 0.25,
-  MARKETING: 1.30 // Updated rate
+  UTILITY: 0.20,
+  AUTHENTICATION: 0.20,
+  MARKETING: 0.90
 };
 
 export const TEMPLATE_DATA = {

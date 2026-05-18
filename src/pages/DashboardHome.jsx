@@ -2,9 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Facebook,
   Gift,
-  PauseCircle,
   PieChart,
-  PlayCircle,
   Send,
   Shield,
   TrendingUp,
@@ -13,14 +11,19 @@ import {
   Zap,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { ensureWallet, MESSAGE_RATES } from '../utils/wallet';
-import { supabase } from '../supabaseClient';
+import { ensureWallet, MESSAGE_RATES, saveWallet } from '../utils/wallet';
+import { supabase } from '../config/supabaseClient';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
+const formatDoctorName = (name = 'Doctor') => {
+  const cleanName = String(name || 'Doctor').trim();
+  return /^dr\.?\s/i.test(cleanName) ? cleanName : `Dr. ${cleanName}`;
+};
 
 const DashboardHome = () => {
   const category = localStorage.getItem('user_business_category') || 'Clinic';
-  const wallet = ensureWallet();
+  const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
+  const [stats, setStats] = useState({ weekly_sent: 0, leads_today: 0, ghost_mode: false });
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Doctor',
@@ -31,22 +34,45 @@ const DashboardHome = () => {
     const loadProfile = async () => {
       const { data } = await supabase.auth.getUser();
       const meta = data?.user?.user_metadata || {};
+      const userId = data?.user?.id || localStorage.getItem('user_id');
       const role = normalizeRole(meta.role || meta.user_role || meta.account_role);
       const name = meta.staff_name || meta.full_name || meta.name || data?.user?.email || profile.name;
       if (active) setProfile({ role, name });
+      if (!userId) return;
+
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - 7);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const [walletResult, sentResult, leadResult] = await Promise.all([
+        supabase.from('wallets').select('balance, is_first_recharge, welcome_gift_active').eq('user_id', userId).maybeSingle(),
+        supabase.from('campaign_queue').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStart.toISOString()),
+        supabase.from('patients_ledger').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', todayStart.toISOString())
+      ]);
+
+      if (active && walletResult.data) setWallet(saveWallet(walletResult.data));
+      if (active) {
+        setStats({
+          weekly_sent: sentResult.count || 0,
+          leads_today: leadResult.count || 0,
+          ghost_mode: false
+        });
+      }
     };
     loadProfile();
     return () => { active = false; };
   }, []);
 
   const isStaff = profile.role === 'STAFF';
-  const stats = { weekly_sent: 8500, leads_today: 12, ghost_mode: true };
+  const liveCampaigns = [];
+  const messageHistory = [0, 0, 0, 0, 0, 0, 0];
 
   return (
     <div className="space-y-8 animate-fade-in pb-10">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Namaste, {profile.name}</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Namaste, {formatDoctorName(profile.name)}</h1>
           <p className="text-gray-500 mt-1">Here is your {category} workspace performance.</p>
           {!isStaff && wallet.welcome_gift_active && (
             <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700">
@@ -73,7 +99,7 @@ const DashboardHome = () => {
             <p className="text-gray-500 text-sm font-medium mb-1">Messages Sent (This Week)</p>
             <h3 className="text-3xl font-extrabold text-gray-900">{stats.weekly_sent.toLocaleString()}</h3>
             <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded flex w-fit mt-2">
-              <TrendingUp size={12} className="mr-1" /> +15% Growth
+              <TrendingUp size={12} className="mr-1" /> Live total
             </span>
           </div>
           <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><Send size={28} /></div>
@@ -123,9 +149,9 @@ const DashboardHome = () => {
               <p className="mt-2 text-sm text-gray-500">Utility reminders cost Rs. {MESSAGE_RATES.utility.toFixed(2)} / msg. Marketing offers cost Rs. {MESSAGE_RATES.marketing.toFixed(2)} / msg.</p>
             </div>
             <div className="rounded-3xl bg-white p-5 border border-gray-100 shadow-sm">
-              <p className="text-sm text-gray-500">UPI Payment Gateway</p>
-              <h4 className="mt-2 text-2xl font-bold text-gray-900">yogidesk@icici</h4>
-              <p className="mt-2 text-sm text-gray-500">Recharge with Rs. 200 or more to become eligible for instant cashback.</p>
+              <p className="text-sm text-gray-500">Fixed Pricing</p>
+              <h4 className="mt-2 text-2xl font-bold text-gray-900">Transparent rates</h4>
+              <p className="mt-2 text-sm text-gray-500">Appointment reminders are fixed at Rs. 0.20/message. Promotional broadcasts are fixed at Rs. 0.90/message.</p>
             </div>
           </div>
         </div>
@@ -135,13 +161,13 @@ const DashboardHome = () => {
         <div className="white-card p-6 flex flex-col">
           <h3 className="font-bold text-gray-800 text-lg mb-6 flex items-center gap-2"><PieChart size={20} className="text-gray-400" /> WhatsApp Template Status</h3>
           <div className="flex items-center gap-8">
-            <div className="relative w-32 h-32 rounded-full" style={{ background: 'conic-gradient(#22c55e 0% 70%, #ef4444 70% 85%, #eab308 85% 100%)' }}>
-              <div className="absolute inset-4 bg-white rounded-full flex items-center justify-center"><span className="text-2xl font-bold text-gray-800">12</span></div>
+            <div className="relative w-32 h-32 rounded-full bg-slate-100">
+              <div className="absolute inset-4 bg-white rounded-full flex items-center justify-center"><span className="text-2xl font-bold text-gray-800">0</span></div>
             </div>
             <div className="space-y-3 text-sm">
-              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-green-500 rounded-full" /><span className="text-gray-600">Approved (8)</span></div>
-              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-red-500 rounded-full" /><span className="text-gray-600">Rejected (2)</span></div>
-              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-yellow-500 rounded-full" /><span className="text-gray-600">Pending (2)</span></div>
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-green-500 rounded-full" /><span className="text-gray-600">Approved (0)</span></div>
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-red-500 rounded-full" /><span className="text-gray-600">Rejected (0)</span></div>
+              <div className="flex items-center gap-2"><span className="w-3 h-3 bg-yellow-500 rounded-full" /><span className="text-gray-600">Pending (0)</span></div>
             </div>
           </div>
           <div className="mt-6 bg-gray-50 p-3 rounded-lg text-xs text-gray-500">Tip: Use clinical, appointment-focused wording for faster template approvals.</div>
@@ -150,14 +176,11 @@ const DashboardHome = () => {
         <div className="lg:col-span-2 white-card p-0 overflow-hidden">
           <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
             <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2"><Facebook size={20} className="text-blue-600" /> Live Ad Campaigns</h3>
-            <span className="text-xs bg-green-100 text-green-700 font-bold px-3 py-1 rounded-full animate-pulse">Live Now</span>
+            <span className="text-xs bg-slate-100 text-slate-500 font-bold px-3 py-1 rounded-full">No active campaigns</span>
           </div>
           <div className="p-6 overflow-x-auto">
             <div className="min-w-[540px] grid gap-4">
-              {[
-                ['Dental Checkup Promo', 'Facebook Feed · Started 2 days ago', 'IMG', '124', <PauseCircle key="pause" size={20} />],
-                ['Free Eye Test Camp', 'Instagram Reels · Started Today', 'VID', '85', <PlayCircle key="play" size={20} />],
-              ].map(([title, meta, type, clicks, icon]) => (
+              {liveCampaigns.map(([title, meta, type, clicks, icon]) => (
                 <div key={title} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">{type}</div>
@@ -167,6 +190,11 @@ const DashboardHome = () => {
                   <button className="text-orange-500 hover:bg-orange-50 p-2 rounded-full">{icon}</button>
                 </div>
               ))}
+              {liveCampaigns.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm font-bold text-slate-400">
+                  No live ad campaigns yet.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -175,7 +203,7 @@ const DashboardHome = () => {
       <div className="white-card p-6">
         <h3 className="font-bold text-gray-800 text-lg mb-6">Message Sent History (Last 7 Days)</h3>
         <div className="h-48 flex items-end justify-between gap-4 px-4">
-          {[45, 70, 30, 85, 55, 95, 40].map((height, index) => (
+          {messageHistory.map((height, index) => (
             <div key={index} className="flex-1 flex flex-col items-center gap-3 group">
               <div className="w-full bg-gray-100 rounded-t-lg relative h-full flex items-end overflow-hidden group-hover:bg-gray-200 transition">
                 <div className="w-full bg-[#FF6B00] rounded-t-lg transition-all duration-700 ease-out group-hover:bg-orange-600" style={{ height: `${height}%` }} />

@@ -14,9 +14,10 @@ import {
   Wallet,
 } from 'lucide-react';
 import { getWallet } from '../utils/wallet';
-import { supabase } from '../supabaseClient';
+import { supabase } from '../config/supabaseClient';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
+const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -26,6 +27,7 @@ const Sidebar = () => {
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Team Member',
+    clinicName: fallbackClinicName(),
   });
 
   useEffect(() => {
@@ -35,7 +37,8 @@ const Sidebar = () => {
       const meta = data?.user?.user_metadata || {};
       const role = normalizeRole(meta.role || meta.user_role || meta.account_role);
       const name = meta.staff_name || meta.full_name || meta.name || data?.user?.email || profile.name;
-      if (active) setProfile({ role, name });
+      const clinicName = meta.clinic_name || meta.business_name || meta.businessName || fallbackClinicName();
+      if (active) setProfile({ role, name, clinicName });
     };
     loadProfile();
     return () => { active = false; };
@@ -75,7 +78,7 @@ const Sidebar = () => {
         <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-orange-500/20">Y</div>
         <div className="min-w-0">
           <span className="block text-xl font-bold text-gray-800 tracking-wide">Yogi Desk</span>
-          <span className="block truncate text-[11px] font-bold uppercase tracking-wider text-gray-400">{profile.name}</span>
+          <span className="block truncate text-[11px] font-bold tracking-wider text-gray-400">{profile.clinicName}</span>
         </div>
       </div>
 

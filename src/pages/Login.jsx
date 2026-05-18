@@ -234,8 +234,8 @@ const Login = () => {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-3xl font-black text-gray-900 mb-2">{step === 1 ? "Welcome Back! 👋" : "Verify Session 🔒"}</h2>
-            <p className="text-gray-500">{step === 1 ? "Please enter your doctor credentials to access the system dashboard." : `Verification token active for ${formData.email}`}</p>
+            <h2 className="text-3xl font-black text-gray-900 mb-2">{step === 1 ? "Welcome Back!" : "Enter Login Code"}</h2>
+            <p className="text-gray-500">{step === 1 ? "Please enter your doctor credentials to access the system dashboard." : "Enter the secure 6-digit access code sent to your mobile device."}</p>
           </div>
 
           {/* 🔴 STEP 1: EMAIL & PASSWORD FORM */}
@@ -256,7 +256,7 @@ const Login = () => {
 
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Clinic Email Address</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Email Address</label>
                   <div className="relative group">
                     <Mail className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#FF6B00] transition-colors" size={20} />
                     <input name="email" type="email" onChange={handleChange} placeholder="doctor@clinic.com" required className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 p-3.5 outline-none focus:border-[#FF6B00]"/>
@@ -273,7 +273,7 @@ const Login = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Admin Mobile OTP</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Mobile Number</label>
                   <div className="relative group">
                     <Phone className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#FF6B00] transition-colors" size={20} />
                     <input name="phone" type="tel" onChange={handleChange} placeholder="10-digit mobile number" required maxLength="10" className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 p-3.5 outline-none focus:border-[#FF6B00]"/>
@@ -316,7 +316,7 @@ const Login = () => {
                </div>
                
                <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-4 rounded-xl font-bold transition-all shadow-xl flex justify-center items-center gap-2">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify Session"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Enter Login Code"} 
                   {!loading && <KeyRound size={20}/>}
                </button>
 

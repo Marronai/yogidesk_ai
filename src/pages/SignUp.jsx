@@ -11,6 +11,7 @@ import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import { API_URL } from '../utils/api';
 import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
+import { saveWallet } from '../utils/wallet';
 
 const SignUp = () => {
   const navigate = useNavigate();
@@ -19,7 +20,6 @@ const SignUp = () => {
   const [phoneConfirmation, setPhoneConfirmation] = useState(null);
   const [pendingUser, setPendingUser] = useState(null);
   const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
-  const [isGoogleIntake, setIsGoogleIntake] = useState(false);
 
   // Signup Steps State (1 = Details, 2 = Confirm/Activation Screen)
   const [step, setStep] = useState(1);
@@ -44,7 +44,6 @@ const SignUp = () => {
       const user = data?.session?.user;
       if (!mounted || !user) return;
       setPendingUser(user);
-      setIsGoogleIntake(Boolean(user.app_metadata?.provider === 'google'));
       if (user.app_metadata?.provider === 'google') setStep(4);
       setFormData((prev) => ({
         ...prev,
@@ -66,25 +65,48 @@ const SignUp = () => {
     if (element.value && element.nextSibling) element.nextSibling.focus();
   };
 
-  const triggerWelcomeEmail = (email = formData.email) => {
+  const ensureSignupWallet = async (userId) => {
+    if (!userId) return;
+
+    const walletPayload = {
+      user_id: userId,
+      balance: 50.00,
+      is_first_recharge: true,
+      welcome_gift_active: true,
+      current_plan: 'starter',
+      plan_tier: 'starter',
+      lifetime_contacts_count: 0,
+    };
+
+    const { error } = await supabase
+      .from('wallets')
+      .upsert(walletPayload, { onConflict: 'user_id', ignoreDuplicates: true });
+
+    if (error) console.warn('Wallet database seed deferred:', error.message);
+
+    saveWallet({
+      balance: 50.00,
+      is_first_recharge: true,
+      welcome_gift_active: true,
+      last_cashback: 0,
+    });
+  };
+
+  const triggerWelcomeEmail = async (email = formData.email, userId = pendingUser?.id) => {
     const payload = JSON.stringify({
       email: email.trim().toLowerCase(),
       name: formData.name.trim(),
       businessName: formData.businessName.trim(),
+      userId,
       template: 'welcome'
     });
 
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(`${API_URL}/api/auth/dispatch-welcome-email`, new Blob([payload], { type: 'application/json' }));
-      return;
-    }
-
-    fetch(`${API_URL}/api/auth/dispatch-welcome-email`, {
+    await fetch(`${API_URL}/api/auth/dispatch-welcome-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: payload,
       keepalive: true,
-    }).catch(() => {});
+    });
   };
 
   const startSignupPhoneVerification = async (user) => {
@@ -105,7 +127,10 @@ const SignUp = () => {
       if (supabaseUser) {
         persistSupabaseSession(supabaseUser, {
           name: formData.name,
+          businessName: formData.businessName,
+          clinicName: formData.businessName,
           businessCategory: formData.businessCategory,
+          phone: formData.phone,
           welcomeGift: true,
         });
         
@@ -121,7 +146,6 @@ const SignUp = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      setIsGoogleIntake(true);
       setStep(4);
       const { error } = await handleGoogleSignIn(`${window.location.origin}/signup`);
       if (error) throw error;
@@ -208,9 +232,10 @@ const SignUp = () => {
         }
 
         await phoneConfirmation.confirm(code);
-        triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email);
+        await ensureSignupWallet(pendingUser?.id);
+        await triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email, pendingUser?.id);
 
-        if (pendingUser?.id && pendingUser?.aud === 'authenticated') {
+        if (pendingUser?.id) {
           handleAuthSuccess(pendingUser);
           return;
         }
@@ -282,7 +307,7 @@ const SignUp = () => {
                {step === 1 ? "Create your Yogi Desk account" : "Activate your account"}
              </h2>
              <p className="text-gray-500">
-               {step === 1 ? "Create your clinic workspace and receive Rs. 50 WhatsApp credits." : `We've sent an activation tracking link to ${formData.email}`}
+               {step === 1 ? "Create your clinic workspace and receive Rs. 50 WhatsApp credits." : step === 3 ? "Enter the secure OTP code sent to your WhatsApp number." : "Complete your clinic details to continue."}
              </p>
           </div>
 
@@ -308,7 +333,7 @@ const SignUp = () => {
                 {step === 4 && (
                   <div className="text-center p-4 bg-orange-50 border border-orange-100 rounded-xl">
                     <p className="text-sm text-orange-700 font-medium">
-                      Complete clinic details, then verify your mobile OTP.
+                      Complete clinic details, then verify your WhatsApp number.
                     </p>
                   </div>
                 )}
@@ -387,7 +412,7 @@ const SignUp = () => {
                 )}
 
                 <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-6">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : step === 4 ? "Send Firebase OTP" : "Create Yogi Desk Account"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : step === 4 ? "Send OTP" : "Create Yogi Desk Account"} 
                   {!loading && <ArrowRight size={20}/>}
                 </button>
               </>
@@ -395,7 +420,7 @@ const SignUp = () => {
               <>
                 <div className="text-center p-6 bg-orange-50 border border-orange-100 rounded-xl mb-4">
                    <p className="text-sm text-orange-700 font-medium">
-                     Enter the Firebase SMS OTP sent to your WhatsApp mobile number.
+                     Enter the secure OTP code sent to your WhatsApp number.
                    </p>
                 </div>
 
@@ -414,7 +439,7 @@ const SignUp = () => {
                 </div>
 
                 <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold transition flex justify-center items-center gap-2 mt-4">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify Mobile & Send Welcome Email"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify OTP"} 
                   {!loading && <ArrowRight size={20}/>}
                 </button>
 
