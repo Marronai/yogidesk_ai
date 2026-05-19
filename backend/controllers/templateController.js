@@ -392,8 +392,6 @@ exports.getTemplates = async (req, res) => {
       return res.json(templates);
     }
 
-    await syncTemplatesFromMeta(userId);
-
     const { data: templates, error } = await supabase
       .from('whatsapp_templates')
       .select('*')
@@ -403,6 +401,12 @@ exports.getTemplates = async (req, res) => {
     if (error) throw error;
 
     res.json(Array.isArray(templates) ? templates : []);
+
+    Promise.resolve()
+      .then(() => syncTemplatesFromMeta(userId))
+      .catch((syncError) => {
+        console.error('Background template sync failed:', syncError.response?.data || syncError.message || syncError);
+      });
   } catch (err) {
     console.error('Get templates error:', err.message);
     return res.status(400).json({ success: false, message: err.message || 'Server Error' });

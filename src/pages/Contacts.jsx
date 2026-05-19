@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Trash2, Users, Phone, Plus, UserPlus, UploadCloud, X, Lock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import api from '../utils/api';
 
 const planCaps = { starter: 500, growth: 2000, hospital: 1000000 };
 
@@ -16,10 +17,11 @@ const Contacts = () => {
   const [manualPatient, setManualPatient] = useState({ name: '', phone: '' });
   const [quickPatient, setQuickPatient] = useState({ name: '', phone: '' });
   const [manualTime, setManualTime] = useState({ hour: '11', minute: '30', period: 'AM' });
+  const backendPath = (path) => String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? path.replace(/^\/api/, '') : path;
 
   const plan = String(walletMeta.current_plan || 'starter').toLowerCase();
   const maxCap = planCaps[plan] || planCaps.starter;
-  const lifetimeCount = Number(walletMeta.lifetime_contacts_count || 0);
+  const lifetimeCount = Number(walletMeta.lifetime_patients_count ?? walletMeta.lifetime_contacts_count ?? 0);
   const isAtLimit = lifetimeCount >= maxCap;
   const metricClass = lifetimeCount <= 350 ? 'border-green-500 bg-green-50 text-green-700' : lifetimeCount <= 450 ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-red-500 bg-red-50 text-red-700 animate-pulse';
   const metricText = `${lifetimeCount} / ${maxCap === 1000000 ? 'Unlimited' : maxCap} Contacts`;
@@ -42,15 +44,15 @@ const Contacts = () => {
     const user = await getSessionUser();
     if (!user) return;
     setLoading(true);
-    const [{ data }, { data: wallet }] = await Promise.all([
+    const [{ data }, usageResult] = await Promise.all([
       supabase.from('patients_ledger').select('*').eq('user_id', user.id),
-      supabase.from('wallets').select('current_plan, plan_tier, lifetime_contacts_count').eq('user_id', user.id).single()
+      api.get(backendPath('/api/user/usage'), { params: { userId: user.id } }).catch(() => ({ data: null }))
     ]);
     setContacts(Array.isArray(data) ? data : []);
-    if (wallet) {
+    if (usageResult.data) {
       setWalletMeta({
-        current_plan: wallet.current_plan || wallet.plan_tier || 'starter',
-        lifetime_contacts_count: wallet.lifetime_contacts_count || 0
+        current_plan: usageResult.data.current_plan || 'starter',
+        lifetime_patients_count: usageResult.data.lifetime_patients_count || 0
       });
     }
     setLoading(false);
@@ -65,12 +67,6 @@ const Contacts = () => {
     return true;
   };
 
-  const bumpLifetimeCount = async (userId, increment) => {
-    const nextCount = lifetimeCount + increment;
-    await supabase.from('wallets').update({ lifetime_contacts_count: nextCount }).eq('user_id', userId);
-    setWalletMeta((cur) => ({ ...cur, lifetime_contacts_count: nextCount }));
-  };
-
   const addPatient = async ({ name, phone, appointment_time }) => {
     const user = await getSessionUser();
     const cleanName = name.trim();
@@ -82,10 +78,10 @@ const Contacts = () => {
     if (contacts.some((c) => c.phone === cleanPhone)) return notify('Duplicate phone skipped.');
 
     const row = { user_id: user.id, name: cleanName, phone: cleanPhone, appointment_time: appointment_time || null };
-    const { data, error } = await supabase.from('patients_ledger').insert([row]).select('*').single();
-    if (error) return notify(error.message || 'Patient sync failed.');
-    await bumpLifetimeCount(user.id, 1);
-    setContacts((cur) => [data, ...cur]);
+    const response = await api.post(backendPath('/api/patients'), { ...row, userId: user.id }).catch((error) => ({ error }));
+    if (response.error) return notify(response.error?.response?.data?.message || response.error.message || 'Patient sync failed.');
+    setWalletMeta((cur) => ({ ...cur, lifetime_patients_count: response.data?.lifetime_patients_count ?? lifetimeCount + 1 }));
+    setContacts((cur) => [response.data?.data, ...cur].filter(Boolean));
     notify('Patient synced.');
     return true;
   };
@@ -130,10 +126,10 @@ const Contacts = () => {
       if (!rows.length) return notify('No valid rows found.');
       if (parsedRows.length > rows.length) notify('Some rows skipped due to contact limit.');
 
-      const { data, error } = await supabase.from('patients_ledger').insert(rows).select('*');
-      if (error) return notify(error.message || 'Import failed.');
-      await bumpLifetimeCount(user.id, rows.length);
-      setContacts((cur) => [...(Array.isArray(data) ? data : []), ...cur]);
+      const response = await api.post(backendPath('/api/patients/bulk'), { userId: user.id, patients: rows }).catch((error) => ({ error }));
+      if (response.error) return notify(response.error?.response?.data?.message || response.error.message || 'Import failed.');
+      setWalletMeta((cur) => ({ ...cur, lifetime_patients_count: response.data?.lifetime_patients_count ?? lifetimeCount + rows.length }));
+      setContacts((cur) => [...(Array.isArray(response.data?.data) ? response.data.data : []), ...cur]);
       notify('File import synced.');
     } finally {
       setImporting(false);

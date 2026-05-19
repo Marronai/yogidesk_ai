@@ -13,6 +13,7 @@ import {
 import { Link } from 'react-router-dom';
 import { ensureWallet, MESSAGE_RATES, saveWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const formatDoctorName = (name = 'Doctor') => {
@@ -24,10 +25,12 @@ const DashboardHome = () => {
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
   const [stats, setStats] = useState({ weekly_sent: 0, leads_today: 0, ghost_mode: false });
+  const [usage, setUsage] = useState({ lifetime_patients_count: 0, limit: 500 });
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Doctor',
   });
+  const backendPath = (path) => String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? path.replace(/^\/api/, '') : path;
 
   useEffect(() => {
     let active = true;
@@ -45,10 +48,11 @@ const DashboardHome = () => {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
-      const [walletResult, sentResult, leadResult] = await Promise.all([
+      const [walletResult, sentResult, leadResult, usageResult] = await Promise.all([
         supabase.from('wallets').select('balance, is_first_recharge, welcome_gift_active').eq('user_id', userId).maybeSingle(),
         supabase.from('campaign_queue').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStart.toISOString()),
-        supabase.from('patients_ledger').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', todayStart.toISOString())
+        supabase.from('patients_ledger').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', todayStart.toISOString()),
+        api.get(backendPath('/api/user/usage'), { params: { userId } }).catch(() => ({ data: null }))
       ]);
 
       if (active && walletResult.data) setWallet(saveWallet(walletResult.data));
@@ -58,6 +62,12 @@ const DashboardHome = () => {
           leads_today: leadResult.count || 0,
           ghost_mode: false
         });
+        if (usageResult.data) {
+          setUsage({
+            lifetime_patients_count: Number(usageResult.data.lifetime_patients_count || 0),
+            limit: Number(usageResult.data.limit || 500)
+          });
+        }
       }
     };
     loadProfile();
@@ -123,9 +133,9 @@ const DashboardHome = () => {
 
         <div className="white-card p-6 flex items-center justify-between border-l-4 border-l-green-500">
           <div>
-            <p className="text-gray-500 text-sm font-medium mb-1">New Patients from Ads</p>
-            <h3 className="text-3xl font-extrabold text-gray-900">{stats.leads_today}</h3>
-            <span className="text-xs text-gray-400 mt-1">Since today morning</span>
+            <p className="text-gray-500 text-sm font-medium mb-1">Lifetime Patients</p>
+            <h3 className="text-3xl font-extrabold text-gray-900">{usage.lifetime_patients_count}/{usage.limit || 500}</h3>
+            <span className="text-xs text-gray-400 mt-1">New today: {stats.leads_today}</span>
           </div>
           <div className="p-4 bg-green-50 text-green-600 rounded-2xl"><Users size={28} /></div>
         </div>

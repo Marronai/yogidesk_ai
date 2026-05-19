@@ -4,6 +4,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const emailConfig = require('./config/emailConfig');
+const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
 
 const app = express();
 
@@ -152,6 +153,10 @@ app.get('/api/health', (req, res) => {
     audience: 'Doctors and Clinics',
   });
 });
+
+app.get('/api/user/usage', getUserUsage);
+app.post('/api/patients', addPatient);
+app.post('/api/patients/bulk', addPatients);
 
 app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     try {
@@ -411,6 +416,120 @@ app.post('/api/webhook/meta', async (req, res) => {
 });
 
 // ====== WHATSAPP TEMPLATE CREATION ======
+const syncTemplatesFromMetaInBackground = async (userId) => {
+    if (!supabase?.from || !userId) return;
+
+    const { data: userMeta, error: credentialError } = await supabase
+        .from('doctor_profiles')
+        .select('whatsapp_access_token,whatsapp_business_account_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (credentialError || !userMeta?.whatsapp_business_account_id || !userMeta?.whatsapp_access_token) {
+        if (credentialError) console.warn('Background template sync credential error:', credentialError.message);
+        return;
+    }
+
+    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.whatsapp_business_account_id}/message_templates`;
+    const response = await require('axios').get(graphUrl, {
+        headers: { Authorization: `Bearer ${userMeta.whatsapp_access_token}` }
+    });
+
+    const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
+    if (!metaTemplates.length) return;
+
+    const { data: localTemplates, error: localError } = await supabase
+        .from('whatsapp_templates')
+        .select('id,template_name')
+        .eq('user_id', userId);
+
+    if (localError) throw localError;
+
+    const localByName = new Map(
+        (Array.isArray(localTemplates) ? localTemplates : [])
+            .map((template) => [String(template.template_name || '').toLowerCase(), template])
+            .filter(([name]) => name)
+    );
+
+    for (const metaTemplate of metaTemplates) {
+        const templateName = metaTemplate.name || metaTemplate.template_name;
+        if (!templateName) continue;
+
+        const status = String(metaTemplate.status || 'PENDING').toUpperCase() === 'PENDING_REVIEW'
+            ? 'PENDING'
+            : String(metaTemplate.status || 'PENDING').toUpperCase();
+        const metaTemplateId = metaTemplate.id || metaTemplate.message_template_id || null;
+        const components = Array.isArray(metaTemplate.components) ? metaTemplate.components : [];
+        const body = components.find((component) => component.type === 'BODY');
+        const header = components.find((component) => component.type === 'HEADER');
+        const footer = components.find((component) => component.type === 'FOOTER');
+        const buttons = components.find((component) => component.type === 'BUTTONS');
+
+        if (localByName.has(String(templateName).toLowerCase())) {
+            const { error } = await supabase
+                .from('whatsapp_templates')
+                .update({ status, meta_template_id: metaTemplateId })
+                .eq('user_id', userId)
+                .eq('template_name', templateName);
+            if (error) throw error;
+            continue;
+        }
+
+        const { error } = await supabase
+            .from('whatsapp_templates')
+            .upsert({
+                user_id: userId,
+                template_name: templateName,
+                category: metaTemplate.category || 'MARKETING',
+                language: metaTemplate.language || 'en_US',
+                body_content: body?.text || '',
+                status,
+                header_type: header?.format || 'NONE',
+                header_text: header?.format === 'TEXT' ? header?.text || null : null,
+                footer_text: footer?.text || null,
+                buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
+                created_at: new Date().toISOString(),
+                meta_template_id: metaTemplateId
+            });
+        if (error) throw error;
+    }
+};
+
+app.get('/api/templates', async (req, res) => {
+    try {
+        if (!supabase?.from) {
+            throw new Error('Database connection unavailable.');
+        }
+
+        const userId = req.query.userId || req.body?.userId;
+        if (!userId) {
+            return res.status(400).json({ success: false, message: 'User ID is required.' });
+        }
+
+        const { data: templates, error } = await supabase
+            .from('whatsapp_templates')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        return res.status(200).json(Array.isArray(templates) ? templates : []);
+    } catch (error) {
+        console.error('Template fetch error:', error.message || error);
+        return res.status(400).json({ success: false, message: error.message || 'Template fetch failed.' });
+    } finally {
+        const userId = req.query.userId || req.body?.userId;
+        if (userId) {
+            Promise.resolve()
+                .then(() => syncTemplatesFromMetaInBackground(userId))
+                .catch((syncError) => {
+                    console.error('Background template sync failed:', syncError.response?.data || syncError.message || syncError);
+                });
+        }
+    }
+});
+
 app.get('/api/templates/sync', async (req, res) => {
     try {
         if (!supabase?.from) {
