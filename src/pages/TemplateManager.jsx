@@ -48,31 +48,14 @@ const TemplateManager = () => {
         }
 
         setSyncing(true);
-        try {
-          await api.get('/api/templates/sync', { params: { userId } });
-        } catch (syncError) {
-          console.warn('Template sync failed:', syncError?.response?.data?.message || syncError.message);
-        } finally {
-          setSyncing(false);
-        }
-        
-        // Fetch from Supabase whatsapp_templates table
-        const { data, error } = await supabase
-          .from('whatsapp_templates')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-        
-        if (error) {
-          throw error;
-        }
-        
-        setTemplates(Array.isArray(data) ? data : []);
+        const response = await api.get('/api/templates', { params: { userId } });
+        setTemplates(Array.isArray(response.data) ? response.data : []);
       } catch (err) {
         console.error('Template fetch failed:', err);
         setError('Unable to load templates at the moment.');
         setTemplates([]);
       } finally {
+        setSyncing(false);
         setLoading(false);
       }
     };
@@ -112,13 +95,13 @@ const TemplateManager = () => {
   }, [searchTerm, templates]);
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'APPROVED': return 'text-emerald-600 bg-emerald-50 border-emerald-200';
+    switch (String(status || '').toUpperCase()) {
+      case 'APPROVED': return 'text-green-700 bg-green-50 border-green-200';
+      case 'REJECTED': return 'text-red-700 bg-red-50 border-red-200';
       case 'PENDING_REVIEW':
-      case 'PENDING': return 'text-amber-600 bg-amber-50 border-amber-200';
-      case 'REJECTED': return 'text-rose-600 bg-rose-50 border-rose-200';
+      case 'PENDING': return 'text-orange-700 bg-orange-50 border-orange-200';
       case 'DRAFT': return 'text-slate-600 bg-slate-50 border-slate-200';
-      default: return 'text-slate-600 bg-slate-50';
+      default: return 'text-slate-600 bg-slate-50 border-slate-200';
     }
   };
 

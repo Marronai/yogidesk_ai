@@ -1,7 +1,12 @@
 require('dotenv').config();
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
-const Template = require('../models/Template');
+let Template = null;
+try {
+  Template = require('../models/Template');
+} catch (err) {
+  Template = null;
+}
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -133,6 +138,104 @@ const getUserMetaCredentials = async (userId) => {
   };
 };
 
+const normalizeMetaStatus = (status) => {
+  const normalized = String(status || 'PENDING').toUpperCase();
+  if (normalized === 'PENDING_REVIEW' || normalized === 'IN_REVIEW') return 'PENDING';
+  if (['APPROVED', 'REJECTED', 'PENDING'].includes(normalized)) return normalized;
+  return normalized || 'PENDING';
+};
+
+const getComponent = (components, type) => (
+  Array.isArray(components)
+    ? components.find((component) => String(component?.type || '').toUpperCase() === type)
+    : null
+);
+
+const mapMetaTemplateToRow = (metaTemplate, userId) => {
+  const components = Array.isArray(metaTemplate?.components) ? metaTemplate.components : [];
+  const header = getComponent(components, 'HEADER');
+  const body = getComponent(components, 'BODY');
+  const footer = getComponent(components, 'FOOTER');
+  const buttons = getComponent(components, 'BUTTONS');
+
+  return {
+    user_id: userId,
+    template_name: metaTemplate.name || metaTemplate.template_name,
+    category: metaTemplate.category || 'MARKETING',
+    language: metaTemplate.language || 'en_US',
+    body_content: body?.text || '',
+    status: normalizeMetaStatus(metaTemplate.status),
+    header_type: header?.format || 'NONE',
+    header_text: header?.format === 'TEXT' ? header?.text || null : null,
+    footer_text: footer?.text || null,
+    buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
+    created_at: new Date().toISOString(),
+    meta_template_id: metaTemplate.id || metaTemplate.message_template_id || null
+  };
+};
+
+const syncTemplatesFromMeta = async (userId) => {
+  if (!supabase?.from || !userId) return;
+
+  const credentials = await getUserMetaCredentials(userId);
+  const wabaId = credentials.businessAccountId || process.env.META_WABA_ID || process.env.META_PHONE_ID;
+  const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
+
+  if (!wabaId || !accessToken) {
+    console.warn('Template Meta sync skipped: missing WhatsApp Business Account credentials.');
+    return;
+  }
+
+  const graphUrl = `https://graph.facebook.com/v20.0/${wabaId}/message_templates`;
+  const response = await axios.get(graphUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` }
+  });
+
+  const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
+  if (!metaTemplates.length) return;
+
+  const { data: localTemplates, error: localError } = await supabase
+    .from('whatsapp_templates')
+    .select('id,template_name')
+    .eq('user_id', userId);
+
+  if (localError) throw localError;
+
+  const localByName = new Map(
+    (Array.isArray(localTemplates) ? localTemplates : [])
+      .map((template) => [String(template.template_name || '').toLowerCase(), template])
+      .filter(([name]) => name)
+  );
+
+  for (const metaTemplate of metaTemplates) {
+    const templateName = metaTemplate.name || metaTemplate.template_name;
+    if (!templateName) continue;
+
+    const row = mapMetaTemplateToRow(metaTemplate, userId);
+    const existingTemplate = localByName.get(String(templateName).toLowerCase());
+
+    if (existingTemplate?.id) {
+      const { error: updateError } = await supabase
+        .from('whatsapp_templates')
+        .update({
+          status: row.status,
+          meta_template_id: row.meta_template_id
+        })
+        .eq('user_id', userId)
+        .eq('template_name', templateName);
+
+      if (updateError) throw updateError;
+      continue;
+    }
+
+    const { error: upsertError } = await supabase
+      .from('whatsapp_templates')
+      .upsert(row);
+
+    if (upsertError) throw upsertError;
+  }
+};
+
 exports.createTemplate = async (req, res) => {
   try {
     if (!supabase?.from) {
@@ -221,7 +324,7 @@ exports.createTemplate = async (req, res) => {
       return res.status(400).json({ success: false, message: insertError.message || 'Template created in Meta, but failed to save.' });
     }
 
-    const newTemplate = await Template.create({
+    const newTemplate = Template?.create ? await Template.create({
       name: formattedName,
       bodyText,
       headerType,
@@ -232,7 +335,7 @@ exports.createTemplate = async (req, res) => {
       status: 'PENDING_REVIEW',
       metaTemplateId,
       businessId: userId
-    });
+    }) : null;
 
     res.status(201).json({ message: 'Template submitted successfully.', data: insertedTemplate || newTemplate, status: 'PENDING_REVIEW' });
   } catch (err) {
@@ -243,12 +346,28 @@ exports.createTemplate = async (req, res) => {
 
 exports.getTemplates = async (req, res) => {
   try {
-    if (!req.user?.id) {
+    const userId = req.user?.id || req.query?.userId;
+    if (!userId) {
       throw new Error('Authenticated user is required.');
     }
 
-    const templates = await Template.find({ businessId: req.user.id });
-    res.json(templates);
+    if (!supabase?.from) {
+      if (!Template?.find) throw new Error('Database connection unavailable.');
+      const templates = await Template.find({ businessId: userId });
+      return res.json(templates);
+    }
+
+    await syncTemplatesFromMeta(userId);
+
+    const { data: templates, error } = await supabase
+      .from('whatsapp_templates')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(Array.isArray(templates) ? templates : []);
   } catch (err) {
     console.error('Get templates error:', err.message);
     return res.status(400).json({ success: false, message: err.message || 'Server Error' });
