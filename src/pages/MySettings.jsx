@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import axios from 'axios';
+import { supabase } from '../config/supabaseClient';
 
 const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [savingConnection, setSavingConnection] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     whatsappPhoneNumberId: '',
-    whatsappWabaId: '',
+    whatsappBusinessAccountId: '',
     whatsappAccessToken: '',
   });
 
@@ -22,13 +25,44 @@ const Settings = () => {
         });
         const user = res.data || {};
 
+        let connectionValues = {
+          whatsappPhoneNumberId: '',
+          whatsappBusinessAccountId: '',
+          whatsappAccessToken: '',
+        };
+
+        try {
+          const { data: authData } = await supabase.auth.getUser();
+          const supabaseUserId = authData?.user?.id || localStorage.getItem('user_id');
+          if (supabaseUserId) {
+            const { data } = await supabase
+              .from('users')
+              .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+              .eq('id', supabaseUserId)
+              .single();
+
+            if (data) {
+              connectionValues = {
+                whatsappPhoneNumberId: data.whatsapp_phone_number_id || '',
+                whatsappBusinessAccountId: data.whatsapp_business_account_id || '',
+                whatsappAccessToken: data.whatsapp_access_token || '',
+              };
+            }
+          }
+        } catch (err) {
+          console.warn('Unable to fetch Supabase connection settings:', err.message || err);
+        }
+
         setFormData({
           name: user.name || '',
           email: user.email || '',
-          whatsappPhoneNumberId: user.whatsappConfig?.phoneNumberId || '',
-          whatsappWabaId: user.whatsappConfig?.wabaId || '',
-          whatsappAccessToken: user.whatsappConfig?.accessToken || '',
+          ...connectionValues,
         });
+        setConnectionStatus(
+          connectionValues.whatsappPhoneNumberId && connectionValues.whatsappBusinessAccountId && connectionValues.whatsappAccessToken
+            ? 'connected'
+            : 'disconnected'
+        );
       } catch (err) {
         console.error('Failed to load user data:', err);
       } finally {
@@ -62,6 +96,44 @@ const Settings = () => {
       setLoading(false);
     }
   };
+
+  const handleSaveConnection = async (e) => {
+    e.preventDefault();
+    setSavingConnection(true);
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+
+      const userId = authData?.user?.id || localStorage.getItem('user_id');
+      if (!userId) throw new Error('Unable to identify the current user. Please sign in again.');
+
+      const { error } = await supabase.from('users').upsert(
+        {
+          id: userId,
+          whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
+          whatsapp_business_account_id: formData.whatsappBusinessAccountId || null,
+          whatsapp_access_token: formData.whatsappAccessToken || null,
+        },
+        { onConflict: 'id' }
+      );
+
+      if (error) throw error;
+
+      setConnectionStatus(
+        formData.whatsappPhoneNumberId && formData.whatsappBusinessAccountId && formData.whatsappAccessToken
+          ? 'connected'
+          : 'disconnected'
+      );
+      alert('WhatsApp connection saved to your Supabase profile.');
+    } catch (err) {
+      alert(err.message || 'Unable to save connection details.');
+    } finally {
+      setSavingConnection(false);
+    }
+  };
+
+  const isConnected = connectionStatus === 'connected';
 
   return (
     <div className="min-h-screen bg-orange-50/30 px-4 py-6 sm:px-6 lg:px-8">
@@ -125,46 +197,58 @@ const Settings = () => {
           </section>
 
           <section className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
-            <div className="mb-6 flex items-start gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
-                <Smartphone size={22} />
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+                  <Smartphone size={22} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-950">Official Meta API Connection</h2>
+                  <p className="mt-1 text-sm font-medium text-slate-500">
+                    Add your clinic doctor’s Meta WhatsApp Cloud credentials here.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-black text-slate-950">WhatsApp Configuration</h2>
-                <p className="mt-1 text-sm font-medium text-slate-500">
-                  Connect your Meta WhatsApp Business account for automated messaging.
-                </p>
-              </div>
+
+              <span
+                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                  isConnected
+                    ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                    : 'border-slate-200 bg-slate-100 text-slate-600'
+                }`}
+              >
+                {isConnected ? '🟢 Connected to your Meta Cloud' : '⚠️ Not connected yet'}
+              </span>
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Phone Number ID</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Phone Number ID</label>
                 <div className="relative">
                   <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input
                     type="text"
                     value={formData.whatsappPhoneNumberId}
                     onChange={(e) => updateField('whatsappPhoneNumberId', e.target.value)}
-                    placeholder="e.g. 10987654321"
+                    placeholder="Enter your WhatsApp Phone Number ID"
                     className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">WABA ID</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Business Account ID</label>
                 <input
                   type="text"
-                  value={formData.whatsappWabaId}
-                  onChange={(e) => updateField('whatsappWabaId', e.target.value)}
-                  placeholder="WhatsApp Business Account ID"
+                  value={formData.whatsappBusinessAccountId}
+                  onChange={(e) => updateField('whatsappBusinessAccountId', e.target.value)}
+                  placeholder="Enter your WABA ID"
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                 />
               </div>
 
               <div className="space-y-2 lg:col-span-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Permanent Access Token</label>
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">System User Access Token</label>
                 <input
                   type="password"
                   value={formData.whatsappAccessToken}
@@ -175,8 +259,20 @@ const Settings = () => {
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800">
-              Your WhatsApp credentials should be permanent Meta Cloud API credentials for the connected clinic or healthcare team.
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800">
+                Your WhatsApp credentials are stored per doctor and used by the campaign engine for authenticated Meta Cloud dispatch.
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveConnection}
+                disabled={savingConnection || loadingProfile}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+              >
+                {savingConnection ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                {savingConnection ? 'Saving...' : 'Save Connection'}
+              </button>
             </div>
           </section>
 

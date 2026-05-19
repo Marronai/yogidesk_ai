@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { simulateMetaApproval } from '../utils/metaApprovalSimulator';
+import api from '../utils/api';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
@@ -170,9 +170,7 @@ const Templates = () => {
     try {
       const userId = localStorage.getItem('user_id');
       if (!userId) throw new Error('User ID not found. Please login again.');
-      const mediaHeaderTypes = ['IMAGE', 'VIDEO', 'DOCUMENT'];
       const headerType = template.headerType || 'NONE';
-      const headerMediaUrl = mediaHeaderTypes.includes(headerType) ? String(template.headerUrl || '').trim() : '';
       const buttonPayload = template.buttons
         .map((btn) => {
           const text = String(btn.text || '').trim();
@@ -185,57 +183,23 @@ const Templates = () => {
         })
         .filter(Boolean);
 
-      // STEP A: Insert into Supabase whatsapp_templates table
-      const { data: insertedTemplate, error: insertError } = await supabase
-        .from('whatsapp_templates')
-        .insert([
-          {
-            user_id: userId,
-            template_name: template.name.trim(),
-            category: template.category,
-            language: languageToSubmit,
-            body_content: bodyToSubmit,
-            status: 'PENDING',
-            header_type: headerType,
-            header_text: headerType === 'TEXT' ? template.headerText.trim() : null,
-            header_media_url: headerMediaUrl || null,
-            footer_text: template.footerText.trim() || null,
-            buttons: buttonPayload,
-            created_at: new Date().toISOString()
-          }
-        ])
-        .select();
-
-      if (insertError) {
-        console.error('Supabase insert error:', insertError);
-        throw insertError;
-      }
-
-      if (!insertedTemplate || insertedTemplate.length === 0) {
-        throw new Error('Template insertion returned no data');
-      }
-
-      const templateId = insertedTemplate[0].id;
-      console.log('✅ Template inserted into database:', templateId);
-
-      // STEP B: Show sleek UI toast notification
-      setMessage('📩 Template submitted to Meta for verification. Status: Pending.');
-      console.log('📩 Template submitted to Meta for verification. Status: Pending.');
-
-      // STEP C: Trigger simulateMetaApproval function
-      console.log('⏳ Simulating Meta approval webhook check (5 seconds)...');
-      simulateMetaApproval(templateId, userId).then((result) => {
-        if (result.success) {
-          // STEP D: Re-fetch templates and show approved badge
-          console.log('✅ Template status updated to APPROVED');
-          setMessage('✅ Template approved by Meta! Status: Approved.');
-          
-          // Navigate back to templates after a brief delay so user sees the success message
-          setTimeout(() => navigate('/templates'), 2000);
-        } else {
-          console.error('Meta approval simulation failed:', result.error);
-        }
+      await api.post('/templates', {
+        userId,
+        name: template.name.trim(),
+        bodyText: bodyToSubmit,
+        language: languageToSubmit === 'en' ? 'en_US' : languageToSubmit,
+        category: template.category,
+        headerType,
+        headerText: template.headerText.trim(),
+        footerText: template.footerText.trim(),
+        buttons: buttonPayload
       });
+
+      setMessage('📩 Template submitted to Meta and saved as pending. Approval status will update automatically when Meta webhook fires.');
+      setSaving(false);
+      console.log('📩 Template submitted to Meta and saved as pending.');
+
+      setTimeout(() => navigate('/templates'), 2000);
 
     } catch (err) {
       console.error('Template submit failed:', err);

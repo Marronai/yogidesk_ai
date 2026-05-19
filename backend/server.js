@@ -163,50 +163,77 @@ app.post('/api/webhook/meta', async (req, res) => {
         const body = req.body;
 
         // Verify if this is a genuine WhatsApp message object
-        if (body.object && body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages) {
-            const messageData = body.entry[0].changes[0].value.messages[0];
-            const patientPhone = messageData.from; // Patient's WhatsApp number
+        if (body.object && body.entry && Array.isArray(body.entry)) {
+            for (const entry of body.entry) {
+                if (!Array.isArray(entry.changes)) continue;
 
-            console.log(`📩 Message received from patient: ${patientPhone}`);
+                for (const change of entry.changes) {
+                    const field = change.field;
+                    const value = change.value || {};
 
-            // If patient clicked a quick reply button inside the WhatsApp Template
-            if (messageData.type === 'button') {
-                const buttonPayload = messageData.button.payload; // 'CONFIRM_SLOT' or 'CANCEL_SLOT'
-                const buttonText = messageData.button.text;
+                    if (field === 'message_template' || field === 'message_template_status_update') {
+                        const messageTemplate = value.message_template || value.message_template_status || value;
+                        if (!messageTemplate || !messageTemplate.id) continue;
 
-                console.log(`🔘 Patient clicked: ${buttonText} (Payload: ${buttonPayload})`);
+                        const status = (messageTemplate.status || '').toUpperCase();
+                        if (['APPROVED', 'REJECTED'].includes(status)) {
+                            let updateQuery = supabase
+                                .from('whatsapp_templates')
+                                .update({ status })
+                                .eq('meta_template_id', messageTemplate.id);
 
-                if (supabase) {
-                    // Step A: Save incoming activity to backup logs table
-                    await supabase.from('whatsapp_logs').insert([
-                        { 
-                            patient_phone: patientPhone, 
-                            button_payload: buttonPayload, 
-                            raw_response: body 
+                        const webhookUserId = value.metadata?.user_id || value.user_id;
+                        if (webhookUserId) {
+                            updateQuery = updateQuery.eq('user_id', webhookUserId);
                         }
-                    ]);
 
-                    // Step B: Set local variables for dynamic statuses
-                    let newStatus = buttonPayload === 'CONFIRM_SLOT' ? 'Confirmed' : 'Cancelled';
+                        const updateResult = await updateQuery;
+                        if (updateResult.error) {
+                            console.error('Webhook template status update failed:', updateResult.error);
+                        } else {
+                            console.log(`Webhook updated template status to ${status} for meta_template_id=${messageTemplate.id}`);
+                        }
+                        }
+                    }
 
-                    // Step C: Lookup patient ID from 'patients' table using phone number
-                    const { data: patient } = await supabase
-                        .from('patients')
-                        .select('id')
-                        .eq('phone_number', patientPhone)
-                        .order('created_at', { ascending: false })
-                        .limit(1)
-                        .single();
+                    if (field === 'messages' && value.messages && value.messages[0]) {
+                        const messageData = value.messages[0];
+                        const patientPhone = messageData.from;
+                        console.log(`📩 Message received from patient: ${patientPhone}`);
 
-                    if (patient) {
-                        // Step D: Update live status in 'appointments' table
-                        await supabase
-                            .from('appointments')
-                            .update({ status: newStatus })
-                            .eq('patient_id', patient.id)
-                            .eq('status', 'Pending'); // Updates unconfirmed slots safely
-                        
-                        console.log(`🔄 Supabase Status successfully updated to: ${newStatus}`);
+                        if (messageData.type === 'button') {
+                            const buttonPayload = messageData.button?.payload;
+                            const buttonText = messageData.button?.text;
+                            console.log(`🔘 Patient clicked: ${buttonText} (Payload: ${buttonPayload})`);
+
+                            if (supabase) {
+                                await supabase.from('whatsapp_logs').insert([
+                                    {
+                                        patient_phone: patientPhone,
+                                        button_payload: buttonPayload,
+                                        raw_response: body
+                                    }
+                                ]);
+
+                                const newStatus = buttonPayload === 'CONFIRM_SLOT' ? 'Confirmed' : 'Cancelled';
+                                const { data: patient } = await supabase
+                                    .from('patients')
+                                    .select('id')
+                                    .eq('phone_number', patientPhone)
+                                    .order('created_at', { ascending: false })
+                                    .limit(1)
+                                    .single();
+
+                                if (patient) {
+                                    await supabase
+                                        .from('appointments')
+                                        .update({ status: newStatus })
+                                        .eq('patient_id', patient.id)
+                                        .eq('status', 'Pending');
+                                    console.log(`🔄 Supabase Status successfully updated to: ${newStatus}`);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -217,6 +244,138 @@ app.post('/api/webhook/meta', async (req, res) => {
     } catch (error) {
         console.error('❌ Webhook Processing Error:', error.message);
         return res.status(200).send('EVENT_RECEIVED'); 
+    }
+});
+
+// ====== WHATSAPP TEMPLATE CREATION ======
+app.post('/api/templates', async (req, res) => {
+    try {
+        const {
+            userId,
+            name,
+            bodyText,
+            language = 'en_US',
+            category = 'MARKETING',
+            headerType = 'NONE',
+            headerText = '',
+            footerText = '',
+            buttons = []
+        } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ message: 'User ID is required.' });
+        }
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ message: 'Template name is required.' });
+        }
+
+        if (!bodyText || !bodyText.trim()) {
+            return res.status(400).json({ message: 'Template body text is required.' });
+        }
+
+        const { data: userMeta, error: credentialError } = await supabase
+            .from('users')
+            .select('whatsapp_business_account_id,whatsapp_access_token')
+            .eq('id', userId)
+            .single();
+
+        if (credentialError || !userMeta) {
+            console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
+        }
+
+        const businessAccountId = userMeta?.whatsapp_business_account_id || process.env.META_WABA_ID;
+        const accessToken = userMeta?.whatsapp_access_token || process.env.META_ACCESS_TOKEN;
+
+        if (!businessAccountId || !accessToken) {
+            return res.status(400).json({ message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
+        }
+
+        const graphComponents = [
+            { type: 'BODY', text: bodyText }
+        ];
+
+        if (headerType === 'TEXT' && headerText) {
+            graphComponents.unshift({
+                type: 'HEADER',
+                format: 'TEXT',
+                text: headerText
+            });
+        }
+
+        if (footerText) {
+            graphComponents.push({
+                type: 'FOOTER',
+                text: footerText
+            });
+        }
+
+        const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
+            if (btn.type === 'URL' && btn.text && btn.url) {
+                return {
+                    type: 'URL',
+                    text: btn.text,
+                    url: btn.url
+                };
+            }
+
+            if (btn.type === 'PHONE_NUMBER' && btn.text && btn.phone_number) {
+                return {
+                    type: 'PHONE_NUMBER',
+                    text: btn.text,
+                    phone_number: btn.phone_number
+                };
+            }
+
+            return null;
+        }).filter(Boolean) : [];
+
+        if (sanitizedButtons.length > 0) {
+            graphComponents.push({ type: 'BUTTONS', buttons: sanitizedButtons });
+        }
+
+        const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
+        const response = await require('axios').post(graphUrl, {
+            name: name.trim(),
+            language: { code: language },
+            category,
+            components: graphComponents
+        }, {
+            params: {
+                access_token: accessToken
+            }
+        });
+
+        const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
+        const newTemplateRow = {
+            user_id: userId,
+            template_name: name.trim(),
+            category,
+            language,
+            body_content: bodyText,
+            status: 'PENDING',
+            header_type: headerType,
+            header_text: headerType === 'TEXT' ? headerText.trim() : null,
+            footer_text: footerText ? footerText.trim() : null,
+            buttons: sanitizedButtons,
+            created_at: new Date().toISOString(),
+            meta_template_id: metaTemplateId
+        };
+
+        const { data: insertedTemplate, error: insertError } = await supabase
+            .from('whatsapp_templates')
+            .insert([newTemplateRow])
+            .select();
+
+        if (insertError) {
+            console.error('Supabase template insert error:', insertError);
+            return res.status(500).json({ message: 'Template created in Meta, but failed to persist locally.' });
+        }
+
+        return res.status(201).json({ message: 'Template submitted successfully.', data: insertedTemplate[0] });
+    } catch (error) {
+        console.error('Template submission error:', error.response?.data || error.message || error);
+        return res.status(500).json({ message: error.response?.data?.error?.message || error.message || 'Template submission failed.' });
     }
 });
 
@@ -438,11 +597,48 @@ app.post('/api/payment/payu-hash', async (req, res) => {
 
 // ====== INTERNAL CAMPAIGN QUEUE WORKER ======
 let campaignWorkerRunning = false;
-const triggerMockMetaWebhook = async (queueItem) => ({
-    ok: true,
-    provider: 'mock_meta',
-    message_id: `mock_${queueItem.id}_${Date.now()}`
-});
+
+const getUserMetaCredentials = async (userId) => {
+    if (!supabase || !userId) return {};
+
+    try {
+        const { data, error } = await supabase
+            .from('users')
+            .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+            .eq('id', userId)
+            .single();
+
+        if (error || !data) return {};
+        return {
+            phoneNumberId: data.whatsapp_phone_number_id || null,
+            businessAccountId: data.whatsapp_business_account_id || null,
+            accessToken: data.whatsapp_access_token || null,
+        };
+    } catch (err) {
+        console.error('Supabase Meta credential lookup failed:', err.message || err);
+        return {};
+    }
+};
+
+const triggerMockMetaWebhook = async (queueItem) => {
+    const credentials = await getUserMetaCredentials(queueItem.user_id);
+    const phoneNumberId = credentials.phoneNumberId || process.env.META_PHONE_ID;
+    const businessAccountId = credentials.businessAccountId || process.env.META_WABA_ID;
+    const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
+    const usedFallback = !credentials.phoneNumberId || !credentials.accessToken;
+
+    console.log(`Dynamic WhatsApp credentials for user ${queueItem.user_id}: phoneNumberId=${phoneNumberId}, businessAccountId=${businessAccountId}, fallback=${usedFallback}`);
+
+    return {
+        ok: true,
+        provider: 'mock_meta',
+        user_id: queueItem.user_id,
+        phone_number_id: phoneNumberId,
+        whatsapp_business_account_id: businessAccountId,
+        access_token_source: usedFallback ? 'system_master_fallback' : 'user_specific',
+        message_id: `mock_${queueItem.id}_${Date.now()}`,
+    };
+};
 
 const processCampaignQueue = async () => {
     if (!supabase || campaignWorkerRunning) return;
@@ -482,7 +678,7 @@ const processCampaignQueue = async () => {
                 recipient_name: row.recipient_name,
                 recipient_phone: row.recipient_phone,
                 template_name: row.template_name,
-                meta_result: metaResult
+                meta_result: metaResult,
             };
 
             await Promise.allSettled([
@@ -494,7 +690,7 @@ const processCampaignQueue = async () => {
                     type: 'message_debit',
                     description: `Campaign sent to ${row.recipient_phone} using ${row.template_name}`,
                     metadata: logPayload,
-                    created_at: new Date().toISOString()
+                    created_at: new Date().toISOString(),
                 }]),
                 supabase.from('inbox').insert([{
                     user_id: row.user_id,
@@ -503,8 +699,8 @@ const processCampaignQueue = async () => {
                     direction: 'OUTBOUND',
                     message: `Sent template: ${row.template_name}`,
                     metadata: logPayload,
-                    created_at: new Date().toISOString()
-                }])
+                    created_at: new Date().toISOString(),
+                }]),
             ]);
         }
     } catch (error) {
