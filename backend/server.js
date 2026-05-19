@@ -280,7 +280,7 @@ app.post('/api/webhook/meta', async (req, res) => {
                                     .eq('phone_number', patientPhone)
                                     .order('created_at', { ascending: false })
                                     .limit(1)
-                                    .single();
+                                    .maybeSingle();
 
                                 if (patient) {
                                     await supabase
@@ -333,17 +333,17 @@ app.post('/api/templates', async (req, res) => {
         }
 
         const { data: userMeta, error: credentialError } = await supabase
-            .from('users')
+            .from('profiles')
             .select('whatsapp_business_account_id,whatsapp_access_token')
             .eq('id', userId)
-            .single();
+            .maybeSingle();
 
         if (credentialError || !userMeta) {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
         }
 
-        const businessAccountId = userMeta?.whatsapp_business_account_id;
-        const accessToken = userMeta?.whatsapp_access_token;
+        const businessAccountId = userMeta?.whatsapp_business_account_id || null;
+        const accessToken = userMeta?.whatsapp_access_token || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -463,7 +463,7 @@ app.post('/api/campaigns/schedule', async (req, res) => {
             .from('wallets')
             .select('balance, plan_tier, lifetime_contacts_count')
             .eq('user_id', userId)
-            .single();
+            .maybeSingle();
 
         if (walletError || !wallet) return res.status(404).json({ success: false, msg: "Wallet not found" });
 
@@ -522,16 +522,19 @@ app.post('/api/campaign/broadcast', async (req, res) => {
         const totalCost = parseFloat((patientCount * unitCost).toFixed(2));
 
         // 2. Fetch User Balance
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('wallet_balance')
-            .eq('id', userId)
-            .single();
+        const { data: wallet, error: walletError } = await supabase
+            .from('wallets')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
 
-        if (userError || !user) throw new Error("User wallet not found");
+        if (walletError) throw walletError;
+        if (!wallet) {
+            return res.status(404).json({ success: false, msg: "Wallet not found. Please finish workspace activation." });
+        }
 
         // 3. Validation Logic
-        const currentBalance = parseFloat(user.wallet_balance || 0);
+        const currentBalance = parseFloat(wallet.balance || 0);
         if (currentBalance < totalCost) {
             return res.status(400).json({ 
                 success: false, 
@@ -544,9 +547,9 @@ app.post('/api/campaign/broadcast', async (req, res) => {
 
         // Update balance
         const { error: updateError } = await supabase
-            .from('users')
-            .update({ wallet_balance: newBalance })
-            .eq('id', userId);
+            .from('wallets')
+            .update({ balance: newBalance })
+            .eq('user_id', userId);
 
         if (updateError) throw updateError;
 
@@ -586,21 +589,28 @@ app.post('/api/wallet/recharge', async (req, res) => {
         if (!supabase) return res.status(500).json({ msg: "Database connection unavailable" });
 
         // 1. Fetch current balance
-        const { data: user, error: userError } = await supabase
-            .from('users')
-            .select('wallet_balance')
-            .eq('id', userId)
-            .single();
+        const { data: wallet, error: walletError } = await supabase
+            .from('wallets')
+            .select('balance')
+            .eq('user_id', userId)
+            .maybeSingle();
 
-        if (userError || !user) throw new Error("User not found");
+        if (walletError) throw walletError;
+        if (!wallet) {
+            return res.status(404).json({
+                success: false,
+                msg: "Wallet not found. Please finish workspace activation before recharge."
+            });
+        }
 
-        const newBalance = parseFloat(user.wallet_balance || 0) + parseFloat(amount);
+        const currentBalance = parseFloat(wallet.balance || 0);
+        const newBalance = currentBalance + parseFloat(amount);
 
-        // 2. Update Balance in Users table
+        // 2. Update Balance in Wallets table
         const { error: updateError } = await supabase
-            .from('users')
-            .update({ wallet_balance: newBalance })
-            .eq('id', userId);
+            .from('wallets')
+            .update({ balance: newBalance })
+            .eq('user_id', userId);
 
         if (updateError) throw updateError;
 
@@ -614,7 +624,7 @@ app.post('/api/wallet/recharge', async (req, res) => {
                 metadata: {
                     payment_method: 'Manual/Internal',
                     recharge_amount: amount,
-                    previous_balance: user.wallet_balance
+                    previous_balance: currentBalance
                 }
             }
         ]);
@@ -661,10 +671,10 @@ const getUserMetaCredentials = async (userId) => {
 
     try {
         const { data, error } = await supabase
-            .from('users')
+            .from('profiles')
             .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
             .eq('id', userId)
-            .single();
+            .maybeSingle();
 
         if (error || !data) return {};
         return {
@@ -734,9 +744,14 @@ const processCampaignQueue = async () => {
                 .from('wallets')
                 .select('balance')
                 .eq('user_id', row.user_id)
-                .single();
+                .maybeSingle();
 
-            const currentBalance = Number(wallet?.balance || 0);
+            if (!wallet) {
+                await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: 'Wallet not found' }).eq('id', row.id);
+                continue;
+            }
+
+            const currentBalance = Number(wallet.balance || 0);
             if (currentBalance < unitCost) {
                 await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: 'Insufficient wallet balance' }).eq('id', row.id);
                 continue;

@@ -9,15 +9,18 @@ const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supa
 const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
     const { data, error } = await supabase
-        .from('users')
+        .from('profiles')
         .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
         .eq('id', userId)
-        .single();
-    if (error || !data) return {};
+        .maybeSingle();
+    if (error || !data) {
+        if (error) console.warn('Meta credential profile lookup failed:', error.message);
+        return {};
+    }
     return {
-        phoneNumberId: data.whatsapp_phone_number_id,
-        businessAccountId: data.whatsapp_business_account_id,
-        accessToken: data.whatsapp_access_token
+        phoneNumberId: data.whatsapp_phone_number_id || null,
+        businessAccountId: data.whatsapp_business_account_id || null,
+        accessToken: data.whatsapp_access_token || null
     };
 };
 
