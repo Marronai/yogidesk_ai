@@ -35,56 +35,58 @@ const Templates = () => {
     buttons: []
   });
 
-  const [planTier, setPlanTier] = useState('Starter Clinic');
-  const [templateCount, setTemplateCount] = useState(0);
+  const [templates, setTemplates] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [doctorProfile, setDoctorProfile] = useState(null);
 
   useEffect(() => {
     const fetchLimits = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id || localStorage.getItem('user_id');
-      if (!userId) return;
+      setIsLoading(true);
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || localStorage.getItem('user_id');
+        if (!userId) return;
 
-      const { data: walletData } = await supabase
-        .from('wallets')
-        .select('plan_tier')
-        .eq('user_id', userId)
-        .maybeSingle();
-      
-      if (walletData?.plan_tier) setPlanTier(walletData.plan_tier);
+        const { data: templatesData, error: countError } = await supabase
+          .from('whatsapp_templates')
+          .select('id')
+          .eq('user_id', userId);
+        
+        if (!countError && Array.isArray(templatesData)) {
+          setTemplates(templatesData);
+        } else {
+          setTemplates([]);
+        }
 
-      const { data: templatesData, error: countError } = await supabase
-        .from('whatsapp_templates')
-        .select('id')
-        .eq('user_id', userId);
-      
-      if (!countError && Array.isArray(templatesData)) {
-        setTemplateCount(templatesData.length);
+        const { data: profileData } = await supabase
+          .from('doctor_profiles')
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+          .eq('id', userId)
+          .maybeSingle();
+
+        setDoctorProfile(profileData || null);
+        if (profileData?.whatsapp_access_token && profileData?.whatsapp_phone_number_id && profileData?.whatsapp_business_account_id) {
+          setError('');
+        }
+      } finally {
+        setIsLoading(false);
       }
-
-      const { data: profileData } = await supabase
-        .from('doctor_profiles')
-        .select('whatsapp_business_account_id,whatsapp_access_token,whatsapp_phone_number_id')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      setDoctorProfile(profileData || null);
     };
     fetchLimits();
   }, []);
-
-  const planLimits = {
-    'Starter Clinic': 20,
-    'Growth Clinic': 50,
-    'Multi-Specialty Hospital': 100
-  };
 
   const categories = [
     { id: 'MARKETING', label: 'Marketing' },
     { id: 'UTILITY', label: 'Utility' },
     { id: 'AUTHENTICATION', label: 'Authentication' },
   ];
+
+  const hasMetaCredentials = Boolean(
+    doctorProfile?.whatsapp_access_token &&
+    doctorProfile?.whatsapp_phone_number_id &&
+    doctorProfile?.whatsapp_business_account_id
+  );
 
   // Logic Functions
   const handleFileUpload = (e) => {
@@ -148,9 +150,8 @@ const Templates = () => {
       return;
     }
 
-    const currentLimit = planLimits[planTier] || 20;
-    if (templateCount >= currentLimit) {
-    setError('');
+    if (templates && Array.isArray(templates) && templates.length >= 20) {
+      setError('Template limit reached. Upgrade to create more than 20 templates.');
       return;
     }
 
@@ -168,7 +169,7 @@ const Templates = () => {
     }
 
     setSaving(true);
-      setError(`Template limit reached. Upgrade to create more than ${currentLimit} templates.`);
+    setError('');
     setMessage('');
     
     try {
@@ -179,14 +180,17 @@ const Templates = () => {
       if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token) {
         const { data: profileData } = await supabase
           .from('doctor_profiles')
-          .select('whatsapp_business_account_id,whatsapp_access_token,whatsapp_phone_number_id')
-          .eq('user_id', userId)
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+          .eq('id', userId)
           .maybeSingle();
         activeProfile = profileData || null;
         setDoctorProfile(activeProfile);
+        if (activeProfile?.whatsapp_access_token && activeProfile?.whatsapp_phone_number_id && activeProfile?.whatsapp_business_account_id) {
+          setError('');
+        }
       }
 
-      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token) {
+      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token || !activeProfile?.whatsapp_phone_number_id) {
         throw new Error('Connect Meta API credentials in Settings before submitting templates.');
       }
 
@@ -240,7 +244,7 @@ const Templates = () => {
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create WhatsApp Template</h1>
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
-          <button onClick={handleSubmit} disabled={saving} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
+          <button onClick={handleSubmit} disabled={saving || isLoading || !hasMetaCredentials} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
             {saving ? (
               <>
                 <Loader size={18} className="animate-spin" />
@@ -254,7 +258,7 @@ const Templates = () => {
           </button>
         </div>
 
-        {error && <div className="mb-4 text-sm text-red-600 font-semibold">{error}</div>}
+        {!isLoading && error && <div className="mb-4 text-sm text-red-600 font-semibold">{error}</div>}
         {message && <div className="mb-4 text-sm text-emerald-700 font-semibold">{message}</div>}
 
         <div className="grid lg:grid-cols-12 gap-10">
