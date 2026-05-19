@@ -25,6 +25,11 @@ const normalizeTemplateLanguage = (language) => {
   return language || 'en_US';
 };
 
+const sanitizeMetaPhoneNumber = (value) => {
+  const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+  return digits.length === 10 ? `91${digits}` : digits;
+};
+
 const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
   if (Array.isArray(components) && components.length > 0) {
     return components
@@ -32,7 +37,13 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
         if (!component?.type) return null;
         if (component.type === 'HEADER') {
           const text = String(component.text || '').trim();
-          return component.format === 'TEXT' && text ? { type: 'HEADER', format: 'TEXT', text } : null;
+          if (component.format === 'TEXT') {
+            return text ? { type: 'HEADER', format: 'TEXT', text } : null;
+          }
+          if (['DOCUMENT', 'LOCATION'].includes(component.format)) {
+            return { type: 'HEADER', format: component.format };
+          }
+          return null;
         }
         if (component.type === 'BODY') {
           const text = String(component.text || bodyText || '').trim();
@@ -50,7 +61,7 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
                 const url = String(btn.url || '').trim();
                 return text && url ? { type: 'URL', text, url } : null;
               }
-              const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+              const phoneNumber = sanitizeMetaPhoneNumber(btn.phone_number || btn.phone);
               return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
             })
             .filter(Boolean)
@@ -71,6 +82,14 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
     graphComponents.push({ type: 'HEADER', format: 'TEXT', text: cleanHeaderText });
   }
 
+  if (headerType === 'DOCUMENT') {
+    graphComponents.push({ type: 'HEADER', format: 'DOCUMENT' });
+  }
+
+  if (headerType === 'LOCATION') {
+    graphComponents.push({ type: 'HEADER', format: 'LOCATION' });
+  }
+
   if (cleanBodyText) {
     graphComponents.push({ type: 'BODY', text: cleanBodyText });
   }
@@ -85,7 +104,7 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
       const url = String(btn.url || '').trim();
       return text && url ? { type: 'URL', text, url } : null;
     }
-    const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+    const phoneNumber = sanitizeMetaPhoneNumber(btn.phone_number || btn.phone);
     return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
   }).filter(Boolean) : [];
 
@@ -177,6 +196,31 @@ exports.createTemplate = async (req, res) => {
     });
 
     const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
+    const newTemplateRow = {
+      user_id: userId,
+      template_name: formattedName,
+      category,
+      language: metaLanguage,
+      body_content: bodyText,
+      status: 'PENDING_REVIEW',
+      header_type: headerType,
+      header_text: headerType === 'TEXT' ? String(headerText || '').trim() : null,
+      footer_text: footerText ? String(footerText).trim() : null,
+      buttons: storedButtons,
+      created_at: new Date().toISOString(),
+      meta_template_id: metaTemplateId
+    };
+
+    const { data: insertedTemplate, error: insertError } = await supabase
+      .from('whatsapp_templates')
+      .insert([newTemplateRow])
+      .select()
+      .maybeSingle();
+
+    if (insertError) {
+      return res.status(400).json({ success: false, message: insertError.message || 'Template created in Meta, but failed to save.' });
+    }
+
     const newTemplate = await Template.create({
       name: formattedName,
       bodyText,
@@ -190,7 +234,7 @@ exports.createTemplate = async (req, res) => {
       businessId: userId
     });
 
-    res.status(201).json({ message: 'Template submitted successfully.', data: newTemplate, status: newTemplate.status });
+    res.status(201).json({ message: 'Template submitted successfully.', data: insertedTemplate || newTemplate, status: 'PENDING_REVIEW' });
   } catch (err) {
     console.error('Template submission error:', err.response?.data || err.message || err);
     return res.status(400).json({ success: false, message: err.response?.data?.error?.message || err.message || 'Template submission failed.' });

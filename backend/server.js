@@ -60,13 +60,23 @@ const normalizeTemplateLanguage = (language) => {
     if (normalized === 'en_in') return 'en_IN';
     return language || 'en_US';
 };
+const sanitizeMetaPhoneNumber = (value) => {
+    const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+    return digits.length === 10 ? `91${digits}` : digits;
+};
 const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
     if (Array.isArray(components) && components.length > 0) {
         return components.map((component) => {
             if (!component?.type) return null;
             if (component.type === 'HEADER') {
                 const text = String(component.text || '').trim();
-                return component.format === 'TEXT' && text ? { type: 'HEADER', format: 'TEXT', text } : null;
+                if (component.format === 'TEXT') {
+                    return text ? { type: 'HEADER', format: 'TEXT', text } : null;
+                }
+                if (['DOCUMENT', 'LOCATION'].includes(component.format)) {
+                    return { type: 'HEADER', format: component.format };
+                }
+                return null;
             }
             if (component.type === 'BODY') {
                 const text = String(component.text || bodyText || '').trim();
@@ -83,7 +93,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
                         const url = String(btn.url || '').trim();
                         return text && url ? { type: 'URL', text, url } : null;
                     }
-                    const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+                    const phoneNumber = sanitizeMetaPhoneNumber(btn.phone_number || btn.phone);
                     return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
                 }).filter(Boolean).slice(0, 2);
                 return buttonList.length ? { type: 'BUTTONS', buttons: buttonList } : null;
@@ -100,6 +110,12 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
     if (headerType === 'TEXT' && cleanHeaderText) {
         graphComponents.push({ type: 'HEADER', format: 'TEXT', text: cleanHeaderText });
     }
+    if (headerType === 'DOCUMENT') {
+        graphComponents.push({ type: 'HEADER', format: 'DOCUMENT' });
+    }
+    if (headerType === 'LOCATION') {
+        graphComponents.push({ type: 'HEADER', format: 'LOCATION' });
+    }
     if (cleanBodyText) {
         graphComponents.push({ type: 'BODY', text: cleanBodyText });
     }
@@ -113,7 +129,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
             const url = String(btn.url || '').trim();
             return text && url ? { type: 'URL', text, url } : null;
         }
-        const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+        const phoneNumber = sanitizeMetaPhoneNumber(btn.phone_number || btn.phone);
         return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
     }).filter(Boolean) : [];
 

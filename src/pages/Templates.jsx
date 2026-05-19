@@ -7,7 +7,7 @@ import {
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
   Settings, MessageSquare, ChevronRight, Link, Phone, Trash2,
   MoreVertical, PhoneCall, Video as VideoIcon, Tag, LayoutGrid, Plus,
-  Smartphone, Monitor, Loader
+  Smartphone, Monitor, Loader, MapPin
 } from 'lucide-react';
 
 const Templates = () => {
@@ -127,6 +127,20 @@ const Templates = () => {
       });
     }
 
+    if (template.headerType === 'DOCUMENT') {
+      components.push({
+        type: 'HEADER',
+        format: 'DOCUMENT'
+      });
+    }
+
+    if (template.headerType === 'LOCATION') {
+      components.push({
+        type: 'HEADER',
+        format: 'LOCATION'
+      });
+    }
+
     if (bodyText) {
       components.push({ type: 'BODY', text: bodyText });
     }
@@ -142,7 +156,8 @@ const Templates = () => {
           const url = String(btn.url || '').trim();
           return text && url ? { type: 'URL', text, url } : null;
         }
-        const phoneNumber = String(btn.phone || '').trim();
+        const phoneDigits = String(btn.phone || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+        const phoneNumber = phoneDigits.length === 10 ? `91${phoneDigits}` : phoneDigits;
         return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
       })
       .filter(Boolean);
@@ -377,11 +392,11 @@ const Templates = () => {
                   <div className="space-y-4">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">1. Header Media Type</label>
                     <div className="flex flex-wrap gap-3">
-                      {['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT'].map((type) => (
+                      {['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'].map((type) => (
                         <button key={type} onClick={() => { setTemplate({ ...template, headerType: type, mediaPreview: null }); if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) fileInputRef.current.click(); }}
                           className={`flex-1 min-w-[100px] py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${template.headerType === type ? 'border-orange-500 bg-orange-50/50 text-orange-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
                         >
-                          {type === 'IMAGE' ? <ImageIcon size={20}/> : type === 'VIDEO' ? <Video size={20}/> : type === 'DOCUMENT' ? <FileText size={20}/> : type === 'TEXT' ? <Type size={20}/> : <X size={20}/>}
+                          {type === 'IMAGE' ? <ImageIcon size={20}/> : type === 'VIDEO' ? <Video size={20}/> : type === 'DOCUMENT' ? <FileText size={20}/> : type === 'LOCATION' ? <MapPin size={20}/> : type === 'TEXT' ? <Type size={20}/> : <X size={20}/>}
                           <span className="text-[10px] font-black tracking-tighter uppercase">{type}</span>
                         </button>
                       ))}
