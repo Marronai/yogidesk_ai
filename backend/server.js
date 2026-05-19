@@ -154,9 +154,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.get('/api/user/usage', getUserUsage);
-app.post('/api/patients', addPatient);
-app.post('/api/patients/bulk', addPatients);
+const attachDoctorSession = (req, res, next) => {
+    const doctorId = req.user?.id || req.query?.userId || req.query?.user_id || req.body?.userId || req.body?.user_id;
+    if (doctorId) req.user = { ...(req.user || {}), id: doctorId };
+    next();
+};
+
+app.get('/api/user/usage', attachDoctorSession, getUserUsage);
+app.post('/api/patients', attachDoctorSession, addPatient);
+app.post('/api/patients/bulk', attachDoctorSession, addPatients);
 
 app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     try {

@@ -11,35 +11,24 @@ const normalizePhone = (phone) => String(phone || '').trim().replace(/\s+/g, '')
 const normalizePlan = (plan) => String(plan || 'starter').toLowerCase().split(' ')[0];
 
 const getRequestUserId = (req) => (
-  req.user?.id ||
-  req.body?.userId ||
-  req.body?.user_id ||
-  req.query?.userId ||
-  req.query?.user_id ||
-  null
+  req.user?.id || null
 );
 
-const getProfileUsage = async (userId) => {
-  const byId = await supabase
+const getProfileUsage = async (req) => {
+  const { data, error } = await supabase
     .from('doctor_profiles')
     .select('id,lifetime_patients_count')
-    .eq('id', userId)
+    .eq('id', req.user.id)
     .maybeSingle();
 
-  if (byId.data) return byId.data;
+  if (error) throw error;
 
-  const byUserId = await supabase
-    .from('doctor_profiles')
-    .select('id,user_id,lifetime_patients_count')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  return byUserId.data || null;
+  return data || null;
 };
 
-const getUsageState = async (userId) => {
+const getUsageState = async (req) => {
   try {
-    const profile = await getProfileUsage(userId);
+    const profile = await getProfileUsage(req);
     if (profile) {
       return {
         profileId: profile.id,
@@ -55,10 +44,10 @@ const getUsageState = async (userId) => {
   throw new Error('Doctor profile not found.');
 };
 
-const persistUsageCount = async (userId, nextCount, profileId = null, increment = 1) => {
-  const targetProfileId = profileId || userId;
+const persistUsageCount = async (req, nextCount, increment = 1) => {
+  const userId = req.user.id;
   const rpcResult = await supabase.rpc('increment_lifetime_patients_count', {
-    profile_id: targetProfileId,
+    profile_id: req.user.id,
     increment_by: increment
   });
 
@@ -76,7 +65,7 @@ const persistUsageCount = async (userId, nextCount, profileId = null, increment 
   const { error } = await supabase
     .from('doctor_profiles')
     .update({ lifetime_patients_count: nextCount })
-    .eq('id', targetProfileId);
+    .eq('id', req.user.id);
 
   if (error) throw error;
 
@@ -105,7 +94,7 @@ exports.getUserUsage = async (req, res) => {
     const userId = getRequestUserId(req);
     if (!userId) return res.status(400).json({ success: false, message: 'userId is required.' });
 
-    const usage = await getUsageState(userId);
+    const usage = await getUsageState(req);
     return res.json({
       success: true,
       lifetime_patients_count: Number(usage.lifetime_patients_count || 0),
@@ -129,7 +118,7 @@ exports.addPatient = async (req, res) => {
     if (!name) return res.status(400).json({ success: false, message: 'Name is required.' });
     if (!/^\d{10}$/.test(phone)) return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
 
-    const usage = await getUsageState(userId);
+    const usage = await getUsageState(req);
     enforceStarterLimit(usage, 1);
 
     const { data: existing } = await supabase
@@ -149,7 +138,7 @@ exports.addPatient = async (req, res) => {
 
     if (error) throw error;
 
-    const nextCount = await persistUsageCount(userId, Number(usage.lifetime_patients_count || 0) + 1, usage.profileId, 1);
+    const nextCount = await persistUsageCount(req, Number(usage.lifetime_patients_count || 0) + 1, 1);
 
     return res.status(201).json({ success: true, data, lifetime_patients_count: nextCount });
   } catch (error) {
@@ -185,7 +174,7 @@ exports.addPatients = async (req, res) => {
 
     if (!uniqueRows.length) return res.status(400).json({ success: false, message: 'No valid rows found.' });
 
-    const usage = await getUsageState(userId);
+    const usage = await getUsageState(req);
     enforceStarterLimit(usage, uniqueRows.length);
 
     const { data, error } = await supabase
@@ -196,7 +185,7 @@ exports.addPatients = async (req, res) => {
     if (error) throw error;
 
     const insertedRows = Array.isArray(data) ? data : [];
-    const nextCount = await persistUsageCount(userId, Number(usage.lifetime_patients_count || 0) + insertedRows.length, usage.profileId, insertedRows.length);
+    const nextCount = await persistUsageCount(req, Number(usage.lifetime_patients_count || 0) + insertedRows.length, insertedRows.length);
 
     return res.status(201).json({ success: true, data: insertedRows, lifetime_patients_count: nextCount });
   } catch (error) {
