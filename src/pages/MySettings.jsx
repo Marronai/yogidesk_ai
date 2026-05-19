@@ -108,6 +108,7 @@ const Settings = () => {
     try {
       const { authUser, userId: authUserId } = await getActiveAccount();
       const payload = {
+        id: authUserId,
         name: formData.name.trim() || null,
         email: formData.email || authUser?.email || null,
         whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
@@ -117,19 +118,19 @@ const Settings = () => {
 
       const { data, error } = await supabase
         .from('doctor_profiles')
-        .update(payload)
-        .eq('user_id', authUserId)
-        .select('user_id')
+        .upsert(payload, { onConflict: 'id' })
+        .select('id')
+        .eq('id', authUserId)
         .maybeSingle();
 
       if (error) {
-        console.error('Connection settings update failed:', error.message || error.details || error);
+        console.error('Supabase Settings Sync Error:', error);
         throw error;
       }
 
       if (!data) {
-        const missingRowError = new Error('No doctor profile row matched the authenticated user.');
-        console.error('Connection settings update failed:', missingRowError.message);
+        const missingRowError = new Error('No doctor profile row returned for the authenticated user.');
+        console.error('Supabase Settings Sync Error:', missingRowError);
         throw missingRowError;
       }
 
@@ -140,9 +141,7 @@ const Settings = () => {
       );
       showToast('success', 'Connection settings saved successfully.');
     } catch (error) {
-      if (error?.message || error?.details) {
-        console.error('Connection settings update failed:', error.message || error.details);
-      }
+      console.error('Supabase Settings Sync Error:', error);
       showToast('error', 'Failed to update connection settings. Please try again.');
     } finally {
       setSavingConnection(false);
