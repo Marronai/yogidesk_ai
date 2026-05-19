@@ -11,11 +11,15 @@ const Campaigns = () => {
   const [ledgerMatches, setLedgerMatches] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateVariables, setTemplateVariables] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState('');
   const [wallet] = useState(() => getWallet());
 
-  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+  const selectedTemplate = templates.find((t) => String(t.id) === String(selectedTemplateId));
+  const variableKeys = Array.from(new Set(
+    String(selectedTemplate?.body_content || '').match(/\{\{(\d+)\}\}/g)?.map((token) => token.replace(/[{}]/g, '')) || []
+  )).sort((a, b) => Number(a) - Number(b));
   const templateType = String(selectedTemplate?.category || 'utility').toLowerCase();
   const unitCost = calculateMessageCost(templateType, 1);
   const totalCost = Number((patients.length * unitCost).toFixed(2));
@@ -66,6 +70,16 @@ const Campaigns = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  useEffect(() => {
+    setTemplateVariables((current) => {
+      const next = {};
+      variableKeys.forEach((key) => {
+        next[key] = current[key] || '';
+      });
+      return next;
+    });
+  }, [selectedTemplateId, selectedTemplate?.body_content]);
+
   const addRecipient = (patient) => {
     setPatients((current) => {
       const exists = current.some((item) => (item.id && item.id === patient.id) || item.phone === patient.phone);
@@ -81,8 +95,11 @@ const Campaigns = () => {
     try {
       await api.post('/api/campaigns/schedule', {
         userId,
-        template: selectedTemplate,
-          recipients: patients.map((p) => ({
+        template: {
+          ...selectedTemplate,
+          variables: templateVariables
+        },
+        recipients: patients.map((p) => ({
           name: p.name,
           phone: p.phone,
           appointment_time: p.appointment_time
@@ -126,12 +143,34 @@ const Campaigns = () => {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-8 rounded-[2rem] border border-gray-100 shadow-sm h-fit">
           <label className="text-xs font-black uppercase tracking-widest text-gray-400">Approved Template</label>
           <select value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)} className="mt-2 mb-5 w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm font-bold outline-none focus:border-[#FF6B00]">
+            <option value="">Select Template</option>
             {templates.map((template) => <option key={template.id} value={template.id}>{template.template_name} · {template.category}</option>)}
           </select>
+
+          {selectedTemplate && (
+            <div className="mb-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">Template Variables</p>
+              {variableKeys.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {variableKeys.map((key) => (
+                    <input
+                      key={key}
+                      value={templateVariables[key] || ''}
+                      onChange={(e) => setTemplateVariables((current) => ({ ...current, [key]: e.target.value }))}
+                      placeholder={`Value for {{${key}}}`}
+                      className="w-full rounded-xl border border-gray-200 bg-white p-3 text-sm font-bold outline-none focus:border-[#FF6B00]"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-slate-500">No variables found in this template.</p>
+              )}
+            </div>
+          )}
 
           <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filter patients by name or phone..." className="mb-5 w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm font-bold outline-none focus:border-[#FF6B00]" />
 

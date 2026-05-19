@@ -40,6 +40,7 @@ const Templates = () => {
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [error, setError] = useState('');
   const [doctorProfile, setDoctorProfile] = useState(null);
+  const [pendingHeaderType, setPendingHeaderType] = useState('NONE');
 
   useEffect(() => {
     const fetchLimits = async () => {
@@ -174,12 +175,42 @@ const Templates = () => {
     const file = e.target.files[0];
     if (!file || file.size > 2 * 1024 * 1024) {
       setError("File size too large! Max 2MB.");
+      e.target.value = '';
       return;
     }
     setError('');
     const reader = new FileReader();
-    reader.onloadend = () => setTemplate({ ...template, mediaPreview: reader.result });
+    reader.onloadend = () => setTemplate((current) => ({
+      ...current,
+      headerType: pendingHeaderType,
+      mediaPreview: reader.result,
+      headerUrl: file.name
+    }));
     reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleHeaderTypeSelect = (type) => {
+    setPendingHeaderType(type);
+    setTemplate({ ...template, headerType: type, mediaPreview: null, headerUrl: '' });
+    if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) {
+      if (fileInputRef.current) fileInputRef.current.accept = getHeaderFileAcceptForType(type);
+      window.setTimeout(() => fileInputRef.current?.click(), 0);
+    }
+  };
+
+  const getHeaderFileAccept = () => {
+    if (pendingHeaderType === 'IMAGE') return 'image/*';
+    if (pendingHeaderType === 'VIDEO') return 'video/mp4,video/3gpp';
+    if (pendingHeaderType === 'DOCUMENT') return 'application/pdf';
+    return '';
+  };
+
+  const getHeaderFileAcceptForType = (type) => {
+    if (type === 'IMAGE') return 'image/*';
+    if (type === 'VIDEO') return 'video/mp4,video/3gpp';
+    if (type === 'DOCUMENT') return 'application/pdf';
+    return '';
   };
 
   const insertPlaceholder = () => {
@@ -278,7 +309,7 @@ const Templates = () => {
       const headerType = template.headerType || 'NONE';
       const { components, buttons: buttonPayload } = buildTemplateComponents(bodyToSubmit);
 
-      await api.post('/templates', {
+      await api.post('/api/templates', {
         userId,
         messaging_product: 'whatsapp',
         whatsapp_business_account_id: activeProfile.whatsapp_business_account_id,
@@ -338,7 +369,7 @@ const Templates = () => {
         {!isLoading && error && <div className="mb-4 text-sm text-red-600 font-semibold">{error}</div>}
         {message && <div className="mb-4 text-sm text-emerald-700 font-semibold">{message}</div>}
 
-        <div className="grid lg:grid-cols-12 gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10">
           {/* --- LEFT: CONFIGURATION --- */}
           <div className="lg:col-span-7 space-y-8">
             {/* 1. General Settings Card */}
@@ -350,7 +381,7 @@ const Templates = () => {
                  <h2 className="font-bold text-slate-700">General Configuration</h2>
                </div>
                
-               <div className="p-8 grid md:grid-cols-2 gap-8">
+               <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
                       <Tag size={14}/> Template Name
@@ -393,7 +424,7 @@ const Templates = () => {
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">1. Header Media Type</label>
                     <div className="flex flex-wrap gap-3">
                       {['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'].map((type) => (
-                        <button key={type} onClick={() => { setTemplate({ ...template, headerType: type, mediaPreview: null }); if (['IMAGE', 'VIDEO', 'DOCUMENT'].includes(type)) fileInputRef.current.click(); }}
+                        <button key={type} onClick={() => handleHeaderTypeSelect(type)}
                           className={`flex-1 min-w-[100px] py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${template.headerType === type ? 'border-orange-500 bg-orange-50/50 text-orange-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
                         >
                           {type === 'IMAGE' ? <ImageIcon size={20}/> : type === 'VIDEO' ? <Video size={20}/> : type === 'DOCUMENT' ? <FileText size={20}/> : type === 'LOCATION' ? <MapPin size={20}/> : type === 'TEXT' ? <Type size={20}/> : <X size={20}/>}
@@ -401,15 +432,13 @@ const Templates = () => {
                         </button>
                       ))}
                     </div>
-                    {['IMAGE', 'VIDEO', 'DOCUMENT'].includes(template.headerType) && (
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        className="hidden" 
-                        onChange={handleFileUpload} 
-                        accept={template.headerType === 'IMAGE' ? 'image/*' : template.headerType === 'VIDEO' ? 'video/*' : 'application/pdf'} 
-                      />
-                    )}
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      className="hidden" 
+                      onChange={handleFileUpload} 
+                      accept={getHeaderFileAccept()} 
+                    />
                     {template.headerType === 'TEXT' && (
                       <input 
                         type="text" 
@@ -431,9 +460,9 @@ const Templates = () => {
                   </div>
 
                   <div className="space-y-4">
-                    <div className="flex justify-between items-center">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-center">
                       <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">2. Message Body</label>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="flex gap-2 flex-wrap md:justify-end">
                          {['Patient Name', 'Appt Time', 'Clinic Name'].map((p) => (
                            <button key={p} onClick={() => insertPlaceholder()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all border border-slate-200 flex items-center gap-1">
                              <Plus size={12}/> {p}
@@ -462,7 +491,7 @@ const Templates = () => {
                </div>
                <div className="p-8">
                   {template.buttons.length > 0 ? (
-                    <div className="grid md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                        {template.buttons.map((btn, index) => (
                          <div key={index} className="p-6 rounded-2xl bg-slate-50 border border-slate-200 relative">
                             <button onClick={() => removeButton(index)} className="absolute top-4 right-4 text-slate-300 hover:text-red-500"><Trash2 size={18}/></button>

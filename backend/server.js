@@ -411,6 +411,67 @@ app.post('/api/webhook/meta', async (req, res) => {
 });
 
 // ====== WHATSAPP TEMPLATE CREATION ======
+app.get('/api/templates/sync', async (req, res) => {
+    try {
+        if (!supabase?.from) {
+            throw new Error('Database connection unavailable.');
+        }
+
+        const userId = req.query.userId || req.body?.userId;
+        if (!userId) {
+            return res.status(400).json({ success: false, message: 'User ID is required.' });
+        }
+
+        const { data: userMeta, error: credentialError } = await supabase
+            .from('doctor_profiles')
+            .select('whatsapp_access_token,whatsapp_business_account_id')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (credentialError) throw credentialError;
+        if (!userMeta?.whatsapp_business_account_id || !userMeta?.whatsapp_access_token) {
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
+        }
+
+        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.whatsapp_business_account_id}/message_templates`;
+        const response = await require('axios').get(graphUrl, {
+            params: { access_token: userMeta.whatsapp_access_token }
+        });
+
+        const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
+        const updates = [];
+
+        for (const metaTemplate of metaTemplates) {
+            const metaTemplateId = metaTemplate.id || metaTemplate.message_template_id || null;
+            const templateName = metaTemplate.name || metaTemplate.template_name || '';
+            const rawStatus = String(metaTemplate.status || 'PENDING').toUpperCase();
+            const status = rawStatus === 'PENDING_REVIEW' ? 'PENDING' : rawStatus;
+
+            if (!templateName && !metaTemplateId) continue;
+
+            let updateQuery = supabase
+                .from('whatsapp_templates')
+                .update({
+                    status,
+                    meta_template_id: metaTemplateId
+                })
+                .eq('user_id', userId);
+
+            updateQuery = metaTemplateId
+                ? updateQuery.or(`meta_template_id.eq.${metaTemplateId},template_name.eq.${templateName}`)
+                : updateQuery.eq('template_name', templateName);
+
+            const { error: updateError } = await updateQuery;
+            if (!updateError) updates.push({ name: templateName, id: metaTemplateId, status });
+        }
+
+        return res.status(200).json({ success: true, templates: updates });
+    } catch (error) {
+        console.error('Template sync error:', error.response?.data || error.message || error);
+        return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template sync failed.' });
+    }
+});
+
 app.post('/api/templates', async (req, res) => {
     try {
         if (!supabase?.from) {
@@ -781,6 +842,18 @@ const sendCampaignMessageToMeta = async (queueItem) => {
             language: { code: queueItem.payload?.template?.language || 'en_US' }
         }
     };
+
+    const variables = queueItem.payload?.template?.variables || {};
+    const variableKeys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
+    if (variableKeys.length > 0) {
+        payload.template.components = [{
+            type: 'body',
+            parameters: variableKeys.map((key) => ({
+                type: 'text',
+                text: String(variables[key] || '')
+            }))
+        }];
+    }
 
     const response = await require('axios').post(url, payload, {
         headers: {

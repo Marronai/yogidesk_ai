@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, ChevronDown, Sparkles, Layers } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import api from '../utils/api';
 import { getTemplatesBySpecialty, calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from "../constants/templateLibrary";
 import { getWallet } from '../utils/wallet';
 
@@ -10,6 +11,7 @@ const TemplateManager = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [planTier, setPlanTier] = useState('Starter Clinic');
   const [activeTab, setActiveTab] = useState('create');
@@ -43,6 +45,15 @@ const TemplateManager = () => {
         if (!userId) {
           setLoading(false);
           return;
+        }
+
+        setSyncing(true);
+        try {
+          await api.get('/api/templates/sync', { params: { userId } });
+        } catch (syncError) {
+          console.warn('Template sync failed:', syncError?.response?.data?.message || syncError.message);
+        } finally {
+          setSyncing(false);
         }
         
         // Fetch from Supabase whatsapp_templates table
@@ -103,6 +114,7 @@ const TemplateManager = () => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'APPROVED': return 'text-emerald-600 bg-emerald-50 border-emerald-200';
+      case 'PENDING_REVIEW':
       case 'PENDING': return 'text-amber-600 bg-amber-50 border-amber-200';
       case 'REJECTED': return 'text-rose-600 bg-rose-50 border-rose-200';
       case 'DRAFT': return 'text-slate-600 bg-slate-50 border-slate-200';
@@ -126,13 +138,13 @@ const TemplateManager = () => {
     try { return buttons ? JSON.parse(buttons) : []; } catch { return []; }
   };
   const submittedRows = useMemo(
-    () => templateRows.filter((template) => ['PENDING', 'APPROVED'].includes(String(template?.status || '').toUpperCase())),
+    () => templateRows.filter((template) => ['PENDING', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(String(template?.status || '').toUpperCase())),
     [templateRows]
   );
   const submittedMetadata = useMemo(
     () => submittedRows.map((template) => ({
       ...template,
-      status: String(template?.status || 'UNKNOWN').toUpperCase(),
+      status: String(template?.status || 'UNKNOWN').toUpperCase() === 'PENDING_REVIEW' ? 'PENDING' : String(template?.status || 'UNKNOWN').toUpperCase(),
       buttons: parseButtons(template?.buttons),
       headerType: template?.header_type || 'NONE',
       mediaUrl: template?.header_url || template?.media_url || ''
@@ -172,6 +184,7 @@ const TemplateManager = () => {
             <ShieldCheck className="text-orange-600" /> Message Templates
           </h1>
           <p className="text-slate-500 text-sm font-medium">Manage and monitor your Meta-approved WhatsApp flows.</p>
+          {syncing && <p className="mt-1 text-xs font-black uppercase tracking-widest text-orange-500">Syncing Meta templates...</p>}
         </div>
         
         <button 
