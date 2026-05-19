@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { getWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
@@ -24,21 +25,32 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
+  const [lifetimeCount, setLifetimeCount] = useState(0);
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Team Member',
     clinicName: fallbackClinicName(),
   });
+  const backendPath = (path) => String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? path.replace(/^\/api/, '') : path;
 
   useEffect(() => {
     let active = true;
     const loadProfile = async () => {
       const { data } = await supabase.auth.getUser();
       const meta = data?.user?.user_metadata || {};
+      const userId = data?.user?.id || localStorage.getItem('user_id');
       const role = normalizeRole(meta.role || meta.user_role || meta.account_role);
       const name = meta.staff_name || meta.full_name || meta.name || data?.user?.email || profile.name;
       const clinicName = meta.clinic_name || meta.business_name || meta.businessName || fallbackClinicName();
       if (active) setProfile({ role, name, clinicName });
+      if (userId) {
+        const usageResult = await api
+          .get(backendPath('/api/user/usage'), { params: { userId } })
+          .catch(() => ({ data: null }));
+        if (active && usageResult.data) {
+          setLifetimeCount(Number(usageResult.data.lifetime_patients_count || 0));
+        }
+      }
     };
     loadProfile();
     return () => { active = false; };
@@ -90,6 +102,15 @@ const Sidebar = () => {
               <span className="text-[10px] font-black uppercase tracking-widest">Yogi Wallet</span>
             </div>
             <p className="text-2xl font-black text-slate-900">Rs. {wallet.balance.toFixed(2)}</p>
+            <div className="mt-3 rounded-xl border border-orange-100 bg-white/70 px-3 py-2">
+              <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-500">
+                <span>Patients</span>
+                <span className="text-slate-900">{lifetimeCount}/500</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-orange-100">
+                <div className="h-full rounded-full bg-orange-500" style={{ width: `${Math.min(100, (lifetimeCount / 500) * 100)}%` }} />
+              </div>
+            </div>
             <Link to="/dashboard/wallet" className="mt-3 flex items-center justify-between text-[11px] text-orange-700 font-bold hover:gap-3 transition-all">
               Recharge Credits
               <span aria-hidden="true">&gt;</span>

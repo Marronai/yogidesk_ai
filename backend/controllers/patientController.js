@@ -19,23 +19,10 @@ const getRequestUserId = (req) => (
   null
 );
 
-const getWalletUsage = async (userId) => {
-  const { data } = await supabase
-    .from('wallets')
-    .select('current_plan, plan_tier, lifetime_contacts_count')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  return {
-    current_plan: data?.current_plan || data?.plan_tier || 'starter',
-    lifetime_patients_count: Number(data?.lifetime_contacts_count || 0)
-  };
-};
-
 const getProfileUsage = async (userId) => {
   const byId = await supabase
     .from('doctor_profiles')
-    .select('id,user_id,current_plan,plan_tier,lifetime_patients_count')
+    .select('id,lifetime_patients_count')
     .eq('id', userId)
     .maybeSingle();
 
@@ -43,7 +30,7 @@ const getProfileUsage = async (userId) => {
 
   const byUserId = await supabase
     .from('doctor_profiles')
-    .select('id,user_id,current_plan,plan_tier,lifetime_patients_count')
+    .select('id,user_id,lifetime_patients_count')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -56,38 +43,42 @@ const getUsageState = async (userId) => {
     if (profile) {
       return {
         profileId: profile.id,
-        current_plan: profile.current_plan || profile.plan_tier || 'starter',
+        current_plan: 'starter',
         lifetime_patients_count: Number(profile.lifetime_patients_count || 0),
         hasProfileCounter: true
       };
     }
   } catch (error) {
-    console.warn('Profile lifetime counter unavailable, using wallet fallback:', error.message);
+    throw new Error(error.message || 'Profile lifetime counter unavailable.');
   }
 
-  return {
-    ...(await getWalletUsage(userId)),
-    profileId: null,
-    hasProfileCounter: false
-  };
+  throw new Error('Doctor profile not found.');
 };
 
-const mirrorUsageCount = async (userId, nextCount, profileId = null) => {
-  if (profileId) {
-    const { error } = await supabase
-      .from('doctor_profiles')
-      .update({ lifetime_patients_count: nextCount })
-      .eq('id', profileId);
+const persistUsageCount = async (userId, nextCount, profileId = null, increment = 1) => {
+  const targetProfileId = profileId || userId;
+  const rpcResult = await supabase.rpc('increment_lifetime_patients_count', {
+    profile_id: targetProfileId,
+    increment_by: increment
+  });
 
-    if (error) console.warn('Profile lifetime counter update failed:', error.message);
-  } else {
-    const { error } = await supabase
-      .from('doctor_profiles')
-      .update({ lifetime_patients_count: nextCount })
-      .eq('id', userId);
+  if (!rpcResult.error && Number.isFinite(Number(rpcResult.data))) {
+    const incrementedCount = Number(rpcResult.data);
+    const { error: walletError } = await supabase
+      .from('wallets')
+      .update({ lifetime_contacts_count: incrementedCount })
+      .eq('user_id', userId);
 
-    if (error) console.warn('Profile lifetime counter update failed:', error.message);
+    if (walletError) console.warn('Wallet lifetime counter mirror failed:', walletError.message);
+    return incrementedCount;
   }
+
+  const { error } = await supabase
+    .from('doctor_profiles')
+    .update({ lifetime_patients_count: nextCount })
+    .eq('id', targetProfileId);
+
+  if (error) throw error;
 
   const { error: walletError } = await supabase
     .from('wallets')
@@ -95,13 +86,14 @@ const mirrorUsageCount = async (userId, nextCount, profileId = null) => {
     .eq('user_id', userId);
 
   if (walletError) console.warn('Wallet lifetime counter mirror failed:', walletError.message);
+  return nextCount;
 };
 
 const enforceStarterLimit = (usage, incoming = 1) => {
   const plan = normalizePlan(usage.current_plan);
   const currentCount = Number(usage.lifetime_patients_count || 0);
-  if (plan === 'starter' && currentCount + incoming > STARTER_LIFETIME_PATIENT_LIMIT) {
-    const error = new Error('Starter plan lifetime patient limit reached');
+  if (plan === 'starter' && (currentCount >= STARTER_LIFETIME_PATIENT_LIMIT || currentCount + incoming > STARTER_LIFETIME_PATIENT_LIMIT)) {
+    const error = new Error('Starter plan lifetime patient limit reached.');
     error.statusCode = 403;
     throw error;
   }
@@ -116,9 +108,8 @@ exports.getUserUsage = async (req, res) => {
     const usage = await getUsageState(userId);
     return res.json({
       success: true,
-      current_plan: usage.current_plan,
       lifetime_patients_count: Number(usage.lifetime_patients_count || 0),
-      limit: normalizePlan(usage.current_plan) === 'starter' ? STARTER_LIFETIME_PATIENT_LIMIT : null
+      limit: STARTER_LIFETIME_PATIENT_LIMIT
     });
   } catch (error) {
     console.error('Usage fetch error:', error.message);
@@ -158,8 +149,7 @@ exports.addPatient = async (req, res) => {
 
     if (error) throw error;
 
-    const nextCount = Number(usage.lifetime_patients_count || 0) + 1;
-    await mirrorUsageCount(userId, nextCount, usage.profileId);
+    const nextCount = await persistUsageCount(userId, Number(usage.lifetime_patients_count || 0) + 1, usage.profileId, 1);
 
     return res.status(201).json({ success: true, data, lifetime_patients_count: nextCount });
   } catch (error) {
@@ -206,8 +196,7 @@ exports.addPatients = async (req, res) => {
     if (error) throw error;
 
     const insertedRows = Array.isArray(data) ? data : [];
-    const nextCount = Number(usage.lifetime_patients_count || 0) + insertedRows.length;
-    await mirrorUsageCount(userId, nextCount, usage.profileId);
+    const nextCount = await persistUsageCount(userId, Number(usage.lifetime_patients_count || 0) + insertedRows.length, usage.profileId, insertedRows.length);
 
     return res.status(201).json({ success: true, data: insertedRows, lifetime_patients_count: nextCount });
   } catch (error) {
