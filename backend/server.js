@@ -8,7 +8,13 @@ const emailConfig = require('./config/emailConfig');
 const app = express();
 
 app.use(cors({
-    origin: 'https://yogidesk-ai.vercel.app',
+    origin: function (origin, callback) {
+        if (!origin || origin === 'https://yogidesk-ai.vercel.app' || origin.endsWith('.vercel.app')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));

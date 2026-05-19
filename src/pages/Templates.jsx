@@ -37,12 +37,14 @@ const Templates = () => {
 
   const [templates, setTemplates] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [error, setError] = useState('');
   const [doctorProfile, setDoctorProfile] = useState(null);
 
   useEffect(() => {
     const fetchLimits = async () => {
       setIsLoading(true);
+      setIsProfileLoading(true);
       try {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || localStorage.getItem('user_id');
@@ -71,6 +73,7 @@ const Templates = () => {
         }
       } finally {
         setIsLoading(false);
+        setIsProfileLoading(false);
       }
     };
     fetchLimits();
@@ -82,11 +85,7 @@ const Templates = () => {
     { id: 'AUTHENTICATION', label: 'Authentication' },
   ];
 
-  const hasMetaCredentials = Boolean(
-    doctorProfile?.whatsapp_access_token &&
-    doctorProfile?.whatsapp_phone_number_id &&
-    doctorProfile?.whatsapp_business_account_id
-  );
+  const metaCredentials = doctorProfile || {};
 
   // Logic Functions
   const handleFileUpload = (e) => {
@@ -244,8 +243,13 @@ const Templates = () => {
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create WhatsApp Template</h1>
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
-          <button onClick={handleSubmit} disabled={saving || isLoading || !hasMetaCredentials} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
-            {saving ? (
+          <button onClick={handleSubmit} disabled={saving || isProfileLoading || !metaCredentials.whatsapp_access_token} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
+            {isProfileLoading ? (
+              <>
+                <Loader size={18} className="animate-spin" />
+                Loading Meta Configuration...
+              </>
+            ) : saving ? (
               <>
                 <Loader size={18} className="animate-spin" />
                 Submitting...
