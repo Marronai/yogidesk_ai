@@ -7,6 +7,95 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
+const formatTemplateName = (value) => (
+  String(value || '')
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+);
+
+const normalizeTemplateLanguage = (language) => {
+  const normalized = String(language || 'en_US').toLowerCase();
+  if (['hi', 'hindi'].includes(normalized)) return 'hi';
+  if (['hinglish', 'hi_latn', 'hi-latn'].includes(normalized)) return 'en_US';
+  if (['en', 'en_us', 'english'].includes(normalized)) return 'en_US';
+  if (normalized === 'en_in') return 'en_IN';
+  return language || 'en_US';
+};
+
+const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
+  if (Array.isArray(components) && components.length > 0) {
+    return components
+      .map((component) => {
+        if (!component?.type) return null;
+        if (component.type === 'HEADER') {
+          const text = String(component.text || '').trim();
+          return component.format === 'TEXT' && text ? { type: 'HEADER', format: 'TEXT', text } : null;
+        }
+        if (component.type === 'BODY') {
+          const text = String(component.text || bodyText || '').trim();
+          return text ? { type: 'BODY', text } : null;
+        }
+        if (component.type === 'FOOTER') {
+          const text = String(component.text || '').trim();
+          return text ? { type: 'FOOTER', text } : null;
+        }
+        if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
+          const buttonList = component.buttons
+            .map((btn) => {
+              const text = String(btn.text || '').trim();
+              if (btn.type === 'URL') {
+                const url = String(btn.url || '').trim();
+                return text && url ? { type: 'URL', text, url } : null;
+              }
+              const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+              return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
+            })
+            .filter(Boolean)
+            .slice(0, 2);
+          return buttonList.length ? { type: 'BUTTONS', buttons: buttonList } : null;
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }
+
+  const graphComponents = [];
+  const cleanBodyText = String(bodyText || '').trim();
+  const cleanHeaderText = String(headerText || '').trim();
+  const cleanFooterText = String(footerText || '').trim();
+
+  if (headerType === 'TEXT' && cleanHeaderText) {
+    graphComponents.push({ type: 'HEADER', format: 'TEXT', text: cleanHeaderText });
+  }
+
+  if (cleanBodyText) {
+    graphComponents.push({ type: 'BODY', text: cleanBodyText });
+  }
+
+  if (cleanFooterText) {
+    graphComponents.push({ type: 'FOOTER', text: cleanFooterText });
+  }
+
+  const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
+    const text = String(btn.text || '').trim();
+    if (btn.type === 'URL') {
+      const url = String(btn.url || '').trim();
+      return text && url ? { type: 'URL', text, url } : null;
+    }
+    const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+    return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
+  }).filter(Boolean) : [];
+
+  if (sanitizedButtons.length) {
+    graphComponents.push({ type: 'BUTTONS', buttons: sanitizedButtons });
+  }
+
+  return graphComponents;
+};
+
 const getUserMetaCredentials = async (userId) => {
   if (!supabase?.from || !userId) return {};
   const { data, error } = await supabase
@@ -40,6 +129,8 @@ exports.createTemplate = async (req, res) => {
       headerText = '',
       footerText = '',
       buttons = [],
+      components = [],
+      language = 'en_US',
       messaging_product: messagingProduct = 'whatsapp',
       whatsapp_business_account_id: requestBusinessAccountId,
       whatsapp_access_token: requestAccessToken
@@ -49,7 +140,9 @@ exports.createTemplate = async (req, res) => {
       return res.status(400).json({ success: false, message: 'userId is required.' });
     }
 
-    if (!name || !name.trim()) {
+    const formattedName = formatTemplateName(name);
+
+    if (!formattedName) {
       return res.status(400).json({ success: false, message: 'Template name is required.' });
     }
 
@@ -57,65 +150,9 @@ exports.createTemplate = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Template body text is required.' });
     }
 
-    const graphComponents = [
-      { type: 'BODY', text: bodyText }
-    ];
-
-    if (headerType === 'TEXT' && headerText) {
-      graphComponents.unshift({
-        type: 'HEADER',
-        format: 'TEXT',
-        text: headerText
-      });
-    }
-
-    if (footerText) {
-      graphComponents.push({
-        type: 'FOOTER',
-        text: footerText
-      });
-    }
-
-    let storedButtons = [];
-
-    if (Array.isArray(buttons) && buttons.length > 0) {
-      const sanitizedButtons = buttons.slice(0, 2).map((btn) => {
-        if (btn.type === 'URL' && btn.text && btn.url) {
-          storedButtons.push({
-            type: 'URL',
-            text: btn.text,
-            url: btn.url
-          });
-          return {
-            type: 'URL',
-            text: btn.text,
-            url: btn.url
-          };
-        }
-
-        if (btn.type === 'PHONE' && btn.text && btn.phone) {
-          storedButtons.push({
-            type: 'PHONE_NUMBER',
-            text: btn.text,
-            phoneNumber: btn.phone
-          });
-          return {
-            type: 'PHONE_NUMBER',
-            text: btn.text,
-            phone_number: btn.phone
-          };
-        }
-
-        return null;
-      }).filter(Boolean);
-
-      if (sanitizedButtons.length) {
-        graphComponents.push({
-          type: 'BUTTONS',
-          buttons: sanitizedButtons
-        });
-      }
-    }
+    const graphComponents = buildGraphComponents({ bodyText, headerType, headerText, footerText, buttons, components });
+    const storedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
+    const metaLanguage = normalizeTemplateLanguage(language);
 
     const credentials = await getUserMetaCredentials(userId);
     const businessAccountId = requestBusinessAccountId || credentials.businessAccountId || process.env.META_PHONE_ID;
@@ -128,8 +165,8 @@ exports.createTemplate = async (req, res) => {
     const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
     const response = await axios.post(graphUrl, {
       messaging_product: messagingProduct || 'whatsapp',
-      name: name.trim(),
-      language: 'en_US',
+      name: formattedName,
+      language: metaLanguage,
       category,
       components: graphComponents
     }, {
@@ -141,7 +178,7 @@ exports.createTemplate = async (req, res) => {
 
     const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
     const newTemplate = await Template.create({
-      name: name.trim(),
+      name: formattedName,
       bodyText,
       headerType,
       headerText,

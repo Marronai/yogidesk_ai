@@ -91,6 +91,69 @@ const Templates = () => {
 
   const metaCredentials = doctorProfile || {};
 
+  const formatTemplateName = (value, trimEdges = true) => {
+    const formatted = String(value || '')
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
+      .replace(/_+/g, '_');
+
+    return trimEdges ? formatted.replace(/^_+|_+$/g, '') : formatted.replace(/^_+/, '');
+  };
+
+  const getMetaLanguageForBody = () => {
+    if (template.english.trim()) {
+      return { bodyText: template.english.trim(), language: 'en_US' };
+    }
+    if (template.hinglish.trim()) {
+      return { bodyText: template.hinglish.trim(), language: 'en_US' };
+    }
+    if (template.hindi.trim()) {
+      return { bodyText: template.hindi.trim(), language: 'hi' };
+    }
+    return { bodyText: '', language: '' };
+  };
+
+  const buildTemplateComponents = (bodyText) => {
+    const components = [];
+    const headerText = String(template.headerText || '').trim();
+    const footerText = String(template.footerText || '').trim();
+
+    if (template.headerType === 'TEXT' && headerText) {
+      components.push({
+        type: 'HEADER',
+        format: 'TEXT',
+        text: headerText
+      });
+    }
+
+    if (bodyText) {
+      components.push({ type: 'BODY', text: bodyText });
+    }
+
+    if (footerText) {
+      components.push({ type: 'FOOTER', text: footerText });
+    }
+
+    const buttonPayload = template.buttons
+      .map((btn) => {
+        const text = String(btn.text || '').trim();
+        if (btn.type === 'URL') {
+          const url = String(btn.url || '').trim();
+          return text && url ? { type: 'URL', text, url } : null;
+        }
+        const phoneNumber = String(btn.phone || '').trim();
+        return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
+      })
+      .filter(Boolean);
+
+    if (buttonPayload.length > 0) {
+      components.push({ type: 'BUTTONS', buttons: buttonPayload });
+    }
+
+    return { components, buttons: buttonPayload };
+  };
+
   // Logic Functions
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -148,7 +211,9 @@ const Templates = () => {
   };
 
   const handleSubmit = async () => {
-    if (!template.name.trim()) {
+    const formattedTemplateName = formatTemplateName(template.name);
+
+    if (!formattedTemplateName) {
       setError('Template name is required.');
       return;
     }
@@ -158,13 +223,7 @@ const Templates = () => {
       return;
     }
 
-    // Determine which language body to send and its corresponding Meta language code
-    let bodyToSubmit = '';
-    let languageToSubmit = '';
-
-    if (template.english.trim()) { bodyToSubmit = template.english.trim(); languageToSubmit = 'en'; }
-    else if (template.hinglish.trim()) { bodyToSubmit = template.hinglish.trim(); languageToSubmit = 'hi_Latn'; } // Hinglish uses hi_Latn for Latin script Hindi
-    else if (template.hindi.trim()) { bodyToSubmit = template.hindi.trim(); languageToSubmit = 'hi'; }
+    const { bodyText: bodyToSubmit, language: languageToSubmit } = getMetaLanguageForBody();
 
     if (!bodyToSubmit) {
       setError('At least one language body text must be provided.');
@@ -202,17 +261,7 @@ const Templates = () => {
       }
 
       const headerType = template.headerType || 'NONE';
-      const buttonPayload = template.buttons
-        .map((btn) => {
-          const text = String(btn.text || '').trim();
-          if (btn.type === 'URL') {
-            const url = String(btn.url || '').trim();
-            return text && url ? { type: 'URL', text, url } : null;
-          }
-          const phone_number = String(btn.phone || '').trim();
-          return text && phone_number ? { type: 'PHONE_NUMBER', text, phone_number } : null;
-        })
-        .filter(Boolean);
+      const { components, buttons: buttonPayload } = buildTemplateComponents(bodyToSubmit);
 
       await api.post('/templates', {
         userId,
@@ -220,10 +269,11 @@ const Templates = () => {
         whatsapp_business_account_id: activeProfile.whatsapp_business_account_id,
         whatsapp_access_token: activeProfile.whatsapp_access_token,
         whatsapp_phone_number_id: activeProfile.whatsapp_phone_number_id || null,
-        name: template.name.trim(),
+        name: formattedTemplateName,
         bodyText: bodyToSubmit,
-        language: languageToSubmit === 'en' ? 'en_US' : languageToSubmit,
+        language: languageToSubmit,
         category: template.category,
+        components,
         headerType,
         headerText: template.headerText.trim(),
         footerText: template.footerText.trim(),
@@ -295,7 +345,8 @@ const Templates = () => {
                       placeholder="e.g. order_confirmation_new" 
                       className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 outline-none transition-all font-medium text-slate-700"
                       value={template.name}
-                      onChange={(e) => setTemplate({...template, name: e.target.value})}
+                      onChange={(e) => setTemplate({...template, name: formatTemplateName(e.target.value, false)})}
+                      onBlur={(e) => setTemplate({...template, name: formatTemplateName(e.target.value)})}
                     />
                   </div>
                   <div className="space-y-2">

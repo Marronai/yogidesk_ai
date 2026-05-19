@@ -44,6 +44,85 @@ const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
 const getUnitCost = (category) => RATE_CARD[String(category || 'UTILITY').toUpperCase()] || RATE_CARD.UTILITY;
+const formatTemplateName = (value) => (
+    String(value || '')
+        .toLowerCase()
+        .replace(/[\s-]+/g, '_')
+        .replace(/[^a-z0-9_]/g, '')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+);
+const normalizeTemplateLanguage = (language) => {
+    const normalized = String(language || 'en_US').toLowerCase();
+    if (['hi', 'hindi'].includes(normalized)) return 'hi';
+    if (['hinglish', 'hi_latn', 'hi-latn'].includes(normalized)) return 'en_US';
+    if (['en', 'en_us', 'english'].includes(normalized)) return 'en_US';
+    if (normalized === 'en_in') return 'en_IN';
+    return language || 'en_US';
+};
+const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
+    if (Array.isArray(components) && components.length > 0) {
+        return components.map((component) => {
+            if (!component?.type) return null;
+            if (component.type === 'HEADER') {
+                const text = String(component.text || '').trim();
+                return component.format === 'TEXT' && text ? { type: 'HEADER', format: 'TEXT', text } : null;
+            }
+            if (component.type === 'BODY') {
+                const text = String(component.text || bodyText || '').trim();
+                return text ? { type: 'BODY', text } : null;
+            }
+            if (component.type === 'FOOTER') {
+                const text = String(component.text || '').trim();
+                return text ? { type: 'FOOTER', text } : null;
+            }
+            if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
+                const buttonList = component.buttons.map((btn) => {
+                    const text = String(btn.text || '').trim();
+                    if (btn.type === 'URL') {
+                        const url = String(btn.url || '').trim();
+                        return text && url ? { type: 'URL', text, url } : null;
+                    }
+                    const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+                    return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
+                }).filter(Boolean).slice(0, 2);
+                return buttonList.length ? { type: 'BUTTONS', buttons: buttonList } : null;
+            }
+            return null;
+        }).filter(Boolean);
+    }
+
+    const graphComponents = [];
+    const cleanBodyText = String(bodyText || '').trim();
+    const cleanHeaderText = String(headerText || '').trim();
+    const cleanFooterText = String(footerText || '').trim();
+
+    if (headerType === 'TEXT' && cleanHeaderText) {
+        graphComponents.push({ type: 'HEADER', format: 'TEXT', text: cleanHeaderText });
+    }
+    if (cleanBodyText) {
+        graphComponents.push({ type: 'BODY', text: cleanBodyText });
+    }
+    if (cleanFooterText) {
+        graphComponents.push({ type: 'FOOTER', text: cleanFooterText });
+    }
+
+    const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
+        const text = String(btn.text || '').trim();
+        if (btn.type === 'URL') {
+            const url = String(btn.url || '').trim();
+            return text && url ? { type: 'URL', text, url } : null;
+        }
+        const phoneNumber = String(btn.phone_number || btn.phone || '').trim();
+        return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
+    }).filter(Boolean) : [];
+
+    if (sanitizedButtons.length) {
+        graphComponents.push({ type: 'BUTTONS', buttons: sanitizedButtons });
+    }
+
+    return graphComponents;
+};
 const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function' ? emailConfig.sendWelcomeEmail : async () => false;
 const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function' ? emailConfig.sendLoginAlert : async () => false;
 const mailTransporter = emailConfig.transporter;
@@ -332,6 +411,7 @@ app.post('/api/templates', async (req, res) => {
             headerText = '',
             footerText = '',
             buttons = [],
+            components = [],
             messaging_product: messagingProduct = 'whatsapp',
             whatsapp_business_account_id: requestBusinessAccountId,
             whatsapp_access_token: requestAccessToken
@@ -341,7 +421,9 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
 
-        if (!name || !name.trim()) {
+        const formattedName = formatTemplateName(name);
+
+        if (!formattedName) {
             return res.status(400).json({ success: false, message: 'Template name is required.' });
         }
 
@@ -366,54 +448,15 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
         }
 
-        const graphComponents = [
-            { type: 'BODY', text: bodyText }
-        ];
-
-        if (headerType === 'TEXT' && headerText) {
-            graphComponents.unshift({
-                type: 'HEADER',
-                format: 'TEXT',
-                text: headerText
-            });
-        }
-
-        if (footerText) {
-            graphComponents.push({
-                type: 'FOOTER',
-                text: footerText
-            });
-        }
-
-        const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
-            if (btn.type === 'URL' && btn.text && btn.url) {
-                return {
-                    type: 'URL',
-                    text: btn.text,
-                    url: btn.url
-                };
-            }
-
-            if (btn.type === 'PHONE_NUMBER' && btn.text && btn.phone_number) {
-                return {
-                    type: 'PHONE_NUMBER',
-                    text: btn.text,
-                    phone_number: btn.phone_number
-                };
-            }
-
-            return null;
-        }).filter(Boolean) : [];
-
-        if (sanitizedButtons.length > 0) {
-            graphComponents.push({ type: 'BUTTONS', buttons: sanitizedButtons });
-        }
+        const graphComponents = buildTemplateComponents({ bodyText, headerType, headerText, footerText, buttons, components });
+        const sanitizedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
+        const metaLanguage = normalizeTemplateLanguage(language);
 
         const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
         const response = await require('axios').post(graphUrl, {
             messaging_product: messagingProduct || 'whatsapp',
-            name: name.trim(),
-            language: { code: language },
+            name: formattedName,
+            language: metaLanguage,
             category,
             components: graphComponents
         }, {
@@ -425,9 +468,9 @@ app.post('/api/templates', async (req, res) => {
         const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
         const newTemplateRow = {
             user_id: userId,
-            template_name: name.trim(),
+            template_name: formattedName,
             category,
-            language,
+            language: metaLanguage,
             body_content: bodyText,
             status: 'PENDING_REVIEW',
             header_type: headerType,
