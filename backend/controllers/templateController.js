@@ -35,7 +35,29 @@ const sanitizeMetaPhoneNumber = (value) => {
   return digits.length === 10 ? `91${digits}` : digits;
 };
 
-const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
+const getBodyExample = (bodyText, bodyVariableParameters = []) => {
+  const indexes = Array.from(String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g), (match) => Number(match[1]))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  if (!indexes.length) return null;
+
+  const labelsByIndex = new Map(
+    (Array.isArray(bodyVariableParameters) ? bodyVariableParameters : [])
+      .map((variable) => [Number(variable.index), String(variable.label || '').trim()])
+      .filter(([index, label]) => Number.isFinite(index) && label)
+  );
+
+  return {
+    body_text: [
+      indexes.map((index) => labelsByIndex.get(index) || `sample_${index}`)
+    ]
+  };
+};
+
+const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, buttons, components, bodyVariableParameters }) => {
+  const bodyExample = getBodyExample(bodyText, bodyVariableParameters);
+
   if (Array.isArray(components) && components.length > 0) {
     return components
       .map((component) => {
@@ -52,7 +74,8 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
         }
         if (component.type === 'BODY') {
           const text = String(component.text || bodyText || '').trim();
-          return text ? { type: 'BODY', text } : null;
+          const example = getBodyExample(text, bodyVariableParameters);
+          return text ? { type: 'BODY', text, ...(example && { example }) } : null;
         }
         if (component.type === 'FOOTER') {
           const text = String(component.text || '').trim();
@@ -96,7 +119,7 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
   }
 
   if (cleanBodyText) {
-    graphComponents.push({ type: 'BODY', text: cleanBodyText });
+    graphComponents.push({ type: 'BODY', text: cleanBodyText, ...(bodyExample && { example: bodyExample }) });
   }
 
   if (cleanFooterText) {
@@ -255,7 +278,9 @@ exports.createTemplate = async (req, res) => {
       language = 'en_US',
       messaging_product: messagingProduct = 'whatsapp',
       whatsapp_business_account_id: requestBusinessAccountId,
-      whatsapp_access_token: requestAccessToken
+      whatsapp_access_token: requestAccessToken,
+      bodyVariableParameters = [],
+      customVariables = []
     } = req.body;
 
     if (!userId) {
@@ -272,7 +297,17 @@ exports.createTemplate = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Template body text is required.' });
     }
 
-    const graphComponents = buildGraphComponents({ bodyText, headerType, headerText, footerText, buttons, components });
+    const graphComponents = buildGraphComponents({
+      bodyText,
+      headerType,
+      headerText,
+      footerText,
+      buttons,
+      components,
+      bodyVariableParameters: Array.isArray(bodyVariableParameters) && bodyVariableParameters.length
+        ? bodyVariableParameters
+        : customVariables
+    });
     const storedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
     const metaLanguage = normalizeTemplateLanguage(language);
 

@@ -15,6 +15,7 @@ const TemplateManager = () => {
   const [error, setError] = useState('');
   const [planTier, setPlanTier] = useState('Starter Clinic');
   const [activeTab, setActiveTab] = useState('create');
+  const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
 
   // Specialization Logic
   const businessCategory = localStorage.getItem('user_business_category') || 'General Physician';
@@ -48,7 +49,7 @@ const TemplateManager = () => {
         }
 
         setSyncing(true);
-        const response = await api.get('/api/templates', { params: { userId } });
+        const response = await api.get(templateApiPath, { params: { userId } });
         setTemplates(Array.isArray(response.data) ? response.data : []);
       } catch (err) {
         console.error('Template fetch failed:', err);

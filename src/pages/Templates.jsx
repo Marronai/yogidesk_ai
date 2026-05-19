@@ -13,6 +13,7 @@ import {
 const Templates = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const bodyTextareaRef = useRef(null);
   
   // Naya state device choice ke liye
   const [device, setDevice] = useState('IPHONE'); // 'IPHONE' or 'ANDROID'
@@ -41,6 +42,9 @@ const Templates = () => {
   const [error, setError] = useState('');
   const [doctorProfile, setDoctorProfile] = useState(null);
   const [pendingHeaderType, setPendingHeaderType] = useState('NONE');
+  const [customVariables, setCustomVariables] = useState([]);
+  const [showCustomVariableInput, setShowCustomVariableInput] = useState(false);
+  const [customVariableLabel, setCustomVariableLabel] = useState('');
 
   useEffect(() => {
     const fetchLimits = async () => {
@@ -91,6 +95,7 @@ const Templates = () => {
   ];
 
   const metaCredentials = doctorProfile || {};
+  const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
 
   const formatTemplateName = (value, trimEdges = true) => {
     const formatted = String(value || '')
@@ -213,11 +218,48 @@ const Templates = () => {
     return '';
   };
 
-  const insertPlaceholder = () => {
-    const currentBody = template[activeBodyLang];
-    const matchesCurrent = currentBody.match(/\{\{(\d+)\}\}/g);
-    const nextNum = matchesCurrent ? matchesCurrent.length + 1 : 1;
-    setTemplate({ ...template, [activeBodyLang]: `${currentBody} {{${nextNum}}}` });
+  const getNextVariableIndex = (bodyText = template[activeBodyLang]) => {
+    const matches = String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g);
+    const indexes = Array.from(matches, (match) => Number(match[1])).filter(Number.isFinite);
+    return indexes.length ? Math.max(...indexes) + 1 : 1;
+  };
+
+  const insertVariableAtCursor = (label) => {
+    const currentBody = template[activeBodyLang] || '';
+    const textarea = bodyTextareaRef.current;
+    const nextNum = getNextVariableIndex(currentBody);
+    const token = `{{${nextNum}}}`;
+    const insertText = currentBody && textarea ? token : ` ${token}`;
+    const start = textarea?.selectionStart ?? currentBody.length;
+    const end = textarea?.selectionEnd ?? currentBody.length;
+    const nextBody = `${currentBody.slice(0, start)}${insertText}${currentBody.slice(end)}`;
+
+    setTemplate((current) => ({ ...current, [activeBodyLang]: nextBody }));
+
+    if (label) {
+      setCustomVariables((current) => [
+        ...current.filter((variable) => variable.index !== nextNum),
+        { index: nextNum, label }
+      ]);
+    }
+
+    window.requestAnimationFrame(() => {
+      const cursorPosition = start + insertText.length;
+      bodyTextareaRef.current?.focus();
+      bodyTextareaRef.current?.setSelectionRange(cursorPosition, cursorPosition);
+    });
+  };
+
+  const insertPlaceholder = (label) => {
+    insertVariableAtCursor(label);
+  };
+
+  const addCustomVariable = () => {
+    const label = customVariableLabel.trim();
+    if (!label) return;
+    insertVariableAtCursor(label);
+    setCustomVariableLabel('');
+    setShowCustomVariableInput(false);
   };
 
   const addButton = (type) => {
@@ -308,8 +350,11 @@ const Templates = () => {
 
       const headerType = template.headerType || 'NONE';
       const { components, buttons: buttonPayload } = buildTemplateComponents(bodyToSubmit);
+      const bodyVariableParameters = customVariables
+        .filter((variable) => new RegExp(`\\{\\{${variable.index}\\}\\}`).test(bodyToSubmit))
+        .sort((a, b) => a.index - b.index);
 
-      await api.post('/api/templates', {
+      await api.post(templateApiPath, {
         userId,
         messaging_product: 'whatsapp',
         whatsapp_business_account_id: activeProfile.whatsapp_business_account_id,
@@ -323,7 +368,9 @@ const Templates = () => {
         headerType,
         headerText: template.headerText.trim(),
         footerText: template.footerText.trim(),
-        buttons: buttonPayload
+        buttons: buttonPayload,
+        bodyVariableParameters,
+        customVariables: bodyVariableParameters
       });
 
       setMessage('Template submitted successfully. Approval status will update automatically.');
@@ -422,10 +469,10 @@ const Templates = () => {
                <div className="p-8 space-y-10">
                   <div className="space-y-4">
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">1. Header Media Type</label>
-                    <div className="flex flex-wrap gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 items-stretch justify-center">
                       {['NONE', 'TEXT', 'IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION'].map((type) => (
                         <button key={type} onClick={() => handleHeaderTypeSelect(type)}
-                          className={`flex-1 min-w-[100px] py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${template.headerType === type ? 'border-orange-500 bg-orange-50/50 text-orange-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
+                          className={`h-full min-h-[86px] w-full py-4 px-2 rounded-2xl border-2 transition-all flex flex-col items-center justify-center gap-2 ${template.headerType === type ? 'border-orange-500 bg-orange-50/50 text-orange-700 shadow-sm' : 'border-slate-100 bg-slate-50 text-slate-400 hover:border-slate-200 hover:bg-slate-100'}`}
                         >
                           {type === 'IMAGE' ? <ImageIcon size={20}/> : type === 'VIDEO' ? <Video size={20}/> : type === 'DOCUMENT' ? <FileText size={20}/> : type === 'LOCATION' ? <MapPin size={20}/> : type === 'TEXT' ? <Type size={20}/> : <X size={20}/>}
                           <span className="text-[10px] font-black tracking-tighter uppercase">{type}</span>
@@ -460,17 +507,40 @@ const Templates = () => {
                   </div>
 
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-center">
+                    <div className="space-y-3">
                       <label className="text-xs font-bold text-slate-500 uppercase tracking-widest italic">2. Message Body</label>
-                      <div className="flex gap-2 flex-wrap md:justify-end">
-                         {['Patient Name', 'Appt Time', 'Clinic Name'].map((p) => (
-                           <button key={p} onClick={() => insertPlaceholder()} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all border border-slate-200 flex items-center gap-1">
+                      <div className="flex flex-wrap gap-2 items-center justify-start">
+                         {['Patient Name', 'Appt Time', 'Clinic Name', 'Date'].map((p) => (
+                           <button key={p} onClick={() => insertPlaceholder(p)} className="h-9 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition-all border border-slate-200 inline-flex items-center justify-center gap-1">
                              <Plus size={12}/> {p}
                            </button>
                          ))}
+                         <button onClick={() => setShowCustomVariableInput(true)} className="h-9 px-3 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg text-[10px] font-bold transition-all border border-orange-100 inline-flex items-center justify-center gap-1">
+                           <Plus size={12}/> Custom Variable
+                         </button>
+                         {showCustomVariableInput && (
+                           <div className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2">
+                             <input
+                               type="text"
+                               value={customVariableLabel}
+                               onChange={(e) => setCustomVariableLabel(e.target.value)}
+                               onKeyDown={(e) => {
+                                 if (e.key === 'Enter') addCustomVariable();
+                                 if (e.key === 'Escape') {
+                                   setCustomVariableLabel('');
+                                   setShowCustomVariableInput(false);
+                                 }
+                               }}
+                               placeholder="Label"
+                               className="h-7 w-28 border-none bg-transparent text-xs font-semibold text-slate-700 outline-none placeholder:text-slate-300"
+                               autoFocus
+                             />
+                             <button type="button" onClick={addCustomVariable} className="h-7 rounded-md bg-slate-900 px-2 text-[10px] font-bold text-white">Add</button>
+                           </div>
+                         )}
                       </div>
                     </div>
-                    <textarea className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder={`Write your message in ${activeBodyLang}...`} value={template[activeBodyLang]} onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })} />
+                    <textarea ref={bodyTextareaRef} className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder={`Write your message in ${activeBodyLang}...`} value={template[activeBodyLang]} onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })} />
                   </div>
 
                   <div className="space-y-2">
