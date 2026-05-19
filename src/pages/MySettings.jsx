@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 
 const emptyForm = {
@@ -15,12 +15,12 @@ const Settings = () => {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [toast, setToast] = useState('');
+  const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
 
-  const showToast = (text) => {
-    setToast(text);
-    window.setTimeout(() => setToast(''), 3200);
+  const showToast = (type, text) => {
+    setToast({ type, text });
+    window.setTimeout(() => setToast(null), 3200);
   };
 
   const getActiveAccount = async () => {
@@ -62,7 +62,7 @@ const Settings = () => {
           : 'disconnected'
       );
     } catch {
-      showToast('Unable to load account settings.');
+      showToast('error', 'Failed to update connection settings. Please try again.');
     } finally {
       setLoadingProfile(false);
     }
@@ -93,9 +93,9 @@ const Settings = () => {
       if (error) throw error;
 
       localStorage.setItem('user_name', formData.name.trim());
-      showToast('Account settings saved successfully.');
+      showToast('success', 'Account settings saved successfully.');
     } catch {
-      showToast('Unable to save account settings.');
+      showToast('error', 'Failed to update connection settings. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -106,9 +106,8 @@ const Settings = () => {
     setSavingConnection(true);
 
     try {
-      const { authUser, userId } = await getActiveAccount();
+      const { authUser, userId: authUserId } = await getActiveAccount();
       const payload = {
-        user_id: userId,
         name: formData.name.trim() || null,
         email: formData.email || authUser?.email || null,
         whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
@@ -116,20 +115,35 @@ const Settings = () => {
         whatsapp_access_token: formData.whatsappAccessToken || null,
       };
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('doctor_profiles')
-        .upsert(payload, { onConflict: 'user_id' });
+        .update(payload)
+        .eq('user_id', authUserId)
+        .select('user_id')
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Connection settings update failed:', error.message || error.details || error);
+        throw error;
+      }
+
+      if (!data) {
+        const missingRowError = new Error('No doctor profile row matched the authenticated user.');
+        console.error('Connection settings update failed:', missingRowError.message);
+        throw missingRowError;
+      }
 
       setConnectionStatus(
         payload.whatsapp_phone_number_id && payload.whatsapp_business_account_id && payload.whatsapp_access_token
           ? 'connected'
           : 'disconnected'
       );
-      showToast('Meta API credentials updated.');
-    } catch {
-      showToast('Unable to update Meta API credentials.');
+      showToast('success', 'Connection settings saved successfully.');
+    } catch (error) {
+      if (error?.message || error?.details) {
+        console.error('Connection settings update failed:', error.message || error.details);
+      }
+      showToast('error', 'Failed to update connection settings. Please try again.');
     } finally {
       setSavingConnection(false);
     }
@@ -140,10 +154,20 @@ const Settings = () => {
   return (
     <div className="min-h-screen bg-orange-50/30 px-4 py-6 sm:px-6 lg:px-8">
       {toast && (
-        <div className="fixed right-4 top-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 shadow-2xl shadow-emerald-100 sm:right-6 sm:top-6">
+        <div
+          className={`fixed right-4 top-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border bg-white px-4 py-3 text-sm font-bold shadow-2xl sm:right-6 sm:top-6 ${
+            toast.type === 'success'
+              ? 'border-emerald-200 text-slate-800 shadow-emerald-100'
+              : 'border-red-200 text-red-800 shadow-red-100'
+          }`}
+        >
           <div className="flex items-center gap-3">
-            <ShieldCheck className="shrink-0 text-emerald-600" size={18} />
-            <span>{toast}</span>
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="shrink-0 text-emerald-600" size={18} />
+            ) : (
+              <AlertCircle className="shrink-0 text-red-600" size={18} />
+            )}
+            <span>{toast.text}</span>
           </div>
         </div>
       )}
