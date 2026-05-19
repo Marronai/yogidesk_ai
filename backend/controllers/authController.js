@@ -3,6 +3,10 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
 const geoip = require('geoip-lite');
+const { createClient } = require('@supabase/supabase-js');
+
+// Initialize Supabase Client for OTP management
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const emailConfig = require('../config/emailConfig');
 const sendOTP = typeof emailConfig.sendOTP === 'function'
@@ -307,5 +311,102 @@ exports.googleLogin = async (req, res) => {
   }
 };
 
-// ... baaki Google login same rahega
+// 7️⃣ SEND WHATSAPP OTP: Generate 6-digit numeric string and dispatch via Meta Cloud API
+exports.sendWhatsAppOTP = async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ msg: "Phone number is required" });
 
+    // Generate 6-digit numeric OTP and set 5-minute expiry
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const fullPhone = `91${phone.replace(/\D/g, '').slice(-10)}`;
+
+    // 1. Insert OTP record into Supabase whatsapp_otps table
+    const { error: dbError } = await supabase.from('whatsapp_otps').insert([{
+      phone_number: fullPhone,
+      otp_code: otpCode,
+      is_verified: false,
+      expires_at: expiresAt
+    }]);
+
+    if (dbError) throw dbError;
+
+    // 2. Dispatch Asynchronous Axios POST call to Meta's Cloud API
+    const metaUrl = `https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    axios.post(metaUrl, {
+      messaging_product: "whatsapp",
+      to: fullPhone,
+      type: "template",
+      template: {
+        name: "yogi_auth_otp",
+        language: { code: "en_US" },
+        components: [{
+          type: "body",
+          parameters: [{ type: "text", text: otpCode }]
+        }]
+      }
+    }, {
+      headers: { 'Authorization': `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}` }
+    }).catch(err => console.error("Meta OTP Dispatch Error:", err.response?.data || err.message));
+
+    res.status(200).json({ success: true, msg: "OTP dispatched to WhatsApp" });
+  } catch (error) {
+    res.status(500).json({ msg: "Failed to dispatch WhatsApp OTP", error: error.message });
+  }
+};
+
+// 8️⃣ VERIFY WHATSAPP OTP: Validate sequence and issue structural JWT
+exports.verifyWhatsAppOTP = async (req, res) => {
+  try {
+    const { phone, otp } = req.body;
+    if (!phone || !otp) return res.status(400).json({ msg: "Phone and OTP are required" });
+
+    const fullPhone = `91${phone.replace(/\D/g, '').slice(-10)}`;
+    const now = new Date().toISOString();
+
+    // Query whatsapp_otps for valid, unverified, and non-expired records
+    const { data: record, error: queryError } = await supabase
+      .from('whatsapp_otps')
+      .select('*')
+      .eq('phone_number', fullPhone)
+      .eq('otp_code', otp)
+      .eq('is_verified', false)
+      .gt('expires_at', now)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (queryError || !record) {
+      return res.status(401).json({ success: false, msg: "Invalid or expired OTP sequence" });
+    }
+
+    // Update flag to prevent replay attacks
+    await supabase.from('whatsapp_otps').update({ is_verified: true }).eq('id', record.id);
+
+    // Upsert profile signature inside doctor_profiles framework
+    const { data: profile, error: upsertError } = await supabase
+      .from('doctor_profiles')
+      .upsert({ phone_number: fullPhone, last_verified_at: now }, { onConflict: 'phone_number' })
+      .select()
+      .single();
+
+    if (upsertError) throw upsertError;
+
+    // Sign custom JWT access token for persistence
+    const token = generateToken({ 
+      _id: profile.id, 
+      phone: fullPhone, 
+      role: 'doctor', 
+      name: 'Yogi Verified Doctor' 
+    });
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: { id: profile.id, phone: fullPhone }
+    });
+  } catch (error) {
+    res.status(500).json({ msg: "OTP verification process failed", error: error.message });
+  }
+};

@@ -9,7 +9,9 @@ const {
   loginStep1, 
   verifyOTP,
   verifySignupOTP,
-  googleLogin
+  googleLogin,
+  sendWhatsAppOTP,
+  verifyWhatsAppOTP
 } = require('../controllers/authController');
 
 const loginLimiter = rateLimit({
@@ -41,6 +43,11 @@ router.post('/signup', signupLimiter, register);
 router.post('/login', loginLimiter, loginStep1);
 router.post('/verify-login', loginLimiter, verifyOTP);
 router.post('/verify-signup-otp', loginLimiter, verifySignupOTP);
+
+// --- WHATSAPP OTP AUTH ROUTES ---
+router.post('/send-whatsapp-otp', loginLimiter, sendWhatsAppOTP);
+router.post('/verify-whatsapp-otp', loginLimiter, verifyWhatsAppOTP);
+
 // --- GOOGLE AUTH ROUTES ---
 router.post('/google', googleLogin);
 
