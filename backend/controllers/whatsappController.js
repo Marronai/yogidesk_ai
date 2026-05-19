@@ -11,10 +11,10 @@ const getUserMetaCredentials = async (userId) => {
     const { data, error } = await supabase
         .from('doctor_profiles')
         .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-        .eq('id', userId)
+        .eq('user_id', userId)
         .maybeSingle();
     if (error || !data) {
-        if (error) console.warn('Meta credential profile lookup failed:', error.message);
+        if (error) console.warn('Meta credential lookup failed:', error.message);
         return {};
     }
     return {
@@ -80,15 +80,27 @@ exports.sendTestMessage = async (req, res) => {
 // 2. Submit Template Function
 exports.submitTemplate = async (req, res) => {
     try {
-        const { userId, name, category, language, body, header, footer, buttons } = req.body;
+        const {
+            userId,
+            name,
+            category,
+            language,
+            body,
+            header,
+            footer,
+            buttons,
+            messaging_product: messagingProduct = 'whatsapp',
+            whatsapp_business_account_id: requestBusinessAccountId,
+            whatsapp_access_token: requestAccessToken
+        } = req.body;
 
         if (!userId || !name || !category || !language || !body) {
             return res.status(400).json({ message: 'Missing required fields: userId, name, category, language, body' });
         }
 
         const credentials = await getUserMetaCredentials(userId);
-        const businessAccountId = credentials.businessAccountId || process.env.META_WABA_ID;
-        const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
+        const businessAccountId = requestBusinessAccountId || credentials.businessAccountId || process.env.META_WABA_ID;
+        const accessToken = requestAccessToken || credentials.accessToken || process.env.META_ACCESS_TOKEN;
 
         if (!businessAccountId || !accessToken) {
             return res.status(500).json({ message: 'WhatsApp Meta credentials unavailable for this user.' });
@@ -136,6 +148,7 @@ exports.submitTemplate = async (req, res) => {
 
         const url = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
         const data = {
+            messaging_product: messagingProduct || 'whatsapp',
             name: name.trim(),
             language,
             category,

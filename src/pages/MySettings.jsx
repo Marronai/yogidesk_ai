@@ -1,76 +1,75 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
-import axios from 'axios';
 import { supabase } from '../config/supabaseClient';
+
+const emptyForm = {
+  name: '',
+  email: '',
+  whatsappPhoneNumberId: '',
+  whatsappBusinessAccountId: '',
+  whatsappAccessToken: '',
+};
 
 const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    whatsappPhoneNumberId: '',
-    whatsappBusinessAccountId: '',
-    whatsappAccessToken: '',
-  });
+  const [toast, setToast] = useState('');
+  const [formData, setFormData] = useState(emptyForm);
+
+  const showToast = (text) => {
+    setToast(text);
+    window.setTimeout(() => setToast(''), 3200);
+  };
+
+  const getActiveAccount = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+
+    const authUser = data?.user || null;
+    const userId = authUser?.id || localStorage.getItem('user_id');
+    if (!userId) throw new Error('Unable to identify the current account.');
+
+    return { authUser, userId };
+  };
+
+  const hydrateProfile = async () => {
+    setLoadingProfile(true);
+
+    try {
+      const { authUser, userId } = await getActiveAccount();
+      const { data, error } = await supabase
+        .from('doctor_profiles')
+        .select('name,email,whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      const nextForm = {
+        name: data?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
+        email: data?.email || authUser?.email || localStorage.getItem('user_email') || '',
+        whatsappPhoneNumberId: data?.whatsapp_phone_number_id || '',
+        whatsappBusinessAccountId: data?.whatsapp_business_account_id || '',
+        whatsappAccessToken: data?.whatsapp_access_token || '',
+      };
+
+      setFormData(nextForm);
+      setConnectionStatus(
+        nextForm.whatsappPhoneNumberId && nextForm.whatsappBusinessAccountId && nextForm.whatsappAccessToken
+          ? 'connected'
+          : 'disconnected'
+      );
+    } catch {
+      showToast('Unable to load account settings.');
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const token = localStorage.getItem('token');
-        const res = await axios.get('http://localhost:5000/api/auth/me', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const user = res.data || {};
-
-        let connectionValues = {
-          whatsappPhoneNumberId: '',
-          whatsappBusinessAccountId: '',
-          whatsappAccessToken: '',
-        };
-
-        try {
-          const { data: authData } = await supabase.auth.getUser();
-          const supabaseUserId = authData?.user?.id || localStorage.getItem('user_id');
-          if (supabaseUserId) {
-            const { data } = await supabase
-              .from('doctor_profiles')
-              .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-              .eq('id', supabaseUserId)
-              .maybeSingle();
-
-            if (data) {
-              connectionValues = {
-                whatsappPhoneNumberId: data.whatsapp_phone_number_id || '',
-                whatsappBusinessAccountId: data.whatsapp_business_account_id || '',
-                whatsappAccessToken: data.whatsapp_access_token || '',
-              };
-            }
-          }
-        } catch (err) {
-          console.warn('Unable to fetch Supabase connection settings:', err.message || err);
-        }
-
-        setFormData({
-          name: user.name || '',
-          email: user.email || '',
-          ...connectionValues,
-        });
-        setConnectionStatus(
-          connectionValues.whatsappPhoneNumberId && connectionValues.whatsappBusinessAccountId && connectionValues.whatsappAccessToken
-            ? 'connected'
-            : 'disconnected'
-        );
-      } catch (err) {
-        console.error('Failed to load user data:', err);
-      } finally {
-        setLoadingProfile(false);
-      }
-    };
-
-    fetchUserData();
+    hydrateProfile();
   }, []);
 
   const updateField = (field, value) => {
@@ -80,54 +79,57 @@ const Settings = () => {
     }));
   };
 
-  const handleUpdate = async (e) => {
-    e.preventDefault();
+  const handleUpdate = async (event) => {
+    event.preventDefault();
     setLoading(true);
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.put('http://localhost:5000/api/settings/update', formData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      alert('Settings saved successfully.');
-    } catch (err) {
-      alert(err.response?.data?.msg || 'Update failed. Please try again.');
+      const { userId } = await getActiveAccount();
+      const { error } = await supabase
+        .from('doctor_profiles')
+        .update({ name: formData.name.trim() || null })
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      localStorage.setItem('user_name', formData.name.trim());
+      showToast('Account settings saved successfully.');
+    } catch {
+      showToast('Unable to save account settings.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSaveConnection = async (e) => {
-    e.preventDefault();
+  const handleSaveConnection = async (event) => {
+    event.preventDefault();
     setSavingConnection(true);
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
+      const { authUser, userId } = await getActiveAccount();
+      const payload = {
+        user_id: userId,
+        name: formData.name.trim() || null,
+        email: formData.email || authUser?.email || null,
+        whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
+        whatsapp_business_account_id: formData.whatsappBusinessAccountId || null,
+        whatsapp_access_token: formData.whatsappAccessToken || null,
+      };
 
-      const userId = authData?.user?.id || localStorage.getItem('user_id');
-      if (!userId) throw new Error('Unable to identify the current user. Please sign in again.');
-
-      const { error } = await supabase.from('doctor_profiles').upsert(
-        {
-          id: userId,
-          whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
-          whatsapp_business_account_id: formData.whatsappBusinessAccountId || null,
-          whatsapp_access_token: formData.whatsappAccessToken || null,
-        },
-        { onConflict: 'id' }
-      );
+      const { error } = await supabase
+        .from('doctor_profiles')
+        .upsert(payload, { onConflict: 'user_id' });
 
       if (error) throw error;
 
       setConnectionStatus(
-        formData.whatsappPhoneNumberId && formData.whatsappBusinessAccountId && formData.whatsappAccessToken
+        payload.whatsapp_phone_number_id && payload.whatsapp_business_account_id && payload.whatsapp_access_token
           ? 'connected'
           : 'disconnected'
       );
-      alert('WhatsApp connection saved to your Supabase profile.');
-    } catch (err) {
-      alert(err.message || 'Unable to save connection details.');
+      showToast('Meta API credentials updated.');
+    } catch {
+      showToast('Unable to update Meta API credentials.');
     } finally {
       setSavingConnection(false);
     }
@@ -137,12 +139,21 @@ const Settings = () => {
 
   return (
     <div className="min-h-screen bg-orange-50/30 px-4 py-6 sm:px-6 lg:px-8">
+      {toast && (
+        <div className="fixed right-4 top-4 z-50 w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 shadow-2xl shadow-emerald-100 sm:right-6 sm:top-6">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="shrink-0 text-emerald-600" size={18} />
+            <span>{toast}</span>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto max-w-5xl">
-        <div className="mb-8 rounded-[2rem] bg-white border border-orange-100 px-5 py-6 shadow-sm sm:px-8">
+        <div className="mb-8 rounded-3xl border border-orange-100 bg-white px-5 py-6 shadow-sm sm:px-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-600">Yogi Desk</p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Settings</h1>
+              <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Settings</h1>
               <p className="mt-2 text-sm font-medium text-slate-500">
                 Manage your profile and WhatsApp Cloud API configuration.
               </p>
@@ -154,7 +165,7 @@ const Settings = () => {
         </div>
 
         <form onSubmit={handleUpdate} className="space-y-6">
-          <section className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+          <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex items-start gap-4">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
                 <User size={22} />
@@ -173,7 +184,7 @@ const Settings = () => {
                   <input
                     type="text"
                     value={formData.name}
-                    onChange={(e) => updateField('name', e.target.value)}
+                    onChange={(event) => updateField('name', event.target.value)}
                     placeholder="Your name"
                     className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                   />
@@ -187,16 +198,17 @@ const Settings = () => {
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={(e) => updateField('email', e.target.value)}
+                    disabled
+                    readOnly
                     placeholder="you@example.com"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                    className="w-full cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-100 py-4 pl-12 pr-4 text-sm font-bold text-slate-500 outline-none"
                   />
                 </div>
               </div>
             </div>
           </section>
 
-          <section className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+          <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-4">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
@@ -205,19 +217,19 @@ const Settings = () => {
                 <div>
                   <h2 className="text-xl font-black text-slate-950">Official Meta API Connection</h2>
                   <p className="mt-1 text-sm font-medium text-slate-500">
-                    Add your clinic doctor’s Meta WhatsApp Cloud credentials here.
+                    Add your clinic's Meta WhatsApp Cloud credentials here.
                   </p>
                 </div>
               </div>
 
               <span
-                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+                className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold ${
                   isConnected
                     ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
                     : 'border-slate-200 bg-slate-100 text-slate-600'
                 }`}
               >
-                {isConnected ? '🟢 Connected to your Meta Cloud' : '⚠️ Not connected yet'}
+                {isConnected ? 'Connected to Meta Cloud' : 'Not connected yet'}
               </span>
             </div>
 
@@ -229,7 +241,7 @@ const Settings = () => {
                   <input
                     type="text"
                     value={formData.whatsappPhoneNumberId}
-                    onChange={(e) => updateField('whatsappPhoneNumberId', e.target.value)}
+                    onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
                     placeholder="Enter your WhatsApp Phone Number ID"
                     className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                   />
@@ -241,7 +253,7 @@ const Settings = () => {
                 <input
                   type="text"
                   value={formData.whatsappBusinessAccountId}
-                  onChange={(e) => updateField('whatsappBusinessAccountId', e.target.value)}
+                  onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
                   placeholder="Enter your WABA ID"
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                 />
@@ -252,7 +264,7 @@ const Settings = () => {
                 <input
                   type="password"
                   value={formData.whatsappAccessToken}
-                  onChange={(e) => updateField('whatsappAccessToken', e.target.value)}
+                  onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
                   placeholder="EAAMz..."
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
                 />
@@ -260,8 +272,8 @@ const Settings = () => {
             </div>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800">
-                Your WhatsApp credentials are stored per doctor and used by the campaign engine for authenticated Meta Cloud dispatch.
+              <div className="w-full rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800 sm:flex-1">
+                Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
               </div>
 
               <button

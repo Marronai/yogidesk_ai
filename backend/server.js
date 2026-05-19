@@ -20,9 +20,9 @@ let supabase;
 let supabaseAdmin;
 if (supabaseUrl && supabaseAnonKey) {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
-    console.log("⚡ Supabase Client Initialized Successfully!");
+    console.log("Data service initialized successfully.");
 } else {
-    console.log("⚠️ Warning: Supabase Credentials Missing in .env");
+    console.log("Warning: data service credentials are missing.");
 }
 
 if (supabaseUrl && supabaseServiceKey) {
@@ -288,7 +288,7 @@ app.post('/api/webhook/meta', async (req, res) => {
                                         .update({ status: newStatus })
                                         .eq('patient_id', patient.id)
                                         .eq('status', 'Pending');
-                                    console.log(`🔄 Supabase Status successfully updated to: ${newStatus}`);
+                                    console.log(`🔄 Status successfully updated to: ${newStatus}`);
                                 }
                             }
                         }
@@ -317,7 +317,10 @@ app.post('/api/templates', async (req, res) => {
             headerType = 'NONE',
             headerText = '',
             footerText = '',
-            buttons = []
+            buttons = [],
+            messaging_product: messagingProduct = 'whatsapp',
+            whatsapp_business_account_id: requestBusinessAccountId,
+            whatsapp_access_token: requestAccessToken
         } = req.body;
 
         if (!userId) {
@@ -335,15 +338,15 @@ app.post('/api/templates', async (req, res) => {
         const { data: userMeta, error: credentialError } = await supabase
             .from('doctor_profiles')
             .select('whatsapp_business_account_id,whatsapp_access_token')
-            .eq('id', userId)
+            .eq('user_id', userId)
             .maybeSingle();
 
         if (credentialError || !userMeta) {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
         }
 
-        const businessAccountId = userMeta?.whatsapp_business_account_id || null;
-        const accessToken = userMeta?.whatsapp_access_token || null;
+        const businessAccountId = requestBusinessAccountId || userMeta?.whatsapp_business_account_id || null;
+        const accessToken = requestAccessToken || userMeta?.whatsapp_access_token || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -394,6 +397,7 @@ app.post('/api/templates', async (req, res) => {
 
         const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
         const response = await require('axios').post(graphUrl, {
+            messaging_product: messagingProduct || 'whatsapp',
             name: name.trim(),
             language: { code: language },
             category,
@@ -426,8 +430,8 @@ app.post('/api/templates', async (req, res) => {
             .select();
 
         if (insertError) {
-            console.error('Supabase template insert error:', insertError);
-            return res.status(500).json({ message: 'Template created in Meta, but failed to persist locally.' });
+            console.error('Template save error:', insertError);
+            return res.status(500).json({ message: 'Template created in Meta, but failed to save.' });
         }
 
         return res.status(201).json({ message: 'Template submitted successfully.', data: insertedTemplate[0] });
@@ -673,7 +677,7 @@ const getUserMetaCredentials = async (userId) => {
         const { data, error } = await supabase
             .from('doctor_profiles')
             .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-            .eq('id', userId)
+            .eq('user_id', userId)
             .maybeSingle();
 
         if (error || !data) return {};
@@ -683,7 +687,7 @@ const getUserMetaCredentials = async (userId) => {
             accessToken: data.whatsapp_access_token || null,
         };
     } catch (err) {
-        console.error('Supabase Meta credential lookup failed:', err.message || err);
+        console.error('Meta credential lookup failed:', err.message || err);
         return {};
     }
 };
@@ -812,3 +816,4 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Yogi Desk API running safely on port ${PORT}`);
 });
+

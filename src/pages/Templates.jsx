@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../supabaseClient';
+import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
@@ -38,22 +38,22 @@ const Templates = () => {
   const [planTier, setPlanTier] = useState('Starter Clinic');
   const [templateCount, setTemplateCount] = useState(0);
   const [error, setError] = useState('');
+  const [doctorProfile, setDoctorProfile] = useState(null);
 
   useEffect(() => {
     const fetchLimits = async () => {
-      const userId = localStorage.getItem('user_id');
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || localStorage.getItem('user_id');
       if (!userId) return;
 
-      // Fetch current plan from wallets table
       const { data: walletData } = await supabase
         .from('wallets')
         .select('plan_tier')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
       
       if (walletData?.plan_tier) setPlanTier(walletData.plan_tier);
 
-      // Fetch current count from Supabase to verify limits
       const { data: templatesData, error: countError } = await supabase
         .from('whatsapp_templates')
         .select('id')
@@ -62,6 +62,14 @@ const Templates = () => {
       if (!countError && Array.isArray(templatesData)) {
         setTemplateCount(templatesData.length);
       }
+
+      const { data: profileData } = await supabase
+        .from('doctor_profiles')
+        .select('whatsapp_business_account_id,whatsapp_access_token,whatsapp_phone_number_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      setDoctorProfile(profileData || null);
     };
     fetchLimits();
   }, []);
@@ -135,9 +143,6 @@ const Templates = () => {
   };
 
   const handleSubmit = async () => {
-    console.log('Submit Clicked', template);
-    console.log('Sending to Meta...');
-
     if (!template.name.trim()) {
       setError('Template name is required.');
       return;
@@ -145,8 +150,7 @@ const Templates = () => {
 
     const currentLimit = planLimits[planTier] || 20;
     if (templateCount >= currentLimit) {
-      setError(`⚠️ Template Limit Reached! Upgrade to Growth or Hospital plan to create more than ${currentLimit} templates.`);
-      alert(`⚠️ Template Limit Reached! Your plan (${planTier}) limit is ${currentLimit}.`);
+    setError('');
       return;
     }
 
@@ -164,12 +168,28 @@ const Templates = () => {
     }
 
     setSaving(true);
-    setError('');
+      setError(`Template limit reached. Upgrade to create more than ${currentLimit} templates.`);
     setMessage('');
     
     try {
-      const userId = localStorage.getItem('user_id');
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || localStorage.getItem('user_id');
       if (!userId) throw new Error('User ID not found. Please login again.');
+      let activeProfile = doctorProfile;
+      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token) {
+        const { data: profileData } = await supabase
+          .from('doctor_profiles')
+          .select('whatsapp_business_account_id,whatsapp_access_token,whatsapp_phone_number_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        activeProfile = profileData || null;
+        setDoctorProfile(activeProfile);
+      }
+
+      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token) {
+        throw new Error('Connect Meta API credentials in Settings before submitting templates.');
+      }
+
       const headerType = template.headerType || 'NONE';
       const buttonPayload = template.buttons
         .map((btn) => {
@@ -185,6 +205,10 @@ const Templates = () => {
 
       await api.post('/templates', {
         userId,
+        messaging_product: 'whatsapp',
+        whatsapp_business_account_id: activeProfile.whatsapp_business_account_id,
+        whatsapp_access_token: activeProfile.whatsapp_access_token,
+        whatsapp_phone_number_id: activeProfile.whatsapp_phone_number_id || null,
         name: template.name.trim(),
         bodyText: bodyToSubmit,
         language: languageToSubmit === 'en' ? 'en_US' : languageToSubmit,
@@ -195,14 +219,12 @@ const Templates = () => {
         buttons: buttonPayload
       });
 
-      setMessage('📩 Template submitted to Meta and saved as pending. Approval status will update automatically when Meta webhook fires.');
+      setMessage('Template submitted successfully. Approval status will update automatically.');
       setSaving(false);
-      console.log('📩 Template submitted to Meta and saved as pending.');
 
       setTimeout(() => navigate('/templates'), 2000);
 
     } catch (err) {
-      console.error('Template submit failed:', err);
       setError(err?.response?.data?.message || err.message || 'Unable to submit template.');
       setSaving(false);
     }
@@ -490,3 +512,6 @@ const Templates = () => {
 };
 
 export default Templates;
+
+
+
