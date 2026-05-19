@@ -46,6 +46,10 @@ const Templates = () => {
       setIsLoading(true);
       setIsProfileLoading(true);
       try {
+        if (!supabase?.auth || !supabase?.from) {
+          throw new Error('Supabase client is not initialized.');
+        }
+
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || localStorage.getItem('user_id');
         if (!userId) return;
@@ -172,6 +176,10 @@ const Templates = () => {
     setMessage('');
     
     try {
+      if (!supabase?.auth || !supabase?.from) {
+        throw new Error('Supabase client is not initialized.');
+      }
+
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id || localStorage.getItem('user_id');
       if (!userId) throw new Error('User ID not found. Please login again.');
