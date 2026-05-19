@@ -36,10 +36,10 @@ const Settings = () => {
           const supabaseUserId = authData?.user?.id || localStorage.getItem('user_id');
           if (supabaseUserId) {
             const { data } = await supabase
-              .from('users')
+              .from('doctor_profiles')
               .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
               .eq('id', supabaseUserId)
-              .single();
+              .maybeSingle();
 
             if (data) {
               connectionValues = {
@@ -108,7 +108,7 @@ const Settings = () => {
       const userId = authData?.user?.id || localStorage.getItem('user_id');
       if (!userId) throw new Error('Unable to identify the current user. Please sign in again.');
 
-      const { error } = await supabase.from('users').upsert(
+      const { error } = await supabase.from('doctor_profiles').upsert(
         {
           id: userId,
           whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,

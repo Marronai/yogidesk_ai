@@ -333,7 +333,7 @@ app.post('/api/templates', async (req, res) => {
         }
 
         const { data: userMeta, error: credentialError } = await supabase
-            .from('profiles')
+            .from('doctor_profiles')
             .select('whatsapp_business_account_id,whatsapp_access_token')
             .eq('id', userId)
             .maybeSingle();
@@ -671,7 +671,7 @@ const getUserMetaCredentials = async (userId) => {
 
     try {
         const { data, error } = await supabase
-            .from('profiles')
+            .from('doctor_profiles')
             .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
             .eq('id', userId)
             .maybeSingle();
