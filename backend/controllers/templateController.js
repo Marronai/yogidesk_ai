@@ -47,10 +47,11 @@ const getBodyExample = (bodyText, bodyVariableParameters = []) => {
       .map((variable) => [Number(variable.index), String(variable.label || '').trim()])
       .filter(([index, label]) => Number.isFinite(index) && label)
   );
+  const defaultSamples = ['Sample Patient Name', 'Sample Clinic Location', '20-May-2026', '04:00 PM'];
 
   return {
     body_text: [
-      indexes.map((index) => labelsByIndex.get(index) || `sample_${index}`)
+      indexes.map((index, position) => labelsByIndex.get(index) || defaultSamples[position] || `Sample Value ${index}`)
     ]
   };
 };
@@ -325,6 +326,7 @@ exports.createTemplate = async (req, res) => {
       name: formattedName,
       language: metaLanguage,
       category,
+      parameter_format: 'positional',
       components: graphComponents
     }, {
       headers: {
