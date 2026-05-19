@@ -8,11 +8,11 @@ const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 const getUserMetaCredentials = async (userId) => {
-  if (!supabase || !userId) return {};
+  if (!supabase?.from || !userId) return {};
   const { data, error } = await supabase
     .from('doctor_profiles')
     .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-    .eq('user_id', userId)
+    .eq('id', userId)
     .maybeSingle();
   if (error || !data) {
     if (error) console.warn('Meta credential lookup failed:', error.message);
@@ -27,6 +27,10 @@ const getUserMetaCredentials = async (userId) => {
 
 exports.createTemplate = async (req, res) => {
   try {
+    if (!supabase?.from) {
+      throw new Error('Database connection unavailable.');
+    }
+
     const {
       userId,
       name,
@@ -42,15 +46,15 @@ exports.createTemplate = async (req, res) => {
     } = req.body;
 
     if (!userId) {
-      return res.status(400).json({ message: 'userId is required.' });
+      return res.status(400).json({ success: false, message: 'userId is required.' });
     }
 
     if (!name || !name.trim()) {
-      return res.status(400).json({ message: 'Template name is required.' });
+      return res.status(400).json({ success: false, message: 'Template name is required.' });
     }
 
     if (!bodyText || !bodyText.trim()) {
-      return res.status(400).json({ message: 'Template body text is required.' });
+      return res.status(400).json({ success: false, message: 'Template body text is required.' });
     }
 
     const graphComponents = [
@@ -118,7 +122,7 @@ exports.createTemplate = async (req, res) => {
     const accessToken = requestAccessToken || credentials.accessToken || process.env.META_ACCESS_TOKEN;
 
     if (!businessAccountId || !accessToken) {
-      return res.status(500).json({ message: 'WhatsApp Meta credentials unavailable for this user.' });
+      return res.status(400).json({ success: false, message: 'WhatsApp Meta credentials unavailable for this user.' });
     }
 
     const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
@@ -152,16 +156,20 @@ exports.createTemplate = async (req, res) => {
     res.status(201).json({ message: 'Template submitted successfully.', data: newTemplate, status: newTemplate.status });
   } catch (err) {
     console.error('Template submission error:', err.response?.data || err.message || err);
-    return res.status(500).json({ message: err.response?.data?.error?.message || err.message || 'Template submission failed.' });
+    return res.status(400).json({ success: false, message: err.response?.data?.error?.message || err.message || 'Template submission failed.' });
   }
 };
 
 exports.getTemplates = async (req, res) => {
   try {
+    if (!req.user?.id) {
+      throw new Error('Authenticated user is required.');
+    }
+
     const templates = await Template.find({ businessId: req.user.id });
     res.json(templates);
   } catch (err) {
     console.error('Get templates error:', err.message);
-    res.status(500).json({ message: 'Server Error' });
+    return res.status(400).json({ success: false, message: err.message || 'Server Error' });
   }
 };

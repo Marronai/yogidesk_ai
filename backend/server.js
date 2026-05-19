@@ -318,6 +318,10 @@ app.post('/api/webhook/meta', async (req, res) => {
 // ====== WHATSAPP TEMPLATE CREATION ======
 app.post('/api/templates', async (req, res) => {
     try {
+        if (!supabase?.from) {
+            throw new Error('Database connection unavailable.');
+        }
+
         const {
             userId,
             name,
@@ -334,21 +338,21 @@ app.post('/api/templates', async (req, res) => {
         } = req.body;
 
         if (!userId) {
-            return res.status(400).json({ message: 'User ID is required.' });
+            return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
 
         if (!name || !name.trim()) {
-            return res.status(400).json({ message: 'Template name is required.' });
+            return res.status(400).json({ success: false, message: 'Template name is required.' });
         }
 
         if (!bodyText || !bodyText.trim()) {
-            return res.status(400).json({ message: 'Template body text is required.' });
+            return res.status(400).json({ success: false, message: 'Template body text is required.' });
         }
 
         const { data: userMeta, error: credentialError } = await supabase
             .from('doctor_profiles')
-            .select('whatsapp_business_account_id,whatsapp_access_token')
-            .eq('user_id', userId)
+            .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+            .eq('id', userId)
             .maybeSingle();
 
         if (credentialError || !userMeta) {
@@ -359,7 +363,7 @@ app.post('/api/templates', async (req, res) => {
         const accessToken = requestAccessToken || userMeta?.whatsapp_access_token || null;
 
         if (!businessAccountId || !accessToken) {
-            return res.status(400).json({ message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
         }
 
         const graphComponents = [
@@ -441,13 +445,13 @@ app.post('/api/templates', async (req, res) => {
 
         if (insertError) {
             console.error('Template save error:', insertError);
-            return res.status(500).json({ message: 'Template created in Meta, but failed to save.' });
+            return res.status(400).json({ success: false, message: insertError.message || 'Template created in Meta, but failed to save.' });
         }
 
         return res.status(201).json({ message: 'Template submitted successfully.', data: insertedTemplate[0] });
     } catch (error) {
         console.error('Template submission error:', error.response?.data || error.message || error);
-        return res.status(500).json({ message: error.response?.data?.error?.message || error.message || 'Template submission failed.' });
+        return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template submission failed.' });
     }
 });
 
@@ -687,7 +691,7 @@ const getUserMetaCredentials = async (userId) => {
         const { data, error } = await supabase
             .from('doctor_profiles')
             .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-            .eq('user_id', userId)
+            .eq('id', userId)
             .maybeSingle();
 
         if (error || !data) return {};
