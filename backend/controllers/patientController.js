@@ -44,8 +44,14 @@ const getUsageState = async (req) => {
   throw new Error('Doctor profile not found.');
 };
 
-const persistUsageCount = async (req, nextCount, increment = 1) => {
+const persistUsageCount = async (req, increment = 1) => {
   const userId = req.user.id;
+  const profile = await getProfileUsage(req);
+  if (!profile) throw new Error('Doctor profile not found.');
+
+  const currentCount = Number(profile.lifetime_patients_count || 0);
+  const nextCount = currentCount + increment;
+
   const rpcResult = await supabase.rpc('increment_lifetime_patients_count', {
     profile_id: req.user.id,
     increment_by: increment
@@ -64,7 +70,7 @@ const persistUsageCount = async (req, nextCount, increment = 1) => {
 
   const { error } = await supabase
     .from('doctor_profiles')
-    .update({ lifetime_patients_count: nextCount })
+    .update({ lifetime_patients_count: currentCount + increment })
     .eq('id', req.user.id);
 
   if (error) throw error;
@@ -75,7 +81,7 @@ const persistUsageCount = async (req, nextCount, increment = 1) => {
     .eq('user_id', userId);
 
   if (walletError) console.warn('Wallet lifetime counter mirror failed:', walletError.message);
-  return nextCount;
+  return currentCount + increment;
 };
 
 const enforceStarterLimit = (usage, incoming = 1) => {
@@ -138,7 +144,7 @@ exports.addPatient = async (req, res) => {
 
     if (error) throw error;
 
-    const nextCount = await persistUsageCount(req, Number(usage.lifetime_patients_count || 0) + 1, 1);
+    const nextCount = await persistUsageCount(req, 1);
 
     return res.status(201).json({ success: true, data, lifetime_patients_count: nextCount });
   } catch (error) {
@@ -185,7 +191,7 @@ exports.addPatients = async (req, res) => {
     if (error) throw error;
 
     const insertedRows = Array.isArray(data) ? data : [];
-    const nextCount = await persistUsageCount(req, Number(usage.lifetime_patients_count || 0) + insertedRows.length, insertedRows.length);
+    const nextCount = await persistUsageCount(req, insertedRows.length);
 
     return res.status(201).json({ success: true, data: insertedRows, lifetime_patients_count: nextCount });
   } catch (error) {
