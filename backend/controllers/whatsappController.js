@@ -1,31 +1,60 @@
+require('dotenv').config();
 const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+const getUserMetaCredentials = async (userId) => {
+    if (!supabase || !userId) return {};
+    const { data, error } = await supabase
+        .from('users')
+        .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+        .eq('id', userId)
+        .single();
+    if (error || !data) return {};
+    return {
+        phoneNumberId: data.whatsapp_phone_number_id,
+        businessAccountId: data.whatsapp_business_account_id,
+        accessToken: data.whatsapp_access_token
+    };
+};
 
 // 1. Send Test Message Function
 exports.sendTestMessage = async (req, res) => {
     try {
-        const { phoneNumber } = req.body; // User ka number (e.g., 919876543210)
+        const { phoneNumber, userId } = req.body;
+        if (!phoneNumber || !userId) {
+            return res.status(400).json({ success: false, msg: 'phoneNumber and userId are required' });
+        }
 
-        // URL Structure: https://graph.facebook.com/v17.0/{PHONE_ID}/messages
-        const url = `https://graph.facebook.com/v17.0/${process.env.META_PHONE_ID}/messages`;
+        const credentials = await getUserMetaCredentials(userId);
+        const phoneId = credentials.phoneNumberId || process.env.META_PHONE_ID;
+        const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
 
+        if (!phoneId || !accessToken) {
+            return res.status(500).json({ success: false, msg: 'WhatsApp Meta credentials are unavailable for this user.' });
+        }
+
+        const url = `https://graph.facebook.com/v17.0/${phoneId}/messages`;
         const data = {
-            messaging_product: "whatsapp",
+            messaging_product: 'whatsapp',
             to: phoneNumber,
-            type: "template",
+            type: 'template',
             template: {
-                name: "hello_world", // Meta ka default test template
-                language: { code: "en_US" }
+                name: 'hello_world',
+                language: { code: 'en_US' }
             }
         };
 
         const config = {
             headers: {
-                'Authorization': `Bearer ${process.env.META_ACCESS_TOKEN}`,
+                Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             }
         };
 
-        // API Call
         const response = await axios.post(url, data, config);
 
         console.log("Message Sent ID:", response.data.messages[0].id);
@@ -47,11 +76,19 @@ exports.sendTestMessage = async (req, res) => {
 
 // 2. Submit Template Function
 exports.submitTemplate = async (req, res) => {
-    try { // Added footer and buttons
-        const { name, category, language, body, header, footer, buttons } = req.body;
+    try {
+        const { userId, name, category, language, body, header, footer, buttons } = req.body;
 
-        if (!name || !category || !language || !body) {
-            return res.status(400).json({ message: 'Missing required fields: name, category, language, body' });
+        if (!userId || !name || !category || !language || !body) {
+            return res.status(400).json({ message: 'Missing required fields: userId, name, category, language, body' });
+        }
+
+        const credentials = await getUserMetaCredentials(userId);
+        const businessAccountId = credentials.businessAccountId || process.env.META_WABA_ID;
+        const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
+
+        if (!businessAccountId || !accessToken) {
+            return res.status(500).json({ message: 'WhatsApp Meta credentials unavailable for this user.' });
         }
 
         const components = [
@@ -94,7 +131,7 @@ exports.submitTemplate = async (req, res) => {
             });
         }
 
-        const url = `https://graph.facebook.com/v19.0/${process.env.META_WABA_ID}/message_templates`;
+        const url = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
         const data = {
             name: name.trim(),
             language,
@@ -104,7 +141,7 @@ exports.submitTemplate = async (req, res) => {
 
         const config = {
             headers: {
-                'Authorization': `Bearer ${process.env.META_ACCESS_TOKEN}`,
+                Authorization: `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             }
         };
@@ -116,15 +153,12 @@ exports.submitTemplate = async (req, res) => {
         const newTemplate = await Template.create({
             name: name.trim(),
             bodyText: body,
-            // Assuming we only save the submitted language's body for now
-            // If multi-language storage is needed, the Template model needs to be updated
-            // english: body, hinglish: '', hindi: '',
             headerType: header ? 'TEXT' : 'NONE',
             headerText: header ? header.text : '',
             category,
-            status: 'PENDING',
-            metaTemplateId: response.data.id,
-            businessId: req.user.id
+            status: 'PENDING_REVIEW',
+            metaTemplateId: response.data.id || response.data.message_template_id,
+            businessId: userId
         });
 
         console.log("Template Submitted ID:", response.data.id);

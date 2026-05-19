@@ -1,9 +1,31 @@
+require('dotenv').config();
 const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
 const Template = require('../models/Template');
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+const getUserMetaCredentials = async (userId) => {
+  if (!supabase || !userId) return {};
+  const { data, error } = await supabase
+    .from('users')
+    .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+    .eq('id', userId)
+    .single();
+  if (error || !data) return {};
+  return {
+    phoneNumberId: data.whatsapp_phone_number_id,
+    businessAccountId: data.whatsapp_business_account_id,
+    accessToken: data.whatsapp_access_token
+  };
+};
 
 exports.createTemplate = async (req, res) => {
   try {
     const {
+      userId,
       name,
       bodyText,
       headerType = 'NONE',
@@ -12,6 +34,10 @@ exports.createTemplate = async (req, res) => {
       footerText = '',
       buttons = []
     } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: 'userId is required.' });
+    }
 
     if (!name || !name.trim()) {
       return res.status(400).json({ message: 'Template name is required.' });
@@ -81,15 +107,24 @@ exports.createTemplate = async (req, res) => {
       }
     }
 
-    const graphUrl = `https://graph.facebook.com/v17.0/${process.env.META_PHONE_ID}/message_templates`;
+    const credentials = await getUserMetaCredentials(userId);
+    const businessAccountId = credentials.businessAccountId || process.env.META_PHONE_ID;
+    const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
+
+    if (!businessAccountId || !accessToken) {
+      return res.status(500).json({ message: 'WhatsApp Meta credentials unavailable for this user.' });
+    }
+
+    const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
     const response = await axios.post(graphUrl, {
       name: name.trim(),
       language: 'en_US',
       category,
       components: graphComponents
     }, {
-      params: {
-        access_token: process.env.META_ACCESS_TOKEN
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
       }
     });
 
@@ -102,9 +137,9 @@ exports.createTemplate = async (req, res) => {
       footerText,
       category,
       buttons: storedButtons,
-      status: 'PENDING',
+      status: 'PENDING_REVIEW',
       metaTemplateId,
-      businessId: req.user.id
+      businessId: userId
     });
 
     res.status(201).json({ message: 'Template submitted successfully.', data: newTemplate, status: newTemplate.status });

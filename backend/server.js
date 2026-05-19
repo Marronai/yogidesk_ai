@@ -129,7 +129,65 @@ app.get('/api/whatsapp-webhook', (req, res) => {
     return res.sendStatus(403);
 });
 
-// 1. GET Method: Meta Dashboard verification loop
+app.post('/api/whatsapp-webhook', async (req, res) => {
+    try {
+        const body = req.body;
+        if (!body || !body.object || !Array.isArray(body.entry)) {
+            return res.status(400).send('Invalid webhook payload');
+        }
+
+        for (const entry of body.entry) {
+            if (!Array.isArray(entry.changes)) continue;
+
+            for (const change of entry.changes) {
+                const field = change.field;
+                const value = change.value || {};
+
+                if (field === 'message_template' || field === 'message_template_status_update') {
+                    const messageTemplate = value.message_template || value.message_template_status || value;
+                    if (!messageTemplate) continue;
+
+                    const status = String(messageTemplate.status || '').toUpperCase();
+                    if (!['APPROVED', 'REJECTED'].includes(status)) continue;
+
+                    const metaTemplateId = messageTemplate.id || null;
+                    const templateName = messageTemplate.name || value.template_name || null;
+
+                    let updateResult;
+                    if (metaTemplateId && templateName) {
+                        updateResult = await supabase
+                            .from('whatsapp_templates')
+                            .update({ status })
+                            .or(`meta_template_id.eq.${metaTemplateId},template_name.eq.${templateName}`);
+                    } else if (metaTemplateId) {
+                        updateResult = await supabase
+                            .from('whatsapp_templates')
+                            .update({ status })
+                            .eq('meta_template_id', metaTemplateId);
+                    } else if (templateName) {
+                        updateResult = await supabase
+                            .from('whatsapp_templates')
+                            .update({ status })
+                            .eq('template_name', templateName);
+                    } else {
+                        continue;
+                    }
+                    if (updateResult.error) {
+                        console.error('Webhook template status update failed:', updateResult.error);
+                    } else {
+                        console.log(`Webhook updated template status to ${status} for template id/name: ${metaTemplateId || templateName}`);
+                    }
+                }
+            }
+        }
+
+        return res.status(200).send('EVENT_RECEIVED');
+    } catch (error) {
+        console.error('❌ WhatsApp webhook processing error:', error.message || error);
+        return res.status(200).send('EVENT_RECEIVED');
+    }
+});
+
 // 1. GET Method: Meta Dashboard verification loop
 app.get('/api/webhook/meta', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -284,8 +342,8 @@ app.post('/api/templates', async (req, res) => {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
         }
 
-        const businessAccountId = userMeta?.whatsapp_business_account_id || process.env.META_WABA_ID;
-        const accessToken = userMeta?.whatsapp_access_token || process.env.META_ACCESS_TOKEN;
+        const businessAccountId = userMeta?.whatsapp_business_account_id;
+        const accessToken = userMeta?.whatsapp_access_token;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -353,7 +411,7 @@ app.post('/api/templates', async (req, res) => {
             category,
             language,
             body_content: bodyText,
-            status: 'PENDING',
+            status: 'PENDING_REVIEW',
             header_type: headerType,
             header_text: headerType === 'TEXT' ? headerText.trim() : null,
             footer_text: footerText ? footerText.trim() : null,
@@ -620,23 +678,37 @@ const getUserMetaCredentials = async (userId) => {
     }
 };
 
-const triggerMockMetaWebhook = async (queueItem) => {
+const sendCampaignMessageToMeta = async (queueItem) => {
     const credentials = await getUserMetaCredentials(queueItem.user_id);
-    const phoneNumberId = credentials.phoneNumberId || process.env.META_PHONE_ID;
-    const businessAccountId = credentials.businessAccountId || process.env.META_WABA_ID;
-    const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
-    const usedFallback = !credentials.phoneNumberId || !credentials.accessToken;
+    if (!credentials.phoneNumberId || !credentials.accessToken) {
+        throw new Error('Missing WhatsApp phone number ID or access token for campaign send. Please configure Meta credentials in settings.');
+    }
 
-    console.log(`Dynamic WhatsApp credentials for user ${queueItem.user_id}: phoneNumberId=${phoneNumberId}, businessAccountId=${businessAccountId}, fallback=${usedFallback}`);
+    const url = `https://graph.facebook.com/v17.0/${credentials.phoneNumberId}/messages`;
+    const payload = {
+        messaging_product: 'whatsapp',
+        to: queueItem.recipient_phone,
+        type: 'template',
+        template: {
+            name: queueItem.template_name,
+            language: { code: queueItem.payload?.template?.language || 'en_US' }
+        }
+    };
+
+    const response = await require('axios').post(url, payload, {
+        headers: {
+            'Authorization': `Bearer ${credentials.accessToken}`,
+            'Content-Type': 'application/json'
+        }
+    });
 
     return {
         ok: true,
-        provider: 'mock_meta',
+        provider: 'meta_whatsapp',
         user_id: queueItem.user_id,
-        phone_number_id: phoneNumberId,
-        whatsapp_business_account_id: businessAccountId,
-        access_token_source: usedFallback ? 'system_master_fallback' : 'user_specific',
-        message_id: `mock_${queueItem.id}_${Date.now()}`,
+        phone_number_id: credentials.phoneNumberId,
+        whatsapp_business_account_id: credentials.businessAccountId,
+        response: response.data
     };
 };
 
@@ -670,7 +742,15 @@ const processCampaignQueue = async () => {
                 continue;
             }
 
-            const metaResult = await triggerMockMetaWebhook(row);
+            let metaResult;
+            try {
+                metaResult = await sendCampaignMessageToMeta(row);
+            } catch (sendError) {
+                await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: sendError.message || 'Meta send failed' }).eq('id', row.id);
+                console.error('Campaign send failed for row', row.id, sendError.message || sendError);
+                continue;
+            }
+
             const nextBalance = Number((currentBalance - unitCost).toFixed(2));
 
             const logPayload = {
