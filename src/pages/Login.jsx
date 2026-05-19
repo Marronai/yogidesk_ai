@@ -32,6 +32,22 @@ const Login = () => {
   ];
 
   useEffect(() => {
+    // 🛡️ DEVICE FINGERPRINT SECURITY CHECK
+    const verifyFingerprint = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const currentFingerprint = navigator.userAgent;
+        const savedFingerprint = session.user.user_metadata?.last_fingerprint;
+        
+        if (savedFingerprint && savedFingerprint !== currentFingerprint) {
+          console.warn("Security Alert: Session fingerprint mismatch detected.");
+          await supabase.auth.signOut();
+          navigate('/login', { replace: true });
+        }
+      }
+    };
+
+    verifyFingerprint();
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % slides.length), 4000);
     return () => clearInterval(timer);
   }, []);
@@ -102,21 +118,35 @@ const Login = () => {
     }
   };
 
-  // ✅ COMMON SUCCESS HANDLER (Saves session profile metadata)
-  const handleAuthSuccess = (supabaseUser) => {
+  // ✅ ENHANCED SUCCESS HANDLER (Saves session with fingerprint and persistence config)
+  const handleAuthSuccess = async (supabaseUser) => {
     try {
-        // Save essentials to clean existing system architecture
+        // 🔐 Update device fingerprint in metadata for future session validation
+        await supabase.auth.updateUser({
+          data: { last_fingerprint: navigator.userAgent }
+        });
+
+        // Enforce storage persistence
         persistSupabaseSession(supabaseUser);
         localStorage.setItem('user_subscription_status', 'active');
 
         if (!rememberMe) {
+          // Transient session logic: session storage only
           sessionStorage.setItem('user_id', supabaseUser.id);
           sessionStorage.setItem('user_email', supabaseUser.email || '');
           sessionStorage.setItem('token', `supabase-bypass-token-${supabaseUser.id}`);
+          
+          // Remove from local storage if rememberMe is false to ensure session ends with tab
+          localStorage.removeItem('sb-' + import.meta.env.VITE_SUPABASE_URL.split('//')[1].split('.')[0] + '-auth-token');
+        } else {
+          // Persistence explicitly in localStorage handled by default Supabase config, 
+          // but we ensure our custom keys follow suit.
+          localStorage.setItem('user_id', supabaseUser.id);
+          localStorage.setItem('user_email', supabaseUser.email || '');
         }
         
         // 🚀 Redirect to Main Dashboard
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
         alert("Login completed with validation anomalies.");
@@ -169,10 +199,10 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-white font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col md:flex-row w-full bg-white font-sans overflow-hidden">
       
       {/* 1. LEFT SIDE: BRANDING & CAROUSEL */}
-      <div className="hidden lg:flex w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden">
+      <div className="hidden md:flex md:order-1 w-full md:w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden">
         <div className="absolute top-[-20%] left-[-20%] w-[600px] h-[600px] bg-[#FF6B00] rounded-full blur-[150px] opacity-20 animate-pulse"></div>
         <div className="absolute bottom-[-20%] right-[-20%] w-[600px] h-[600px] bg-blue-600 rounded-full blur-[150px] opacity-20"></div>
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
@@ -222,7 +252,7 @@ const Login = () => {
       </div>
 
       {/* 2. RIGHT SIDE: FORM SECTION */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 relative bg-white">
+      <div className="w-full md:w-1/2 md:order-2 flex flex-col justify-center items-center p-8 relative bg-white">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 rounded-full blur-[120px] lg:hidden"></div>
 
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">

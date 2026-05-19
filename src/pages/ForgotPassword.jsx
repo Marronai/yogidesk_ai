@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import axios from 'axios';
-import { Mail, ArrowRight, Loader2, CheckCircle2, AlertCircle, ShieldCheck, ChevronLeft } from 'lucide-react';
+import { Mail, ArrowRight, Loader2, CheckCircle2, AlertCircle, ShieldCheck, ChevronLeft, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { supabase } from '../config/supabaseClient';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
@@ -35,8 +35,12 @@ const ForgotPassword = () => {
 
     setLoading(true);
     try {
-      await axios.post(`${API_URL}/auth/forgotpassword`, { email });
-      
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: 'https://yogidesk-ai.vercel.app/reset-password',
+      });
+
+      if (error) throw error;
+
       // 🔒 SECURITY PATCH: Generic Success Message (User Enumeration Prevention)
       // Hacker ko mat batao ki email exist karta hai ya nahi.
       setMsg({ type: 'success', text: "If an account exists with this email, a reset link has been sent." });
@@ -53,12 +57,40 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-white font-sans overflow-hidden">
+    <div className="min-h-screen flex flex-col md:flex-row w-full bg-white font-sans overflow-hidden">
       
       {/* ========================================== */}
-      {/* 1. LEFT SIDE: FORM SECTION                 */}
+      {/* 1. LEFT SIDE: BRANDING (SWAPPED)           */}
       {/* ========================================== */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-8 relative bg-white">
+      <div className="hidden md:flex md:order-1 w-full md:w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden">
+        
+        {/* Background Effects */}
+        <div className="absolute top-[-20%] right-[-20%] w-[600px] h-[600px] bg-[#FF6B00] rounded-full blur-[150px] opacity-20 animate-pulse"></div>
+        <div className="absolute bottom-[-20%] left-[-20%] w-[600px] h-[600px] bg-blue-600 rounded-full blur-[150px] opacity-20"></div>
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
+
+        <div className="relative z-10 max-w-md text-white text-center">
+           <div className="mb-6 flex justify-center">
+              <div className="w-16 h-16 bg-[#FF6B00]/20 rounded-full flex items-center justify-center backdrop-blur-sm border border-[#FF6B00]/30">
+                 <ShieldCheck size={32} className="text-[#FF6B00]"/>
+              </div>
+           </div>
+           <h2 className="text-4xl font-black leading-tight mb-6">
+              Account Security <br/> is our <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Priority.</span>
+           </h2>
+           <p className="text-slate-400 text-lg">
+              We use industry-standard encryption to keep your data safe. A recovery link will be sent to your email instantly.
+           </p>
+           <div className="mt-8 flex justify-center gap-1 text-yellow-400">
+              {[1,2,3,4,5].map(i => <Star key={i} size={16} className="fill-yellow-400"/>)}
+           </div>
+        </div>
+      </div>
+
+      {/* ========================================== */}
+      {/* 2. RIGHT SIDE: FORM SECTION (SWAPPED)      */}
+      {/* ========================================== */}
+      <div className="w-full md:w-1/2 md:order-2 flex flex-col justify-center items-center p-8 relative bg-white">
         
         {/* Mobile Blob */}
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 rounded-full blur-[120px] lg:hidden"></div>
@@ -123,32 +155,6 @@ const ForgotPassword = () => {
 
         </motion.div>
       </div>
-
-      {/* ========================================== */}
-      {/* 2. RIGHT SIDE: BRANDING                    */}
-      {/* ========================================== */}
-      <div className="hidden lg:flex w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden">
-        
-        {/* Background Effects */}
-        <div className="absolute top-[-20%] right-[-20%] w-[600px] h-[600px] bg-[#FF6B00] rounded-full blur-[150px] opacity-20 animate-pulse"></div>
-        <div className="absolute bottom-[-20%] left-[-20%] w-[600px] h-[600px] bg-blue-600 rounded-full blur-[150px] opacity-20"></div>
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
-
-        <div className="relative z-10 max-w-md text-white text-center">
-           <div className="mb-6 flex justify-center">
-              <div className="w-16 h-16 bg-[#FF6B00]/20 rounded-full flex items-center justify-center backdrop-blur-sm border border-[#FF6B00]/30">
-                 <ShieldCheck size={32} className="text-[#FF6B00]"/>
-              </div>
-           </div>
-           <h2 className="text-4xl font-black leading-tight mb-6">
-              Account Security <br/> is our <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-400">Priority.</span>
-           </h2>
-           <p className="text-slate-400 text-lg">
-              We use industry-standard encryption to keep your data safe. A recovery link will be sent to your email instantly.
-           </p>
-        </div>
-      </div>
-
     </div>
   );
 };
