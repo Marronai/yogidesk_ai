@@ -42,7 +42,7 @@ const Settings = () => {
       const { data, error } = await supabase
         .from('doctor_profiles')
         .select('name,email,whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .maybeSingle();
 
       if (error) throw error;
@@ -88,7 +88,7 @@ const Settings = () => {
       const { error } = await supabase
         .from('doctor_profiles')
         .update({ name: formData.name.trim() || null })
-        .eq('user_id', userId);
+        .eq('id', userId);
 
       if (error) throw error;
 
