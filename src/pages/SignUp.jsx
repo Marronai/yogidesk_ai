@@ -9,7 +9,7 @@ import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { persistSupabaseSession } from '../utils/authSession';
-import { API_URL } from '../utils/api';
+import api from '../utils/api';
 import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 import { saveWallet } from '../utils/wallet';
 
@@ -73,14 +73,12 @@ const SignUp = () => {
       balance: 50.00,
       is_first_recharge: true,
       welcome_gift_active: true,
-      current_plan: 'starter',
-      plan_tier: 'starter',
-      lifetime_contacts_count: 0,
     };
+    const walletConflictTarget = 'user_id';
 
     const { error } = await supabase
       .from('wallets')
-      .upsert(walletPayload, { onConflict: 'user_id', ignoreDuplicates: true });
+      .upsert(walletPayload, { onConflict: walletConflictTarget, ignoreDuplicates: true });
 
     if (error) console.warn('Wallet database seed deferred:', error.message);
 
@@ -93,20 +91,15 @@ const SignUp = () => {
   };
 
   const triggerWelcomeEmail = async (email = formData.email, userId = pendingUser?.id) => {
-    const payload = JSON.stringify({
+    const payload = {
       email: email.trim().toLowerCase(),
       name: formData.name.trim(),
       businessName: formData.businessName.trim(),
       userId,
       template: 'welcome'
-    });
+    };
 
-    await fetch(`${API_URL}/api/auth/dispatch-welcome-email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      keepalive: true,
-    });
+    await api.post('/auth/dispatch-welcome-email', payload);
   };
 
   const startSignupPhoneVerification = async (user) => {

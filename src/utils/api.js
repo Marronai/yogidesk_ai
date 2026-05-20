@@ -1,10 +1,14 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
+const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
+const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
+
+const API_URL = stripApiSuffix(import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com');
+const API_BASE_URL = `${API_URL}/api`;
 
 // Create axios instance with default config
 const api = axios.create({
-  baseURL: API_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
@@ -15,6 +19,9 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
+    if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
+      config.url = config.url.replace(/^\/api(?=\/|$)/, '');
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -40,4 +47,4 @@ api.interceptors.response.use(
 );
 
 export default api;
-export { API_URL };
+export { API_URL, API_BASE_URL };
