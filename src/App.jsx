@@ -37,7 +37,7 @@ import AdminLogin from './admin/AdminLogin';
 import AdminPrivateRoute from './admin/AdminPrivateRoute';
 import TermsConditions from './pages/TermsConditions';
 import Footer from './components/Footer';
-import Navbar from './components/Navbar'; // Agar navbar bhi global hai
+ // Agar navbar bhi global hai
 
 
 const App = () => {
