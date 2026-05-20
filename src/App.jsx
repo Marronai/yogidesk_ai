@@ -113,6 +113,7 @@ const App = () => {
           {/* Agar kuch galat type kare toh wapas Landing Page par bhej do */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <Footer />
       </BrowserRouter>
   );
 };

@@ -73,6 +73,8 @@ const SignUp = () => {
       balance: 50.00,
       is_first_recharge: true,
       welcome_gift_active: true,
+      current_plan: 'starter',
+      plan_tier: 'starter',
     };
     const walletConflictTarget = 'user_id';
 
@@ -86,6 +88,8 @@ const SignUp = () => {
       balance: 50.00,
       is_first_recharge: true,
       welcome_gift_active: true,
+      current_plan: 'starter',
+      plan_tier: 'starter',
       last_cashback: 0,
     });
   };

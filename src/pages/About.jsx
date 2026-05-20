@@ -73,15 +73,15 @@ const About = () => {
       </nav>
 
       {/* 2. HERO SECTION */}
-      <section className="pt-40 pb-20 px-6 bg-gradient-to-b from-orange-50 to-white">
+      <section className="pt-32 md:pt-40 pb-12 md:pb-20 lg:pb-24 px-4 md:px-6 bg-gradient-to-b from-orange-50 to-white">
         <div className="max-w-5xl mx-auto text-center">
            <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} transition={{duration:0.6}}>
              <span className="inline-block py-1 px-3 rounded-full bg-orange-100 text-[#FF6B00] text-xs font-bold uppercase tracking-widest mb-6">Our Legacy</span>
-             <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 leading-tight">
+             <h1 className="text-4xl sm:text-5xl md:text-6xl font-black leading-tight text-slate-900 mb-6">
                 An Absolute Healthcare technology company India <br/> 
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#FF6B00] to-orange-600">Powering WhatsApp automation for medical professionals.</span>
              </h1>
-             <p className="text-xl text-slate-500 leading-relaxed max-w-3xl mx-auto">
+             <p className="text-xl md:text-2xl text-slate-700 leading-relaxed max-w-4xl mx-auto">
                As a premier digital health communication platform, we craft custom patient care software solution pipelines. Yogi Desk operates as the medical practice automation experts that modern practices trust.
              </p>
            </motion.div>
@@ -89,8 +89,8 @@ const About = () => {
       </section>
 
       {/* 🚀 NEW SECTION 1: INDIA'S 1ST DOCTOR-CENTRIC WHATSAPP API */}
-      <section className="py-20 bg-white border-t border-gray-50">
-        <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-white border-t border-gray-50">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 items-center">
           <motion.div initial={{opacity:0, x:-30}} whileInView={{opacity:1, x:0}} viewport={{once:true}}>
             <span className="text-[#FF6B00] font-bold text-sm tracking-wider uppercase">India's First & Only</span>
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 mt-2 mb-6">
@@ -128,12 +128,12 @@ const About = () => {
       </section>
 
       {/* 💰 NEW SECTION 2: 99% COST SAVING COMPARISON */}
-      <section className="py-20 bg-gray-50 border-y border-gray-100">
-        <div className="max-w-7xl mx-auto px-6 grid lg:grid-cols-2 gap-12 items-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-gray-50 border-y border-gray-100">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 items-center">
           <motion.div initial={{opacity:0, scale:0.95}} whileInView={{opacity:1, scale:1}} viewport={{once:true}} className="order-2 lg:order-1 bg-white p-8 rounded-3xl border border-gray-200 shadow-lg flex flex-col justify-center">
             <div className="flex justify-between items-center mb-6">
               <span className="font-bold text-slate-800">Market Standard API Price</span>
-              <span className="text-red-500 line-through font-bold">₹15,000 / Mo</span>
+              <span className="text-red-500 line-through font-bold">₹15,0000 / Mo</span>
             </div>
             <div className="flex justify-between items-center p-4 bg-orange-50 border border-orange-200 rounded-2xl mb-4">
               <span className="font-black text-slate-900">Yogi Desk AI Specialized Rate</span>
@@ -157,8 +157,8 @@ const About = () => {
       </section>
 
       {/* 🧩 NEW SECTION 3: 3-STEP SYSTEM DESIGNED FOR DOCTORS */}
-      <section className="py-20 bg-white">
-        <div className="max-w-5xl mx-auto px-6 text-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-white">
+        <div className="max-w-5xl mx-auto text-center">
           <span className="text-[#FF6B00] font-bold text-sm uppercase tracking-wider">Zero Training Required</span>
           <h2 className="text-3xl md:text-4xl font-black text-slate-900 mt-2 mb-6">
             Designed Exclusively For Busy Medical Professionals — Operates In Simple 3 Steps Just Like Normal WhatsApp
@@ -166,7 +166,7 @@ const About = () => {
           <p className="text-slate-600 text-lg max-w-3xl mx-auto mb-16">
             We know doctors do not have hours to study complicated dashboard tech. That is why this entire WhatsApp automation for medical professionals ecosystem sets up instantly. Doctors can start using it effectively from Day 1 to achieve true medical workflow automation.
           </p>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <div className="bg-gray-50 border border-gray-100 p-8 rounded-2xl relative shadow-sm">
               <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 w-10 h-10 bg-[#FF6B00] text-white font-black rounded-full flex items-center justify-center shadow-md">1</div>
               <h3 className="text-xl font-bold mt-2 mb-3">Connect Identity</h3>
@@ -187,8 +187,8 @@ const About = () => {
       </section>
 
       {/* 3. OUR STORY (The Problem & Solution) */}
-      <section className="py-24 bg-gray-50 border-t border-gray-100">
-         <div className="max-w-7xl mx-auto px-6 grid md:grid-cols-2 gap-16 items-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-gray-50 border-t border-gray-100">
+         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">
             <motion.div initial={{opacity:0, x:-50}} whileInView={{opacity:1, x:0}} viewport={{once:true}}>
                <h2 className="text-3xl font-bold mb-6 text-slate-900">The Problem We Saw</h2>
                <div className="space-y-6 text-lg text-slate-600 leading-relaxed">
@@ -212,7 +212,7 @@ const About = () => {
                <p className="text-slate-300 mb-6 leading-relaxed">
                   We engineered an integrated digital health communication platform layout. By establishing a dynamic healthcare communication technology India hub, we enable doctors to deploy reliable medical workflow automation features smoothly.
                </p>
-               <div className="grid grid-cols-2 gap-6 mt-8">
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-8">
                   <div className="bg-slate-800 p-4 rounded-xl">
                      <Clock className="text-[#FF6B00] mb-2" size={24}/>
                      <div className="font-bold">24/7 Active</div>
@@ -229,10 +229,10 @@ const About = () => {
       </section>
 
       {/* 4. IMPACT STATS */}
-      <section className="py-20 bg-[#FF6B00] text-white">
-         <div className="max-w-7xl mx-auto px-6 text-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-[#FF6B00] text-white">
+         <div className="max-w-7xl mx-auto text-center">
             <h2 className="text-3xl font-bold mb-12 opacity-90">Our Impact So Far</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
                {stats.map((stat, i) => (
                   <div key={i} className="bg-white/10 backdrop-blur-sm p-6 rounded-2xl border border-white/20">
                      <div className="text-4xl md:text-5xl font-black mb-2">{stat.val}</div>
@@ -244,12 +244,12 @@ const About = () => {
       </section>
 
       {/* 5. INDUSTRIES WE SERVE */}
-      <section className="py-24 bg-gray-50">
-         <div className="max-w-7xl mx-auto px-6 text-center">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-gray-50">
+         <div className="max-w-7xl mx-auto text-center">
             <h2 className="text-4xl font-bold text-slate-900 mb-4">Built for Healthcare Teams Like Yours</h2>
             <p className="text-slate-500 mb-12">Whether you're a small clinic or a growing hospital, our healthcare digital transformation hub is ready.</p>
             
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                {industries.map((ind, i) => (
                   <motion.div 
                     whileHover={{scale: 1.05}} 
@@ -265,13 +265,13 @@ const About = () => {
       </section>
 
       {/* 6. OUR VALUES */}
-      <section className="py-24 bg-white">
-         <div className="max-w-7xl mx-auto px-6">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-white">
+         <div className="max-w-7xl mx-auto">
             <div className="text-center mb-16">
                <span className="text-[#FF6B00] font-bold tracking-widest uppercase text-sm">Core Principles</span>
                <h2 className="text-4xl font-bold text-slate-900 mt-2">What Drives Us</h2>
             </div>
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                {values.map((val, i) => (
                   <div key={i} className="p-8 rounded-3xl bg-gray-50 border border-gray-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
                      <div className="mb-6 bg-white w-16 h-16 rounded-2xl flex items-center justify-center shadow-sm">{val.icon}</div>
@@ -283,34 +283,9 @@ const About = () => {
          </div>
       </section>
 
-      {/* 7. TEAM SECTION */}
-      <section className="py-24 bg-slate-900 text-white border-t border-slate-800">
-         <div className="max-w-7xl mx-auto px-6 text-center">
-            <h2 className="text-3xl font-bold mb-4">Meet The Team</h2>
-            <p className="text-slate-400 mb-16">We are an expert company building WhatsApp solutions for doctors with an advanced healthcare CRM innovation layout.</p>
-            
-            <div className="grid md:grid-cols-3 gap-8">
-               {[
-                  {name: "Avinash Kumar", role: "Founder & CEO", img: "https://placehold.co/200"},
-                  {name: "Rahul Singh", role: "CTO", img: "https://placehold.co/200"},
-                  {name: "Priya Sharma", role: "Head of Growth", img: "https://placehold.co/200"},
-               ].map((member, i) => (
-                  <div key={i} className="bg-slate-800 p-8 rounded-2xl border border-slate-700 hover:border-[#FF6B00] transition group">
-                     <div className="w-32 h-32 mx-auto mb-6 relative">
-                        <div className="absolute inset-0 bg-[#FF6B00] rounded-full transform scale-105 opacity-0 group-hover:opacity-20 transition-opacity"></div>
-                        <img src={member.img} alt={member.name} className="relative w-full h-full rounded-full border-4 border-slate-700 object-cover"/>
-                     </div>
-                     <h3 className="text-xl font-bold">{member.name}</h3>
-                     <p className="text-[#FF6B00] font-bold text-sm mt-1">{member.role}</p>
-                  </div>
-               ))}
-            </div>
-         </div>
-      </section>
-
       {/* 8. BUSINESS AUDIT OVERVIEW SECTION */}
-      <section className="py-20 bg-gray-50 text-slate-700 text-sm leading-relaxed border-t border-gray-100">
-        <div className="max-w-5xl mx-auto px-6 text-center space-y-4">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-gray-50 text-slate-700 text-sm leading-relaxed border-t border-gray-100">
+        <div className="max-w-5xl mx-auto text-center space-y-4">
           <p>Yogi Desk operates cleanly as a top-tier WhatsApp Business solution provider. Our operational core provides deep patient-doctor communication platform mapping across regional centers. We remain a dedicated healthcare technology company India provider committed to scaling functional infrastructure.</p>
           <p>By connecting custom pipelines as medical practice automation experts, our teams ensure that each patient care software solution conforms to optimal industry standards. We serve natively as a trusted medical practice software provider across the sub-continent.</p>
           <p>Our ongoing healthcare CRM innovation milestones establish us as a premier company building WhatsApp solutions for doctors. Our stack simplifies complex setups into intuitive tools, enabling rapid medical workflow automation adoption.</p>
@@ -319,8 +294,8 @@ const About = () => {
       </section>
 
       {/* 9. CTA SECTION */}
-      <section className="py-20 bg-white text-center">
-         <div className="max-w-3xl mx-auto px-6">
+      <section className="py-12 md:py-20 lg:py-24 px-4 md:px-6 bg-white text-center">
+         <div className="max-w-3xl mx-auto">
             <h2 className="text-4xl font-black text-slate-900 mb-6">Let’s Grow Together 🚀</h2>
             <p className="text-xl text-slate-500 mb-10">
                Ready to connect with a trusted medical practice software provider and optimize your healthcare communication technology India infrastructure?

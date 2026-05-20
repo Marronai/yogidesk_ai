@@ -64,8 +64,8 @@ const Contact = () => {
                      <div className="bg-gray-100 p-3 rounded-xl"><Mail size={24} className="text-slate-700"/></div>
                      <div>
                         <h3 className="font-bold text-slate-900">Email Us</h3>
-                        <p className="text-slate-500">support@yogidesk.com</p>
-                        <p className="text-slate-500">sales@yogidesk.com</p>
+                        <p className="text-slate-500">support@yogidesk-ai.com</p>
+                        <p className="text-slate-500">sales@yogidesk-ai.com</p>
                      </div>
                   </div>
 
@@ -73,7 +73,7 @@ const Contact = () => {
                      <div className="bg-gray-100 p-3 rounded-xl"><MapPin size={24} className="text-slate-700"/></div>
                      <div>
                         <h3 className="font-bold text-slate-900">Headquarters</h3>
-                        <p className="text-slate-500">Building N0 - 172,Dilawarpur,PO -MilkiChak Bahadurpur, <br/>Darbhanga,Bihar - Darbhanga,846009 India</p>
+                        <p className="text-slate-500">New Alkapuri Gardanibhag Road No 14<br/>Patna,Bihar -800002 India</p>
                      </div>
                   </div>
                </div>
