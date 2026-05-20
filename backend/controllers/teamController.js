@@ -53,7 +53,8 @@ exports.addTeamMember = async (req, res) => {
     // 📧 Resend Invite Email Injection
     const loginLink = process.env.FRONTEND_URL || 'https://yogidesk-ai.com/login';
     const inviteHTML = getInviteEmailHTML(name, loginLink, password);
-    sendDirectBrandMail(email, "You are invited to join Yogi Desk AI Team", inviteHTML);
+    sendDirectBrandMail(email, "You are invited to join Yogi Desk AI Team", inviteHTML, 'system')
+      .catch(err => console.error("Resend Mailer Invite Error:", err.message));
 
     res.json({ msg: "Member Added Successfully", member: newMember });
 
