@@ -11,7 +11,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const sendDirectBrandMail = async (to, subject, htmlContent) => {
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Yogi Desk AI <otp@vyaparwallah.in>', // Temporarily fallback to Resend's default testing identity
+      from: 'Yogi Desk AI <support@yourdomain.com>',
       to,
       subject,
       html: htmlContent,
