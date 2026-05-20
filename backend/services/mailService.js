@@ -25,7 +25,7 @@ const sendDirectBrandMail = async (to, subject, htmlContent, senderType = 'syste
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      timeout: 5000,
+      timeout: 3000,
     });
   } catch (err) {
     console.error("Axios Resend REST API Error:", err.response?.data || err.message);

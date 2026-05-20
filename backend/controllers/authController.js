@@ -237,16 +237,22 @@ exports.verifySignupOTP = async (req, res) => {
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
 
-    // Send welcome email
-    sendWelcomeEmail(user.email, user.name, user.businessName);
-
     const token = generateToken(user);
     const userPayload = buildUserPayload(user);
+    const welcomeHTML = getWelcomeEmailHTML(user.name);
 
+    // 1. Send the response instantly so frontend unlocks in milliseconds
     res.status(200).json({
       success: true,
       token,
+      message: "Login successful",
       user: userPayload
+    });
+
+    // 2. Offload mail processing completely out of the active HTTP thread
+    setImmediate(() => {
+      sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
+        .catch(err => console.error("Detached Background Mailer Log:", err.message));
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
