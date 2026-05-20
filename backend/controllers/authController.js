@@ -11,6 +11,19 @@ const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
 // Initialize Supabase Client for OTP management
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
+const runSupabaseOperation = async (operationPromise) => {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Supabase Client Timeout')), 4000);
+  });
+
+  try {
+    return await Promise.race([operationPromise, timeoutPromise]);
+  } catch (error) {
+    console.error("Supabase Operation Failure Trace:", error.message);
+    throw error;
+  }
+};
+
 const emailConfig = require('../config/emailConfig');
 const sendOTP = typeof emailConfig.sendOTP === 'function'
   ? emailConfig.sendOTP
@@ -103,16 +116,16 @@ exports.register = async (req, res) => {
       // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
-    // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
-    console.log("Attempting to send welcome email to:", email);
     const welcomeHTML = getWelcomeEmailHTML(name);
-    setImmediate(() => {
-      sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
-        .catch(err => console.error("Background Mailer Error Trace:", err.message));
-    });
 
     sendOTP(user.email, user.name, otp)
       .catch(err => console.error("Background OTP Mailer Error Trace:", err.message));
+
+    res.once('finish', () => {
+      setImmediate(() => {
+        void sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
+      });
+    });
 
     res.status(200).json({
       success: true,
@@ -241,16 +254,17 @@ exports.verifySignupOTP = async (req, res) => {
     const userPayload = buildUserPayload(user);
     const welcomeHTML = getWelcomeEmailHTML(user.name);
 
-    // 1. Send the response instantly so frontend unlocks in milliseconds
+    res.once('finish', () => {
+      setImmediate(() => {
+        void sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
+      });
+    });
+
     res.status(200).json({
       success: true,
       token,
       message: "Login successful",
       user: userPayload
-    });
-
-    setImmediate(() => {
-      void sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
@@ -333,13 +347,14 @@ exports.sendWhatsAppOTP = async (req, res) => {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     const fullPhone = `91${phone.replace(/\D/g, '').slice(-10)}`;
 
-    // 1. Insert OTP record into Supabase whatsapp_otps table
-    const { error: dbError } = await supabase.from('whatsapp_otps').insert([{
-      phone_number: fullPhone,
-      otp_code: otpCode,
-      is_verified: false,
-      expires_at: expiresAt
-    }]);
+    const { error: dbError } = await runSupabaseOperation(
+      supabase.from('whatsapp_otps').insert([{
+        phone_number: fullPhone,
+        otp_code: otpCode,
+        is_verified: false,
+        expires_at: expiresAt
+      }])
+    );
 
     if (dbError) throw dbError;
 
@@ -376,31 +391,34 @@ exports.verifyWhatsAppOTP = async (req, res) => {
     const fullPhone = `91${phone.replace(/\D/g, '').slice(-10)}`;
     const now = new Date().toISOString();
 
-    // Query whatsapp_otps for valid, unverified, and non-expired records
-    const { data: record, error: queryError } = await supabase
-      .from('whatsapp_otps')
-      .select('*')
-      .eq('phone_number', fullPhone)
-      .eq('otp_code', otp)
-      .eq('is_verified', false)
-      .gt('expires_at', now)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: record, error: queryError } = await runSupabaseOperation(
+      supabase
+        .from('whatsapp_otps')
+        .select('*')
+        .eq('phone_number', fullPhone)
+        .eq('otp_code', otp)
+        .eq('is_verified', false)
+        .gt('expires_at', now)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
 
     if (queryError || !record) {
       return res.status(401).json({ success: false, msg: "Invalid or expired OTP sequence" });
     }
 
-    // Update flag to prevent replay attacks
-    await supabase.from('whatsapp_otps').update({ is_verified: true }).eq('id', record.id);
+    await runSupabaseOperation(
+      supabase.from('whatsapp_otps').update({ is_verified: true }).eq('id', record.id)
+    );
 
-    // Upsert profile signature inside doctor_profiles framework
-    const { data: profile, error: upsertError } = await supabase
-      .from('doctor_profiles')
-      .upsert({ phone_number: fullPhone, last_verified_at: now }, { onConflict: 'phone_number' })
-      .select()
-      .single();
+    const { data: profile, error: upsertError } = await runSupabaseOperation(
+      supabase
+        .from('doctor_profiles')
+        .upsert({ phone_number: fullPhone, last_verified_at: now }, { onConflict: 'phone_number' })
+        .select()
+        .single()
+    );
 
     if (upsertError) throw upsertError;
 
