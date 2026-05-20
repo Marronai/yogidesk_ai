@@ -5,6 +5,9 @@ const axios = require('axios');
 const geoip = require('geoip-lite');
 const { createClient } = require('@supabase/supabase-js');
 
+const { sendDirectBrandMail } = require('../services/mailService');
+const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
+
 // Initialize Supabase Client for OTP management
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
@@ -99,6 +102,10 @@ exports.register = async (req, res) => {
       otpExpires
       // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
+
+    // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
+    const welcomeHTML = getWelcomeEmailHTML(name);
+    sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML);
 
     // Send OTP email
     const otpSent = await sendOTP(user.email, user.name, otp);

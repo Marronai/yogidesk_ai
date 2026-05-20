@@ -1,6 +1,8 @@
 // FILE: backend/controllers/teamController.js
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
+const { sendDirectBrandMail } = require('../services/mailService');
+const { getInviteEmailHTML } = require('../utils/emailTemplates');
 
 // --- 1. ADD MEMBER (Admin & Manager Only) ---
 exports.addTeamMember = async (req, res) => {
@@ -47,6 +49,12 @@ exports.addTeamMember = async (req, res) => {
     });
 
     await newMember.save();
+
+    // 📧 Resend Invite Email Injection
+    const loginLink = process.env.FRONTEND_URL || 'https://yogidesk-ai.com/login';
+    const inviteHTML = getInviteEmailHTML(name, loginLink, password);
+    sendDirectBrandMail(email, "You are invited to join Yogi Desk AI Team", inviteHTML);
+
     res.json({ msg: "Member Added Successfully", member: newMember });
 
   } catch (err) {

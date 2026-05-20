@@ -1,67 +1,92 @@
-// File: backend/utils/emailTemplates.js
-
-// 1. Welcome Email Template (Modern & Professional)
-const welcomeEmailTemplate = (name, loginLink) => {
-  return `
-    <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px;">
-      <div style="background-color: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        
-        <div style="text-align: center; margin-bottom: 30px;">
-          <img src="https://via.placeholder.com/150x50?text=YogiDesk+AI" alt="YogiDesk Logo" style="max-width: 150px;">
-        </div>
-
-        <h1 style="color: #333333; font-size: 24px; text-align: center; margin-bottom: 10px;">Welcome to YogiDesk AI! 🚀</h1>
-        <p style="color: #666666; font-size: 16px; text-align: center; margin-bottom: 30px;">
-          Hi ${name}, we are thrilled to have you on board.
-        </p>
-
-        <p style="color: #555555; line-height: 1.6; font-size: 15px; margin-bottom: 20px;">
-          Yogi Desk AI is your healthcare WhatsApp API dashboard. You can now automate responses, manage patient campaigns, and support your healthcare team effortlessly.
-          <br><br>
-          Your account is fully active. Click the button below to access your dashboard:
-        </p>
-
-        <div style="text-align: center; margin: 30px 0;">
-          <a href="${loginLink}" style="background-color: #007bff; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">
-            Login to Dashboard
-          </a>
-        </div>
-
-        <p style="text-align: center; font-size: 14px; color: #999;">
-          Or copy this link: <a href="${loginLink}" style="color: #007bff;">${loginLink}</a>
-        </p>
-        
-        <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 30px 0;">
-
-        <div style="background-color: #f0f7ff; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-          <h3 style="margin: 0 0 10px; color: #0056b3; font-size: 16px;">Need Help?</h3>
-          <p style="margin: 0; color: #555; font-size: 14px;">
-            Our support team is here for you 24/7.
-            <br>📧 Email: <strong>support@yogidesk.com</strong>
-            <br>📞 WhatsApp: <strong>+91-XXXXXXXXXX</strong>
-          </p>
-        </div>
-
-        <p style="text-align: center; font-size: 12px; color: #aaaaaa; margin-top: 20px;">
-          Regards,<br>
-          <strong>Team Yogi Desk AI</strong><br>
-          Yogi Desk
-        </p>
-      </div>
-    </div>
-  `;
-};
-
-// 2. OTP Template (Simple)
-const otpEmailTemplate = (otp) => {
-  return `
-    <div style="font-family: Arial, sans-serif; padding: 20px; text-align: center;">
-      <h2>Verify your Yogi Desk AI Account</h2>
-      <p>Use the OTP below to complete your signup process.</p>
-      <h1 style="color: #007bff; font-size: 32px; letter-spacing: 5px;">${otp}</h1>
-      <p>This OTP is valid for 10 minutes.</p>
-    </div>
-  `;
-};
-
-module.exports = { welcomeEmailTemplate, otpEmailTemplate };
+const getWelcomeEmailHTML = (doctorName) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <meta charset="UTF-8">
+          <style>
+              body { font-family: 'Inter', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #FFFFFF; color: #111111; }
+              .wrapper { max-width: 600px; margin: 0 auto; border: 1px solid #E5E7EB; }
+              .header { background-color: #FF6B00; padding: 48px 24px; text-align: center; }
+              .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 900; letter-spacing: -0.02em; }
+              .content { padding: 40px 32px; background-color: #FFFFFF; }
+              .greeting { font-size: 22px; font-weight: 800; margin-bottom: 16px; color: #111111; }
+              .text { font-size: 16px; line-height: 1.6; color: #4B5563; margin-bottom: 32px; }
+              .cta-container { text-align: center; }
+              .cta-button { display: inline-block; background-color: #FF6B00; color: #FFFFFF; padding: 16px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 16px; transition: background-color 0.2s; }
+              .footer { padding: 24px; text-align: center; font-size: 12px; color: #9CA3AF; border-top: 1px solid #F3F4F6; }
+          </style>
+      </head>
+      <body>
+          <div class="wrapper">
+              <div class="header">
+                  <h1>YOGI DESK AI</h1>
+              </div>
+              <div class="content">
+                  <div class="greeting">Welcome to the future of healthcare, Dr. ${doctorName}! 🚀</div>
+                  <p class="text">
+                      We're thrilled to have you join Yogi Desk AI. Your clinical workspace is now active, providing you with elite WhatsApp automation tools designed specifically for modern medical practices.
+                  </p>
+                  <p class="text">
+                      You can now manage appointments, automate patient follow-ups, and coordinate your healthcare team effortlessly from one central dashboard.
+                  </p>
+                  <div class="cta-container">
+                      <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Explore Your Dashboard</a>
+                  </div>
+              </div>
+              <div class="footer">
+                  &copy; 2026 Yogi Desk AI. Empowering Doctors through AI Communication.
+              </div>
+          </div>
+      </body>
+      </html>
+    `;
+  };
+  
+  const getInviteEmailHTML = (employeeName, loginLink, temporaryPassword) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <meta charset="UTF-8">
+          <style>
+              body { font-family: 'Inter', Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #F9FAFB; }
+              .wrapper { max-width: 600px; margin: 40px auto; background-color: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); display: flex; }
+              .accent-bar { width: 8px; background-color: #FF6B00; flex-shrink: 0; }
+              .main { padding: 48px; flex-grow: 1; }
+              .title { font-size: 24px; font-weight: 900; color: #111111; margin-bottom: 24px; }
+              .text { font-size: 15px; line-height: 1.6; color: #4B5563; margin-bottom: 24px; }
+              .creds-box { background-color: #F3F4F6; padding: 24px; border-radius: 12px; margin-bottom: 32px; border: 1px dashed #D1D5DB; }
+              .cred-item { margin-bottom: 8px; font-size: 14px; color: #374151; }
+              .cred-item strong { color: #FF6B00; font-weight: 700; }
+              .cta-button { display: inline-block; background-color: #111111; color: #FFFFFF; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 15px; }
+              .footer { margin-top: 40px; font-size: 12px; color: #9CA3AF; }
+          </style>
+      </head>
+      <body>
+          <div class="wrapper">
+              <div class="accent-bar"></div>
+              <div class="main">
+                  <div class="title">Join Your Clinical Team</div>
+                  <p class="text">Hi ${employeeName}, your administrator has invited you to join their healthcare workspace on Yogi Desk AI. You can now access the team inbox and patient management tools.</p>
+                  
+                  <div class="creds-box">
+                      <div class="cred-item"><strong>Login URL:</strong> ${loginLink}</div>
+                      <div class="cred-item"><strong>Temporary Password:</strong> ${temporaryPassword}</div>
+                  </div>
+  
+                  <p class="text" style="font-size: 13px; font-style: italic;">For security reasons, please update your password immediately after your first login.</p>
+  
+                  <a href="${loginLink}" class="cta-button">Access Workspace</a>
+  
+                  <div class="footer">
+                      This is an automated invitation from Yogi Desk AI.
+                  </div>
+              </div>
+          </div>
+      </body>
+      </html>
+    `;
+  };
+  
+  module.exports = { getWelcomeEmailHTML, getInviteEmailHTML };
