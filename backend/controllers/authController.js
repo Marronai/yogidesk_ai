@@ -249,10 +249,8 @@ exports.verifySignupOTP = async (req, res) => {
       user: userPayload
     });
 
-    // 2. Offload mail processing completely out of the active HTTP thread
     setImmediate(() => {
-      sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
-        .catch(err => console.error("Detached Background Mailer Log:", err.message));
+      void sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });

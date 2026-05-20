@@ -1,34 +1,28 @@
 const axios = require('axios');
 
-const RESEND_EMAIL_API_URL = 'https://api.resend.com/emails';
+const BREVO_SMTP_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
-/**
- * Sends a direct branded email using Resend's REST API.
- * @param {string} to - Recipient email address.
- * @param {string} subject - Email subject line.
- * @param {string} htmlContent - Responsive HTML content with brand styling.
- * @param {string} senderType - 'onboarding' or 'system' identity.
- */
 const sendDirectBrandMail = async (to, subject, htmlContent, senderType = 'system') => {
   const fromEmail = senderType === 'onboarding'
-    ? 'Yogi Desk AI <support@yogidesk-ai.com>'
-    : 'Yogi Desk AI <no-reply@yogidesk-ai.com>';
+    ? 'support@yogidesk-ai.com'
+    : 'no-reply@yogidesk-ai.com';
 
   try {
-    await axios.post(RESEND_EMAIL_API_URL, {
-      from: fromEmail,
-      to: [to],
-      subject,
-      html: htmlContent,
+    await axios.post(BREVO_SMTP_EMAIL_API_URL, {
+      sender: { name: 'Yogi Desk AI', email: fromEmail },
+      to: [{ email: to }],
+      subject: subject,
+      htmlContent: htmlContent
     }, {
       headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
+        'api-key': process.env.BREVO_API_KEY,
+        'Content-Type': 'application/json'
       },
-      timeout: 3000,
+      timeout: 5000
     });
+    console.log(`Brevo mail successfully sent to ${to} via ${fromEmail}`);
   } catch (err) {
-    console.error("Axios Resend REST API Error:", err.response?.data || err.message);
+    console.error("Brevo REST API Failure:", err.response?.data || err.message);
   }
 };
 
