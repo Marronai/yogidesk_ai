@@ -106,18 +106,14 @@ exports.register = async (req, res) => {
     // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
     console.log("Attempting to send welcome email to:", email);
     const welcomeHTML = getWelcomeEmailHTML(name);
-    // Note: sendDirectBrandMail is intentionally not awaited here to prevent blocking the primary user registration flow.
+    // Remove await so it runs instantly in the background without holding the HTTP response
     sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
-      .catch(emailError => console.error("Resend Mailer Execution Error Detail:", emailError.response?.data || emailError.message || emailError));
+      .catch(err => console.error("Background Mailer Error Trace:", err.message));
 
-    // Send OTP email
-    const otpSent = await sendOTP(user.email, user.name, otp);
-    
-    if (!otpSent) {
-      return res.status(500).json({ msg: 'Failed to send OTP. Please try again.' });
-    }
+    sendOTP(user.email, user.name, otp)
+      .catch(err => console.error("Background OTP Mailer Error Trace:", err.message));
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
       msg: 'User registered. Please check your email for OTP verification.'
     });
