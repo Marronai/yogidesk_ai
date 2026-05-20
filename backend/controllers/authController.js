@@ -106,9 +106,10 @@ exports.register = async (req, res) => {
     // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
     console.log("Attempting to send welcome email to:", email);
     const welcomeHTML = getWelcomeEmailHTML(name);
-    // Remove await so it runs instantly in the background without holding the HTTP response
-    sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
-      .catch(err => console.error("Background Mailer Error Trace:", err.message));
+    setImmediate(() => {
+      sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding')
+        .catch(err => console.error("Background Mailer Error Trace:", err.message));
+    });
 
     sendOTP(user.email, user.name, otp)
       .catch(err => console.error("Background OTP Mailer Error Trace:", err.message));
