@@ -103,9 +103,15 @@ exports.register = async (req, res) => {
       // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
-    // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
-    const welcomeHTML = getWelcomeEmailHTML(name);
-    sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML);
+    try {
+      // 📧 Resend Welcome Email Injection (Bypassing standard triggers)
+      console.log("Attempting to send welcome email to:", email);
+      const welcomeHTML = getWelcomeEmailHTML(name);
+      // Note: sendDirectBrandMail is intentionally not awaited here to prevent blocking the primary user registration flow.
+      sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML);
+    } catch (emailError) {
+      console.error("Resend Mailer Execution Error Detail:", emailError.response?.data || emailError.message || emailError);
+    }
 
     // Send OTP email
     const otpSent = await sendOTP(user.email, user.name, otp);
