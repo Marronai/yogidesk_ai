@@ -396,7 +396,7 @@ const Templates = () => {
         footerText: (template?.footerText || '').trim(),
         buttons: buttonPayload,
         variablesData: variableSamples,
-        bodyVariableParameters: bodyVariableParameters,
+        bodyVariableParameters: bodyVariableParameters, // This seems to be a duplicate or for internal tracking
         customVariables: bodyVariableParameters
       });
 

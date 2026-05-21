@@ -226,6 +226,8 @@ exports.submitTemplate = async (req, res) => {
             return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
         }
 
+        console.log("Incoming Payload from Frontend:", JSON.stringify(req.body));
+
         let components = [];
 
         // 3. MAINTAIN SYSTEM AUTH FALLBACK
@@ -252,17 +254,17 @@ exports.submitTemplate = async (req, res) => {
             ];
             category = 'AUTHENTICATION';
         } else {
-            // 2. MAP CONTEXTUAL SAMPLES TO META PAYLOAD
+            // 2. REFIX THE BACKEND COMPLIANCE ENGINE
             const { variablesData } = req.body;
-            const variableIndices = Object.keys(variablesData || {}).sort((a, b) => Number(a) - Number(b));
+            const sortedKeys = Object.keys(variablesData || {}).sort((a, b) => Number(a) - Number(b));
+            const samplesArray = sortedKeys.map(key => variablesData[key]);
             
             const bodyComponent = {
                 type: 'BODY',
                 text: body
             };
 
-            if (variableIndices.length > 0) {
-                const samplesArray = variableIndices.map(key => variablesData[key]);
+            if (samplesArray.length > 0) {
                 bodyComponent.example = {
                     body_text: [samplesArray]
                 };
@@ -338,7 +340,8 @@ exports.submitTemplate = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Template Submission Error:", error.response ? error.response.data : error.message);
+        // 3. CAPTURE META ERROR RESPONSE
+        console.error("Meta API Absolute Rejection Error:", JSON.stringify(error.response?.data || error.message));
         res.status(500).json({
             success: false,
             message: 'Template submission failed',
