@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from '../config/supabaseClient';
 
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
@@ -15,14 +16,26 @@ const api = axios.create({
   }
 });
 
+const readStoredSessionToken = () => {
+  try {
+    const session = JSON.parse(localStorage.getItem('sb-access-token') || '{}');
+    return session?.access_token || null;
+  } catch {
+    return null;
+  }
+};
+
 // Add request interceptor to include auth token
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
+  async (config) => {
+    const { data } = await supabase.auth.getSession();
+    const token = readStoredSessionToken() || data?.session?.access_token || localStorage.getItem('token');
+
     if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
       config.url = config.url.replace(/^\/api(?=\/|$)/, '');
     }
     if (token) {
+      config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;

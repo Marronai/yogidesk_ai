@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
-import { API_URL } from '../utils/api';
+import api from '../utils/api';
 
 const emptyForm = {
   name: '',
@@ -85,6 +85,12 @@ const Settings = () => {
     setLoading(true);
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session) {
+        window.location.href = '/login';
+        return;
+      }
+
       const { userId } = await getActiveAccount();
       const { error } = await supabase
         .from('doctor_profiles')
@@ -107,10 +113,13 @@ const Settings = () => {
     setSavingConnection(true);
 
     try {
-      const { authUser } = await getActiveAccount();
       const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) throw new Error('Unable to validate the current doctor session.');
+      if (!sessionData?.session) {
+        window.location.href = '/login';
+        return;
+      }
+
+      const { authUser } = await getActiveAccount();
 
       const payload = {
         name: formData.name.trim(),
@@ -120,18 +129,9 @@ const Settings = () => {
         whatsappAccessToken: formData.whatsappAccessToken,
       };
 
-      const response = await fetch(`${API_URL}/api/settings/meta-connection`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      const { data: result } = await api.post('/settings/meta-connection', payload);
 
-      const result = await response.json().catch(() => ({}));
-
-      if (!response.ok || !result.success) {
+      if (!result?.success) {
         throw new Error(result.message || 'Failed to update connection settings. Please try again.');
       }
 
