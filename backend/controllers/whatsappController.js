@@ -6,41 +6,90 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
-const getUserMetaCredentials = async (userId) => {
-    if (!supabase || !userId) return {};
-    const { data, error } = await supabase
-        .from('doctor_profiles')
-        .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-        .eq('user_id', userId)
-        .maybeSingle();
-    if (error || !data) {
-        if (error) console.warn('Meta credential lookup failed:', error.message);
+const missingSubAccountConfigResponse = {
+    success: false,
+    message: "WhatsApp API profile configuration missing for this sub-account."
+};
+
+const getActiveDoctorId = (req) => {
+    const authUser = req.user || req.auth?.user || req.session?.user || {};
+    return (
+        authUser.doctor_id ||
+        authUser.doctorId ||
+        authUser.id ||
+        authUser._id?.toString?.() ||
+        req.auth?.doctor_id ||
+        req.auth?.doctorId ||
+        req.session?.doctor_id ||
+        req.session?.doctorId ||
+        null
+    );
+};
+
+const getDoctorMetaCredentials = async (doctorId) => {
+    if (!supabase || !doctorId) return {};
+
+    const lookupColumns = ['doctor_id', 'id', 'user_id'];
+    let data = null;
+    let lastError = null;
+
+    for (const column of lookupColumns) {
+        const result = await supabase
+            .from('doctor_profiles')
+            .select('meta_phone_number_id,meta_waba_id')
+            .eq(column, doctorId)
+            .maybeSingle();
+
+        if (result.data) {
+            data = result.data;
+            lastError = null;
+            break;
+        }
+
+        if (result.error) {
+            lastError = result.error;
+        }
+    }
+
+    if (lastError || !data) {
+        if (lastError) console.warn('Meta credential lookup failed:', lastError.message);
         return {};
     }
+
     return {
-        phoneNumberId: data.whatsapp_phone_number_id || null,
-        businessAccountId: data.whatsapp_business_account_id || null,
-        accessToken: data.whatsapp_access_token || null
+        phoneNumberId: data.meta_phone_number_id || null,
+        businessAccountId: data.meta_waba_id || null,
+        accessToken: process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null
     };
 };
 
 // 1. Send Test Message Function
 exports.sendTestMessage = async (req, res) => {
     try {
-        const { phoneNumber, userId } = req.body;
-        if (!phoneNumber || !userId) {
-            return res.status(400).json({ success: false, msg: 'phoneNumber and userId are required' });
+        const { phoneNumber } = req.body;
+        const doctorId = getActiveDoctorId(req);
+
+        if (!phoneNumber) {
+            return res.status(400).json({ success: false, msg: 'phoneNumber is required' });
         }
 
-        const credentials = await getUserMetaCredentials(userId);
-        const phoneId = credentials.phoneNumberId || process.env.META_PHONE_ID;
-        const accessToken = credentials.accessToken || process.env.META_ACCESS_TOKEN;
-
-        if (!phoneId || !accessToken) {
-            return res.status(500).json({ success: false, msg: 'WhatsApp Meta credentials are unavailable for this user.' });
+        if (!doctorId) {
+            return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         }
 
-        const url = `https://graph.facebook.com/v17.0/${phoneId}/messages`;
+        const credentials = await getDoctorMetaCredentials(doctorId);
+        const phoneId = credentials.phoneNumberId;
+        const accessToken = credentials.accessToken;
+
+        if (!phoneId || !credentials.businessAccountId) {
+            return res.status(400).json(missingSubAccountConfigResponse);
+        }
+
+        if (!accessToken) {
+            return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
+        }
+
+        const url = `https://graph.facebook.com/v20.0/${phoneId}/messages`;
         const data = {
             messaging_product: 'whatsapp',
             to: phoneNumber,
@@ -81,7 +130,6 @@ exports.sendTestMessage = async (req, res) => {
 exports.submitTemplate = async (req, res) => {
     try {
         const {
-            userId,
             name,
             category,
             language,
@@ -89,21 +137,28 @@ exports.submitTemplate = async (req, res) => {
             header,
             footer,
             buttons,
-            messaging_product: messagingProduct = 'whatsapp',
-            whatsapp_business_account_id: requestBusinessAccountId,
-            whatsapp_access_token: requestAccessToken
+            messaging_product: messagingProduct = 'whatsapp'
         } = req.body;
+        const doctorId = getActiveDoctorId(req);
 
-        if (!userId || !name || !category || !language || !body) {
-            return res.status(400).json({ message: 'Missing required fields: userId, name, category, language, body' });
+        if (!doctorId) {
+            return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         }
 
-        const credentials = await getUserMetaCredentials(userId);
-        const businessAccountId = requestBusinessAccountId || credentials.businessAccountId || process.env.META_WABA_ID;
-        const accessToken = requestAccessToken || credentials.accessToken || process.env.META_ACCESS_TOKEN;
+        if (!name || !category || !language || !body) {
+            return res.status(400).json({ success: false, message: 'Missing required fields: name, category, language, body' });
+        }
 
-        if (!businessAccountId || !accessToken) {
-            return res.status(500).json({ message: 'WhatsApp Meta credentials unavailable for this user.' });
+        const credentials = await getDoctorMetaCredentials(doctorId);
+        const businessAccountId = credentials.businessAccountId;
+        const accessToken = credentials.accessToken;
+
+        if (!credentials.phoneNumberId || !businessAccountId) {
+            return res.status(400).json(missingSubAccountConfigResponse);
+        }
+
+        if (!accessToken) {
+            return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
         }
 
         const components = [
@@ -174,7 +229,7 @@ exports.submitTemplate = async (req, res) => {
             category,
             status: 'PENDING_REVIEW',
             metaTemplateId: response.data.id || response.data.message_template_id,
-            businessId: userId
+            businessId: doctorId
         });
 
         console.log("Template Submitted ID:", response.data.id);
