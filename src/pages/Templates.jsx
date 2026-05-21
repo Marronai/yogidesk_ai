@@ -91,9 +91,9 @@ const Templates = () => {
 
   // 1. IMPLEMENT DYNAMIC VARIABLE DETECTOR
   useEffect(() => {
-    const currentBody = template[activeBodyLang] || '';
+    const currentBody = template?.[activeBodyLang] || '';
     const matches = [...currentBody.matchAll(/\{\{(\d+)\}\}/g)];
-    const detectedVars = [...new Set(matches.map(m => m[1]))].sort((a, b) => Number(a) - Number(b));
+    const detectedVars = [...new Set((matches || []).map(m => m[1]))].sort((a, b) => Number(a) - Number(b));
     
     setVariableSamples(prev => {
       const next = {};
@@ -124,13 +124,13 @@ const Templates = () => {
   };
 
   const getMetaLanguageForBody = () => {
-    if (template.english.trim()) {
+    if (template?.english?.trim?.()) {
       return { bodyText: template.english.trim(), language: 'en_US' };
     }
-    if (template.hinglish.trim()) {
+    if (template?.hinglish?.trim?.()) {
       return { bodyText: template.hinglish.trim(), language: 'en_US' };
     }
-    if (template.hindi.trim()) {
+    if (template?.hindi?.trim?.()) {
       return { bodyText: template.hindi.trim(), language: 'hi' };
     }
     return { bodyText: '', language: '' };
@@ -138,10 +138,10 @@ const Templates = () => {
 
   const buildTemplateComponents = (bodyText) => {
     const components = [];
-    const headerText = String(template.headerText || '').trim();
-    const footerText = String(template.footerText || '').trim();
+    const headerText = String(template?.headerText || '').trim();
+    const footerText = String(template?.footerText || '').trim();
 
-    if (template.headerType === 'TEXT' && headerText) {
+    if (template?.headerType === 'TEXT' && headerText) {
       components.push({
         type: 'HEADER',
         format: 'TEXT',
@@ -149,14 +149,14 @@ const Templates = () => {
       });
     }
 
-    if (template.headerType === 'DOCUMENT') {
+    if (template?.headerType === 'DOCUMENT') {
       components.push({
         type: 'HEADER',
         format: 'DOCUMENT'
       });
     }
 
-    if (template.headerType === 'LOCATION') {
+    if (template?.headerType === 'LOCATION') {
       components.push({
         type: 'HEADER',
         format: 'LOCATION'
@@ -171,14 +171,14 @@ const Templates = () => {
       components.push({ type: 'FOOTER', text: footerText });
     }
 
-    const buttonPayload = template.buttons
+    const buttonPayload = (template?.buttons || [])
       .map((btn) => {
-        const text = String(btn.text || '').trim();
-        if (btn.type === 'URL') {
-          const url = String(btn.url || '').trim();
+        const text = String(btn?.text || '').trim();
+        if (btn?.type === 'URL') {
+          const url = String(btn?.url || '').trim();
           return text && url ? { type: 'URL', text, url } : null;
         }
-        const phoneDigits = String(btn.phone || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+        const phoneDigits = String(btn?.phone || '').trim().replace(/^\+/, '').replace(/\D/g, '');
         const phoneNumber = phoneDigits.length === 10 ? `91${phoneDigits}` : phoneDigits;
         return text && phoneNumber ? { type: 'PHONE_NUMBER', text, phone_number: phoneNumber } : null;
       })
@@ -235,7 +235,7 @@ const Templates = () => {
   };
 
   const getNextVariableIndex = (bodyText = template[activeBodyLang]) => {
-    const matches = String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g);
+    const matches = String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g) || [];
     const indexes = Array.from(matches, (match) => Number(match[1])).filter(Number.isFinite);
     return indexes.length ? Math.max(...indexes) + 1 : 1;
   };
@@ -279,13 +279,13 @@ const Templates = () => {
   };
 
   const addButton = (type) => {
-    if (template.buttons.length >= 2) return;
+    if ((template?.buttons || []).length >= 2) return;
     const newBtn = type === 'URL' ? { type: 'URL', text: '', url: '' } : { type: 'PHONE', text: '', phone: '' };
-    setTemplate({ ...template, buttons: [...template.buttons, newBtn] });
+    setTemplate({ ...template, buttons: [...(template?.buttons || []), newBtn] });
   };
 
   const updateButtonEntry = (index, field, value) => {
-    const updatedButtons = [...template.buttons];
+    const updatedButtons = [...(template?.buttons || [])];
     updatedButtons[index][field] = value;
     setTemplate({ ...template, buttons: updatedButtons });
   };
@@ -315,19 +315,19 @@ const Templates = () => {
   };
 
   const allSamplesProvided = useMemo(() => {
-    const keys = Object.keys(variableSamples);
-    return keys.length === 0 || keys.every(key => String(variableSamples[key]).trim() !== '');
+    const keys = Object.keys(variableSamples || {});
+    return keys.length === 0 || keys.every(key => String(variableSamples?.[key] || '').trim() !== '');
   }, [variableSamples]);
 
   const handleSubmit = async () => {
-    const formattedTemplateName = formatTemplateName(template.name);
+    const formattedTemplateName = formatTemplateName(template?.name);
 
     if (!formattedTemplateName) {
       setError('Template name is required.');
       return;
     }
 
-    if (templates && Array.isArray(templates) && templates.length >= 20) {
+    if (Array.isArray(templates) && templates.length >= 20) {
       setError('Template limit reached. Upgrade to create more than 20 templates.');
       return;
     }
@@ -374,9 +374,9 @@ const Templates = () => {
         throw new Error('Connect Meta API credentials in Settings before submitting templates.');
       }
 
-      const headerType = template.headerType || 'NONE';
+      const headerType = template?.headerType || 'NONE';
       const { components, buttons: buttonPayload } = buildTemplateComponents(bodyToSubmit);
-      const bodyVariableParameters = customVariables
+      const bodyVariableParameters = (customVariables || [])
         .filter((variable) => new RegExp(`\\{\\{${variable.index}\\}\\}`).test(bodyToSubmit))
         .sort((a, b) => a.index - b.index);
 
@@ -392,8 +392,8 @@ const Templates = () => {
         category: template.category,
         components,
         headerType,
-        headerText: template.headerText.trim(),
-        footerText: template.footerText.trim(),
+        headerText: (template?.headerText || '').trim(),
+        footerText: (template?.footerText || '').trim(),
         buttons: buttonPayload,
         variablesData: variableSamples,
         bodyVariableParameters: bodyVariableParameters,
@@ -410,6 +410,17 @@ const Templates = () => {
       setSaving(false);
     }
   };
+
+  if (isLoading || isProfileLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-[#F9FAFB]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader className="h-10 w-10 animate-spin text-[#25D366]" />
+          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Hydrating Clinical Workspace...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-10 bg-[#F9FAFB] min-h-screen font-sans text-slate-900">

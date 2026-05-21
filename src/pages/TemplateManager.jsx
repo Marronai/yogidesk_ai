@@ -91,7 +91,7 @@ const TemplateManager = () => {
 
     if (!query) return templateList;
 
-    return templateList.filter((template) =>
+    return (templateList || []).filter((template) =>
       String(template?.template_name || '').toLowerCase().includes(query)
     );
   }, [searchTerm, templates]);
@@ -139,11 +139,11 @@ const TemplateManager = () => {
     try { return buttons ? JSON.parse(buttons) : []; } catch { return []; }
   };
   const submittedRows = useMemo(
-    () => templateRows.filter((template) => ['PENDING', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(String(template?.status || '').toUpperCase())),
+    () => (templateRows || []).filter((template) => ['PENDING', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(String(template?.status || '').toUpperCase())),
     [templateRows]
   );
   const submittedMetadata = useMemo(
-    () => submittedRows.map((template) => ({
+    () => (submittedRows || []).map((template) => ({
       ...template,
       status: String(template?.status || 'UNKNOWN').toUpperCase() === 'PENDING_REVIEW' ? 'PENDING' : String(template?.status || 'UNKNOWN').toUpperCase(),
       buttons: parseButtons(template?.buttons),

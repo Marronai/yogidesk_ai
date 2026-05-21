@@ -48,14 +48,20 @@ const DashboardHome = () => {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
-      const [walletResult, sentResult, leadResult, usageResult] = await Promise.all([
+      const results = await Promise.allSettled([
         supabase.from('wallets').select('balance, is_first_recharge, welcome_gift_active').eq('user_id', userId).maybeSingle(),
         supabase.from('campaign_queue').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStart.toISOString()),
         supabase.from('patients_ledger').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', todayStart.toISOString()),
         api.get(backendPath('/api/user/usage'), { params: { userId } }).catch(() => ({ data: null }))
       ]);
 
-      if (active && walletResult.data) setWallet(saveWallet(walletResult.data));
+      const walletResult = results[0]?.status === 'fulfilled' ? results[0].value : null;
+      if (active && walletResult?.data) setWallet(saveWallet(walletResult.data));
+      
+      const sentResult = results[1]?.status === 'fulfilled' ? results[1].value : null;
+      const leadResult = results[2]?.status === 'fulfilled' ? results[2].value : null;
+      const usageResult = results[3]?.status === 'fulfilled' ? results[3].value : null;
+
       if (active) {
         setStats({
           weekly_sent: sentResult.count || 0,
@@ -190,7 +196,7 @@ const DashboardHome = () => {
           </div>
           <div className="p-6 overflow-x-auto">
             <div className="min-w-[540px] grid gap-4">
-              {liveCampaigns.map(([title, meta, type, clicks, icon]) => (
+              {(liveCampaigns || []).map(([title, meta, type, clicks, icon]) => (
                 <div key={title} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:shadow-md transition bg-white">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center font-bold text-xs">{type}</div>
@@ -213,7 +219,7 @@ const DashboardHome = () => {
       <div className="white-card p-6">
         <h3 className="font-bold text-gray-800 text-lg mb-6">Message Sent History (Last 7 Days)</h3>
         <div className="h-48 flex items-end justify-between gap-4 px-4">
-          {messageHistory.map((height, index) => (
+          {(messageHistory || []).map((height, index) => (
             <div key={index} className="flex-1 flex flex-col items-center gap-3 group">
               <div className="w-full bg-gray-100 rounded-t-lg relative h-full flex items-end overflow-hidden group-hover:bg-gray-200 transition">
                 <div className="w-full bg-[#FF6B00] rounded-t-lg transition-all duration-700 ease-out group-hover:bg-orange-600" style={{ height: `${height}%` }} />
