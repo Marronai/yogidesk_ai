@@ -161,44 +161,76 @@ exports.submitTemplate = async (req, res) => {
             return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
         }
 
-        const components = [
-            {
+        let components = [];
+
+        // 3. MAINTAIN SYSTEM AUTH FALLBACK
+        if (name.trim() === 'yogi_auth_otp') {
+            components = [
+                {
+                    type: 'BODY',
+                    text: "{{1}} is your verification code. For your security, do not share this code.",
+                    example: {
+                        body_text: [["123456"]]
+                    }
+                },
+                {
+                    type: 'BUTTONS',
+                    buttons: [
+                        {
+                            type: 'OTP',
+                            otp_type: 'COPY_CODE',
+                            text: 'Copy Code',
+                            example: ["123456"]
+                        }
+                    ]
+                }
+            ];
+        } else {
+            // 1. REMOVE HARDCODED LIMITS & PARSE ALL VARIABLES DYNAMICALLY
+            const variableMatches = body.match(/{{\d+}}/g) || [];
+            const uniqueVariables = [...new Set(variableMatches)];
+            
+            const bodyComponent = {
                 type: 'BODY',
                 text: body
+            };
+
+            // 2. BUILD AUTOMATED PLACEHOLDER ARRAYS FOR META
+            if (uniqueVariables.length > 0) {
+                bodyComponent.example = {
+                    body_text: [uniqueVariables.map((_, i) => `Sample Text ${i + 1}`)]
+                };
             }
-        ];
 
-        // Handle Header component
-        if (header) {
-            components.unshift({
-                type: 'HEADER',
-                format: header.type, // TEXT, IMAGE, VIDEO, DOCUMENT
-                ...(header.type === 'TEXT' && { text: header.text }),
-                ...(header.type !== 'TEXT' && { example: { header_handle: [header.link] } }) // For media, Meta expects example with link
-            });
-        }
+            components.push(bodyComponent);
 
-        // Handle Body component (already added above)
+            if (header) {
+                components.unshift({
+                    type: 'HEADER',
+                    format: header.type,
+                    ...(header.type === 'TEXT' && { text: header.text }),
+                    ...(header.type !== 'TEXT' && { example: { header_handle: [header.link] } })
+                });
+            }
 
-        // Handle Footer component
-        if (footer && footer.text) {
-            components.push({
-                type: 'FOOTER',
-                text: footer.text
-            });
-        }
+            if (footer && footer.text) {
+                components.push({
+                    type: 'FOOTER',
+                    text: footer.text
+                });
+            }
 
-        // Handle Buttons component
-        if (buttons && buttons.length > 0) {
-            components.push({
-                type: 'BUTTONS',
-                buttons: buttons.map(btn => ({
-                    type: btn.type === 'URL' ? 'URL' : 'PHONE_NUMBER', // Meta API uses PHONE_NUMBER
-                    text: btn.text,
-                    ...(btn.type === 'URL' && { url: btn.url }),
-                    ...(btn.type === 'PHONE_NUMBER' && { phone_number: btn.phone_number })
-                }))
-            });
+            if (buttons && buttons.length > 0) {
+                components.push({
+                    type: 'BUTTONS',
+                    buttons: buttons.map(btn => ({
+                        type: btn.type === 'URL' ? 'URL' : 'PHONE_NUMBER',
+                        text: btn.text,
+                        ...(btn.type === 'URL' && { url: btn.url }),
+                        ...(btn.type === 'PHONE_NUMBER' && { phone_number: btn.phone_number })
+                    }))
+                });
+            }
         }
 
         const url = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
@@ -206,7 +238,7 @@ exports.submitTemplate = async (req, res) => {
             messaging_product: messagingProduct || 'whatsapp',
             name: name.trim(),
             language,
-            category,
+            category: name.trim() === 'yogi_auth_otp' ? 'AUTHENTICATION' : category,
             components
         };
 
@@ -224,9 +256,9 @@ exports.submitTemplate = async (req, res) => {
         const newTemplate = await Template.create({
             name: name.trim(),
             bodyText: body,
-            headerType: header ? 'TEXT' : 'NONE',
-            headerText: header ? header.text : '',
-            category,
+            headerType: header ? (header.type === 'TEXT' ? 'TEXT' : header.type) : 'NONE',
+            headerText: header && header.type === 'TEXT' ? header.text : '',
+            category: name.trim() === 'yogi_auth_otp' ? 'AUTHENTICATION' : category,
             status: 'PENDING_REVIEW',
             metaTemplateId: response.data.id || response.data.message_template_id,
             businessId: doctorId
