@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
+import { API_URL } from '../utils/api';
 
 const emptyForm = {
   name: '',
@@ -106,43 +107,43 @@ const Settings = () => {
     setSavingConnection(true);
 
     try {
-      const { authUser, userId: authUserId } = await getActiveAccount();
+      const { authUser } = await getActiveAccount();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error('Unable to validate the current doctor session.');
+
       const payload = {
-        id: authUserId,
-        name: formData.name.trim() || null,
-        email: formData.email || authUser?.email || null,
-        whatsapp_phone_number_id: formData.whatsappPhoneNumberId || null,
-        whatsapp_business_account_id: formData.whatsappBusinessAccountId || null,
-        whatsapp_access_token: formData.whatsappAccessToken || null,
+        name: formData.name.trim(),
+        email: formData.email || authUser?.email || '',
+        whatsappPhoneNumberId: formData.whatsappPhoneNumberId,
+        whatsappBusinessAccountId: formData.whatsappBusinessAccountId,
+        whatsappAccessToken: formData.whatsappAccessToken,
       };
 
-      const { data, error } = await supabase
-        .from('doctor_profiles')
-        .upsert(payload, { onConflict: 'id' })
-        .select('id')
-        .eq('id', authUserId)
-        .maybeSingle();
+      const response = await fetch(`${API_URL}/api/settings/meta-connection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
 
-      if (error) {
-        console.error('Supabase Settings Sync Error:', error);
-        throw error;
-      }
+      const result = await response.json().catch(() => ({}));
 
-      if (!data) {
-        const missingRowError = new Error('No doctor profile row returned for the authenticated user.');
-        console.error('Supabase Settings Sync Error:', missingRowError);
-        throw missingRowError;
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Failed to update connection settings. Please try again.');
       }
 
       setConnectionStatus(
-        payload.whatsapp_phone_number_id && payload.whatsapp_business_account_id && payload.whatsapp_access_token
+        payload.whatsappPhoneNumberId && payload.whatsappBusinessAccountId && payload.whatsappAccessToken
           ? 'connected'
           : 'disconnected'
       );
       showToast('success', 'Connection settings saved successfully.');
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
-      showToast('error', 'Failed to update connection settings. Please try again.');
+      showToast('error', error.message || 'Failed to update connection settings. Please try again.');
     } finally {
       setSavingConnection(false);
     }

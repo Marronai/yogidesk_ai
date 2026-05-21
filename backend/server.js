@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const emailConfig = require('./config/emailConfig');
 const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
@@ -64,6 +65,60 @@ const normalizeTemplateLanguage = (language) => {
 const sanitizeMetaPhoneNumber = (value) => {
     const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
+};
+const cleanCredentialValue = (value) => String(value || '').trim();
+const invalidMetaConfigurationResponse = {
+    success: false,
+    message: "Invalid Meta configuration or access token permissions. Please check your developer credentials."
+};
+const getBearerToken = (req) => {
+    const header = req.headers.authorization || '';
+    return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+};
+const getSupabaseSessionUser = async (req) => {
+    const token = getBearerToken(req);
+    if (!token || token.startsWith('supabase-bypass-token-')) return null;
+
+    const client = supabaseAdmin || supabase;
+    if (!client?.auth?.getUser) return null;
+
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data?.user?.id) {
+        console.error('Settings session validation failed:', error?.message || 'missing Supabase user');
+        return null;
+    }
+
+    return data.user;
+};
+const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, accessToken }) => {
+    try {
+        await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
+            params: {
+                fields: 'id,display_phone_number,verified_name'
+            },
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            },
+            timeout: 10000,
+            validateStatus: (status) => status >= 200 && status < 300
+        });
+
+        await axios.get(`https://graph.facebook.com/v21.0/${businessAccountId}`, {
+            params: {
+                fields: 'id,name'
+            },
+            headers: {
+                Authorization: `Bearer ${accessToken}`
+            },
+            timeout: 10000,
+            validateStatus: (status) => status >= 200 && status < 300
+        });
+
+        return true;
+    } catch (error) {
+        console.error('Meta credential validation failed:', error.response?.data || error.message || error);
+        return false;
+    }
 };
 const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
     if (Array.isArray(components) && components.length > 0) {
@@ -697,6 +752,64 @@ app.post('/api/templates', async (req, res) => {
     } catch (error) {
         console.error('Template submission error:', error.response?.data || error.message || error);
         return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template submission failed.' });
+    }
+});
+
+app.post('/api/settings/meta-connection', async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(500).json({ success: false, message: "Database connection unavailable." });
+        }
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id) {
+            return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
+        }
+
+        const phoneNumberId = cleanCredentialValue(req.body.whatsappPhoneNumberId || req.body.whatsapp_phone_number_id);
+        const businessAccountId = cleanCredentialValue(req.body.whatsappBusinessAccountId || req.body.whatsappWabaId || req.body.whatsapp_business_account_id);
+        const accessToken = cleanCredentialValue(req.body.whatsappAccessToken || req.body.whatsapp_access_token);
+        const name = cleanCredentialValue(req.body.name);
+        const email = cleanCredentialValue(req.body.email || sessionUser.email);
+
+        const credentialsAreComplete = phoneNumberId && businessAccountId && accessToken;
+        const credentialsAreFormatted = /^\d+$/.test(phoneNumberId) && /^\d+$/.test(businessAccountId) && accessToken.length >= 20;
+
+        if (!credentialsAreComplete || !credentialsAreFormatted) {
+            return res.status(400).json(invalidMetaConfigurationResponse);
+        }
+
+        const isMetaValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
+        if (!isMetaValid) {
+            return res.status(400).json(invalidMetaConfigurationResponse);
+        }
+
+        const profilePayload = {
+            id: sessionUser.id,
+            whatsapp_phone_number_id: phoneNumberId,
+            whatsapp_business_account_id: businessAccountId,
+            whatsapp_access_token: accessToken
+        };
+
+        if (name) profilePayload.name = name;
+        if (email) profilePayload.email = email;
+
+        const { data, error } = await (supabaseAdmin || supabase)
+            .from('doctor_profiles')
+            .upsert(profilePayload, { onConflict: 'id' })
+            .select('id,whatsapp_phone_number_id,whatsapp_business_account_id')
+            .eq('id', sessionUser.id)
+            .maybeSingle();
+
+        if (error || !data) {
+            console.error('Supabase Meta settings save failed:', error?.message || 'No profile row returned');
+            return res.status(400).json({ success: false, message: "Unable to save Meta configuration for this doctor profile." });
+        }
+
+        return res.status(200).json({ success: true, message: "Connection settings saved successfully.", data });
+    } catch (error) {
+        console.error('Meta settings connection route failed:', error.response?.data || error.message || error);
+        return res.status(400).json(invalidMetaConfigurationResponse);
     }
 });
 
