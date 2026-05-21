@@ -11,6 +11,62 @@ const missingSubAccountConfigResponse = {
     message: "WhatsApp API profile configuration missing for this sub-account."
 };
 
+const extractVariableValue = (value) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value !== 'object') return String(value).trim();
+
+    return String(
+        value.value ||
+        value.sample ||
+        value.example ||
+        value.text ||
+        value.customValue ||
+        value.custom ||
+        value.label ||
+        value.field ||
+        ''
+    ).trim();
+};
+
+const collectTemplateVariables = (body = {}) => {
+    const variableSources = [
+        body.variablesData,
+        body.variables,
+        body.variableMapping,
+        body.variableMappings,
+        body.mappings,
+        body.customVariables
+    ];
+    const variablesData = {};
+
+    variableSources.forEach((source) => {
+        if (!source) return;
+
+        if (Array.isArray(source)) {
+            source.forEach((item, index) => {
+                if (item === null || item === undefined) return;
+                const key = String(item.index || item.position || item.key || item.variable || item.placeholder || index + 1).replace(/\D/g, '');
+                if (!key) return;
+                const value = extractVariableValue(item);
+                if (value) variablesData[key] = value;
+            });
+            return;
+        }
+
+        if (typeof source === 'object') {
+            Object.entries(source).forEach(([rawKey, rawValue]) => {
+                const key = String(rawKey).replace(/\D/g, '');
+                if (!key) return;
+                const value = extractVariableValue(rawValue);
+                if (value) variablesData[key] = value;
+            });
+        }
+    });
+
+    const sortedKeys = Object.keys(variablesData).sort((a, b) => Number(a) - Number(b));
+    return sortedKeys.map(key => variablesData[key]);
+};
+
 const getActiveDoctorId = (req) => {
     const authUser = req.user || req.auth?.user || req.session?.user || {};
     return (
@@ -199,7 +255,6 @@ exports.submitTemplate = async (req, res) => {
             templateText,
             category: incomingCategory,
             language,
-            variablesData: incomingVariablesData,
             headerType,
             headerText,
             footerText,
@@ -232,24 +287,24 @@ exports.submitTemplate = async (req, res) => {
             return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
         }
 
-        console.log("Extracted variablesData payload:", JSON.stringify(req.body.variablesData));
+        console.log("Extracted variablesData payload:", JSON.stringify(req.body.variablesData || req.body.variableMapping || req.body.variableMappings || req.body.variables || {}));
 
         let components = [];
 
         if (name === 'yogi_auth_otp') {
             components = [
                 {
-                    type: 'BODY',
+                    type: 'body',
                     text: "{{1}} is your verification code. For your security, do not share this code.",
                     example: {
                         body_text: [["123456"]]
                     }
                 },
                 {
-                    type: 'BUTTONS',
+                    type: 'buttons',
                     buttons: [
                         {
-                            type: 'OTP',
+                            type: 'otp',
                             otp_type: 'COPY_CODE',
                             text: 'Copy Code',
                             example: ["123456"]
@@ -258,13 +313,11 @@ exports.submitTemplate = async (req, res) => {
                 }
             ];
         } else {
-            const variablesData = req.body.variablesData || {};
-            const sortedKeys = Object.keys(variablesData).sort((a, b) => Number(a) - Number(b));
-            const samplesArray = sortedKeys.map(key => variablesData[key]);
+            const samplesArray = collectTemplateVariables(req.body);
             
             components = [
                 {
-                    type: 'BODY',
+                    type: 'body',
                     text: req.body.templateText
                 }
             ];
@@ -277,24 +330,24 @@ exports.submitTemplate = async (req, res) => {
 
             if (headerType && headerType !== 'NONE') {
                 components.unshift({
-                    type: 'HEADER',
-                    format: headerType,
+                    type: 'header',
+                    format: String(headerType).toLowerCase(),
                     ...(headerType === 'TEXT' && { text: headerText })
                 });
             }
 
             if (footerText) {
                 components.push({
-                    type: 'FOOTER',
+                    type: 'footer',
                     text: footerText
                 });
             }
 
             if (buttons && buttons.length > 0) {
                 components.push({
-                    type: 'BUTTONS',
+                    type: 'buttons',
                     buttons: buttons.map(btn => ({
-                        type: btn.type === 'URL' ? 'URL' : 'PHONE_NUMBER',
+                        type: btn.type === 'URL' ? 'url' : 'phone_number',
                         text: btn.text,
                         ...(btn.type === 'URL' && { url: btn.url }),
                         ...(btn.type === 'PHONE_NUMBER' && { phone_number: btn.phone_number })
@@ -309,6 +362,7 @@ exports.submitTemplate = async (req, res) => {
             name,
             language,
             category,
+            parameter_format: 'positional',
             components
         };
 
@@ -342,7 +396,7 @@ exports.submitTemplate = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Meta Absolute Error Payload:", JSON.stringify(error.response?.data || error.message));
+        console.error("Meta Absolute Array Failure:", JSON.stringify(error.response?.data || error.message));
         res.status(500).json({
             success: false,
             message: 'Template submission failed',
