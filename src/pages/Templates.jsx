@@ -296,16 +296,12 @@ const Templates = () => {
 
   const renderWhatsAppLook = (text) => {
     if (!text) return '';
-    // Healthcare-specific token mapping for placeholder replacement
-    const tokenMap = {
-      '1': '[Patient Name]',
-      '2': '[Appt Time]',
-      '3': '[Clinic Name]'
-    };
-    // Replace healthcare placeholders with readable token names
     return text.replace(/\{\{(\d+)\}\}/g, (match, num) => {
-      const tokenName = tokenMap[num] || `[Param ${num}]`;
-      return `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">${tokenName}</span>`;
+      const sampleValue = variableSamples?.[num];
+      if (sampleValue && String(sampleValue).trim() !== '') {
+        return `<span class="text-blue-600 font-bold">${sampleValue}</span>`;
+      }
+      return `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">{{${num}}}</span>`;
     })
                .replace(/\*(.*?)\*/g, '<strong>$1</strong>') // Bold
                .replace(/_(.*?)_/g, '<em>$1</em>') // Italic

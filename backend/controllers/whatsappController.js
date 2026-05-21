@@ -195,12 +195,14 @@ exports.syncTemplateStatus = async (req, res) => {
 exports.submitTemplate = async (req, res) => {
     try {
         const {
-            name,
-            category,
+            templateName,
+            templateText,
+            category: incomingCategory,
             language,
-            body,
-            header,
-            footer,
+            variablesData: incomingVariablesData,
+            headerType,
+            headerText,
+            footerText,
             buttons,
             messaging_product: messagingProduct = 'whatsapp'
         } = req.body;
@@ -210,8 +212,12 @@ exports.submitTemplate = async (req, res) => {
             return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         }
 
+        const name = (templateName || '').trim();
+        const body = templateText;
+        let category = name === 'yogi_auth_otp' ? 'AUTHENTICATION' : incomingCategory;
+
         if (!name || !category || !language || !body) {
-            return res.status(400).json({ success: false, message: 'Missing required fields: name, category, language, body' });
+            return res.status(400).json({ success: false, message: 'Missing required fields: templateName, category, language, templateText' });
         }
 
         const credentials = await getDoctorMetaCredentials(doctorId);
@@ -226,12 +232,11 @@ exports.submitTemplate = async (req, res) => {
             return res.status(500).json({ success: false, message: 'WhatsApp API authorization is not configured.' });
         }
 
-        console.log("Incoming Payload from Frontend:", JSON.stringify(req.body));
+        console.log("Extracted variablesData payload:", JSON.stringify(req.body.variablesData));
 
         let components = [];
 
-        // 3. MAINTAIN SYSTEM AUTH FALLBACK
-        if (name.trim() === 'yogi_auth_otp') {
+        if (name === 'yogi_auth_otp') {
             components = [
                 {
                     type: 'BODY',
@@ -252,39 +257,36 @@ exports.submitTemplate = async (req, res) => {
                     ]
                 }
             ];
-            category = 'AUTHENTICATION';
         } else {
-            // 2. REFIX THE BACKEND COMPLIANCE ENGINE
-            const { variablesData } = req.body;
-            const sortedKeys = Object.keys(variablesData || {}).sort((a, b) => Number(a) - Number(b));
+            const variablesData = req.body.variablesData || {};
+            const sortedKeys = Object.keys(variablesData).sort((a, b) => Number(a) - Number(b));
             const samplesArray = sortedKeys.map(key => variablesData[key]);
             
-            const bodyComponent = {
-                type: 'BODY',
-                text: body
-            };
+            components = [
+                {
+                    type: 'BODY',
+                    text: req.body.templateText
+                }
+            ];
 
             if (samplesArray.length > 0) {
-                bodyComponent.example = {
+                components[0].example = {
                     body_text: [samplesArray]
                 };
             }
 
-            components.push(bodyComponent);
-
-            if (header) {
+            if (headerType && headerType !== 'NONE') {
                 components.unshift({
                     type: 'HEADER',
-                    format: header.type,
-                    ...(header.type === 'TEXT' && { text: header.text }),
-                    ...(header.type !== 'TEXT' && { example: { header_handle: [header.link] } })
+                    format: headerType,
+                    ...(headerType === 'TEXT' && { text: headerText })
                 });
             }
 
-            if (footer && footer.text) {
+            if (footerText) {
                 components.push({
                     type: 'FOOTER',
-                    text: footer.text
+                    text: footerText
                 });
             }
 
@@ -303,10 +305,10 @@ exports.submitTemplate = async (req, res) => {
 
         const url = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
         const data = {
-            messaging_product: messagingProduct || 'whatsapp',
-            name: name.trim(),
+            messaging_product: messagingProduct,
+            name,
             language,
-            category: name.trim() === 'yogi_auth_otp' ? 'AUTHENTICATION' : category,
+            category,
             components
         };
 
@@ -322,11 +324,11 @@ exports.submitTemplate = async (req, res) => {
         // Save to DB
         const Template = require('../models/Template');
         const newTemplate = await Template.create({
-            name: name.trim(),
-            bodyText: body,
-            headerType: header ? (header.type === 'TEXT' ? 'TEXT' : header.type) : 'NONE',
-            headerText: header && header.type === 'TEXT' ? header.text : '',
-            category: name.trim() === 'yogi_auth_otp' ? 'AUTHENTICATION' : category,
+            name,
+            bodyText: templateText,
+            headerType: headerType || 'NONE',
+            headerText: headerText || '',
+            category,
             status: 'PENDING_REVIEW',
             metaTemplateId: response.data.id || response.data.message_template_id,
             businessId: doctorId
@@ -340,8 +342,7 @@ exports.submitTemplate = async (req, res) => {
         });
 
     } catch (error) {
-        // 3. CAPTURE META ERROR RESPONSE
-        console.error("Meta API Absolute Rejection Error:", JSON.stringify(error.response?.data || error.message));
+        console.error("Meta Absolute Error Payload:", JSON.stringify(error.response?.data || error.message));
         res.status(500).json({
             success: false,
             message: 'Template submission failed',
