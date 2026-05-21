@@ -42,6 +42,7 @@ const Templates = () => {
   const [error, setError] = useState('');
   const [doctorProfile, setDoctorProfile] = useState(null);
   const [pendingHeaderType, setPendingHeaderType] = useState('NONE');
+  const [variableSamples, setVariableSamples] = useState({});
   const [customVariables, setCustomVariables] = useState([]);
   const [showCustomVariableInput, setShowCustomVariableInput] = useState(false);
   const [customVariableLabel, setCustomVariableLabel] = useState('');
@@ -87,6 +88,21 @@ const Templates = () => {
     };
     fetchLimits();
   }, []);
+
+  // 1. IMPLEMENT DYNAMIC VARIABLE DETECTOR
+  useEffect(() => {
+    const currentBody = template[activeBodyLang] || '';
+    const matches = [...currentBody.matchAll(/\{\{(\d+)\}\}/g)];
+    const detectedVars = [...new Set(matches.map(m => m[1]))].sort((a, b) => Number(a) - Number(b));
+    
+    setVariableSamples(prev => {
+      const next = {};
+      detectedVars.forEach(v => {
+        next[v] = prev[v] || '';
+      });
+      return next;
+    });
+  }, [template, activeBodyLang]);
 
   const categories = [
     { id: 'MARKETING', label: 'Marketing' },
@@ -298,6 +314,11 @@ const Templates = () => {
                .replace(/\n/g, '<br/>'); // Handle newlines
   };
 
+  const allSamplesProvided = useMemo(() => {
+    const keys = Object.keys(variableSamples);
+    return keys.length === 0 || keys.every(key => String(variableSamples[key]).trim() !== '');
+  }, [variableSamples]);
+
   const handleSubmit = async () => {
     const formattedTemplateName = formatTemplateName(template.name);
 
@@ -316,6 +337,11 @@ const Templates = () => {
     if (!bodyToSubmit) {
       setError('At least one language body text must be provided.');
       return;
+    }
+
+    if (!allSamplesProvided) {
+        setError('All variable sample values are mandatory for Meta approval.');
+        return;
     }
 
     setSaving(true);
@@ -369,7 +395,8 @@ const Templates = () => {
         headerText: template.headerText.trim(),
         footerText: template.footerText.trim(),
         buttons: buttonPayload,
-        bodyVariableParameters,
+        variablesData: variableSamples,
+        bodyVariableParameters: bodyVariableParameters,
         customVariables: bodyVariableParameters
       });
 
@@ -394,7 +421,7 @@ const Templates = () => {
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create WhatsApp Template</h1>
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
-          <button onClick={handleSubmit} disabled={saving || isProfileLoading || !metaCredentials.whatsapp_access_token} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
+          <button onClick={handleSubmit} disabled={saving || isProfileLoading || !metaCredentials.whatsapp_access_token || !allSamplesProvided} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
             {isProfileLoading ? (
               <>
                 <Loader size={18} className="animate-spin" />
@@ -541,6 +568,27 @@ const Templates = () => {
                       </div>
                     </div>
                     <textarea ref={bodyTextareaRef} className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder={`Write your message in ${activeBodyLang}...`} value={template[activeBodyLang]} onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })} />
+                    
+                    {/* DYNAMIC SAMPLE INPUTS */}
+                    {Object.keys(variableSamples).length > 0 && (
+                      <div className="mt-4 p-5 bg-orange-50/40 rounded-2xl border border-orange-100 space-y-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Contextual Sample Values (Required by Meta)</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {Object.keys(variableSamples).sort((a, b) => Number(a) - Number(b)).map(v => (
+                            <div key={v} className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-500 uppercase">Sample value for variable {"{{"}{v}{"}}"}</label>
+                              <input 
+                                type="text" 
+                                className="w-full px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:ring-2 focus:ring-orange-200 outline-none transition-all"
+                                value={variableSamples[v]}
+                                onChange={(e) => setVariableSamples(prev => ({ ...prev, [v]: e.target.value }))}
+                                placeholder="e.g. Dr. Avinash or 10:30 AM"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -693,6 +741,3 @@ const Templates = () => {
 };
 
 export default Templates;
-
-
-

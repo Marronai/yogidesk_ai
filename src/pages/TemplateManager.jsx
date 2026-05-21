@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, ChevronDown, Sparkles, Layers } from 'lucide-react';
+import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, ChevronDown, Sparkles, Layers, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
 import { getTemplatesBySpecialty, calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from "../constants/templateLibrary";
@@ -11,6 +11,7 @@ const TemplateManager = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncingStatuses, setIsSyncingStatuses] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [planTier, setPlanTier] = useState('Starter Clinic');
@@ -116,6 +117,22 @@ const TemplateManager = () => {
     }
   };
 
+  const handleSyncStatuses = async () => {
+    setIsSyncingStatuses(true);
+    try {
+      const response = await api.post('/whatsapp/templates/sync');
+      if (response.data.success) {
+        const userId = localStorage.getItem('user_id');
+        const refreshResponse = await api.get(templateApiPath, { params: { userId } });
+        setTemplates(Array.isArray(refreshResponse.data) ? refreshResponse.data : []);
+      }
+    } catch (err) {
+      console.error('Manual sync failed:', err);
+    } finally {
+      setIsSyncingStatuses(false);
+    }
+  };
+
   const templateRows = Array.isArray(filteredTemplates) ? filteredTemplates : [];
   const parseButtons = (buttons) => {
     if (Array.isArray(buttons)) return buttons;
@@ -180,16 +197,27 @@ const TemplateManager = () => {
         </button>
       </div>
 
-      <div className="flex space-x-6 border-b border-gray-200 mb-6">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`pb-3 text-sm font-black transition-all ${activeTab === tab.id ? 'text-orange-600 border-b-2 border-orange-600' : 'text-slate-400 hover:text-slate-700'}`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-200 mb-6 gap-4">
+        <div className="flex space-x-6 overflow-x-auto">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`pb-3 text-sm font-black whitespace-nowrap transition-all ${activeTab === tab.id ? 'text-orange-600 border-b-2 border-orange-600' : 'text-slate-400 hover:text-slate-700'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        
+        <button 
+          onClick={handleSyncStatuses}
+          disabled={isSyncingStatuses}
+          className="flex items-center gap-2 px-4 py-2 sm:mb-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:border-orange-200 hover:text-orange-600 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={isSyncingStatuses ? 'animate-spin' : ''} />
+          {isSyncingStatuses ? 'Syncing...' : 'Sync Status'}
+        </button>
       </div>
 
       {/* Security Tip */}

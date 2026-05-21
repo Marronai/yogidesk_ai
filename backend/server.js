@@ -1082,9 +1082,57 @@ const processCampaignQueue = async () => {
 
 setInterval(processCampaignQueue, 10000);
 
+// ====== AUTOMATIC META STATUS SYNC POLLING (1 MINUTE) ======
+setInterval(async () => {
+    if (!supabase) return;
+    try {
+        // Fetch all templates currently in PENDING state
+        const { data: pendingTemplates } = await supabase
+            .from('whatsapp_templates')
+            .select('user_id, template_name, id, status')
+            .or('status.eq.PENDING,status.eq.PENDING_REVIEW');
+
+        if (!pendingTemplates?.length) return;
+
+        // Group by user to batch credential lookups
+        const userGroups = pendingTemplates.reduce((acc, t) => {
+            acc[t.user_id] = acc[t.user_id] || [];
+            acc[t.user_id].push(t);
+            return acc;
+        }, {});
+
+        for (const userId in userGroups) {
+            const { data: profile } = await supabase
+                .from('doctor_profiles')
+                .select('whatsapp_access_token, whatsapp_business_account_id')
+                .eq('id', userId)
+                .maybeSingle();
+
+            if (!profile?.whatsapp_access_token || !profile?.whatsapp_business_account_id) continue;
+
+            for (const t of userGroups[userId]) {
+                try {
+                    const url = `https://graph.facebook.com/v21.0/${profile.whatsapp_business_account_id}/message_templates?name=${t.template_name}`;
+                    const res = await require('axios').get(url, {
+                        headers: { Authorization: `Bearer ${profile.whatsapp_access_token}` }
+                    });
+                    const metaData = res.data.data?.[0];
+                    if (metaData) {
+                        const trueStatus = metaData.status.toUpperCase() === 'PENDING_REVIEW' ? 'PENDING' : metaData.status.toUpperCase();
+                        if (trueStatus !== t.status) {
+                            await supabase.from('whatsapp_templates').update({ status: trueStatus }).eq('id', t.id);
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+    } catch (err) {
+        console.error('Background Sync Polling Error:', err.message);
+    }
+}, 60000);
+
 // ====== PORT LISTEN ENGINE ======
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Yogi Desk API running safely on port ${PORT}`);
 });
-

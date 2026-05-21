@@ -126,6 +126,71 @@ exports.sendTestMessage = async (req, res) => {
     }
 };
 
+// 3. Sync Template Status Pipeline
+exports.syncTemplateStatus = async (req, res) => {
+    try {
+        const doctorId = getActiveDoctorId(req);
+        if (!doctorId) {
+            return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        }
+
+        // Fetch all stored templates for this doctor
+        const { data: templates, error: dbError } = await supabase
+            .from('whatsapp_templates')
+            .select('*')
+            .eq('user_id', doctorId);
+
+        if (dbError) throw dbError;
+
+        // Fetch credentials from doctor profile
+        const { data: profile } = await supabase
+            .from('doctor_profiles')
+            .select('whatsapp_access_token, whatsapp_business_account_id')
+            .eq('id', doctorId)
+            .maybeSingle();
+
+        if (!profile?.whatsapp_business_account_id || !profile?.whatsapp_access_token) {
+            return res.status(400).json({ success: false, message: "Meta configuration missing." });
+        }
+
+        const updatedTemplates = [];
+
+        for (const template of templates) {
+            try {
+                const url = `https://graph.facebook.com/v21.0/${profile.whatsapp_business_account_id}/message_templates`;
+                const response = await axios.get(url, {
+                    params: {
+                        name: template.template_name,
+                        access_token: profile.whatsapp_access_token
+                    }
+                });
+
+                const metaTemplate = response.data.data?.[0];
+                if (metaTemplate) {
+                    const rawStatus = metaTemplate.status.toUpperCase();
+                    const trueStatus = rawStatus === 'PENDING_REVIEW' ? 'PENDING' : rawStatus;
+                    
+                    if (trueStatus !== template.status) {
+                        await supabase
+                            .from('whatsapp_templates')
+                            .update({ status: trueStatus })
+                            .eq('id', template.id);
+                        
+                        updatedTemplates.push({ id: template.id, name: template.template_name, status: trueStatus });
+                    }
+                }
+            } catch (err) {
+                console.error(`Sync failure for ${template.template_name}:`, err.message);
+            }
+        }
+
+        return res.status(200).json({ success: true, updatedTemplates });
+    } catch (error) {
+        console.error("Manual Sync Pipeline Error:", error.message);
+        res.status(500).json({ success: false, message: 'Sync pipeline failed' });
+    }
+};
+
 // 2. Submit Template Function
 exports.submitTemplate = async (req, res) => {
     try {
@@ -185,20 +250,21 @@ exports.submitTemplate = async (req, res) => {
                     ]
                 }
             ];
+            category = 'AUTHENTICATION';
         } else {
-            // 1. REMOVE HARDCODED LIMITS & PARSE ALL VARIABLES DYNAMICALLY
-            const variableMatches = body.match(/{{\d+}}/g) || [];
-            const uniqueVariables = [...new Set(variableMatches)];
+            // 2. MAP CONTEXTUAL SAMPLES TO META PAYLOAD
+            const { variablesData } = req.body;
+            const variableIndices = Object.keys(variablesData || {}).sort((a, b) => Number(a) - Number(b));
             
             const bodyComponent = {
                 type: 'BODY',
                 text: body
             };
 
-            // 2. BUILD AUTOMATED PLACEHOLDER ARRAYS FOR META
-            if (uniqueVariables.length > 0) {
+            if (variableIndices.length > 0) {
+                const samplesArray = variableIndices.map(key => variablesData[key]);
                 bodyComponent.example = {
-                    body_text: [uniqueVariables.map((_, i) => `Sample Text ${i + 1}`)]
+                    body_text: [samplesArray]
                 };
             }
 
