@@ -94,7 +94,7 @@ const SignUp = () => {
     });
   };
 
-  const triggerWelcomeEmail = async (email = formData.email, userId = pendingUser?.id) => {
+  const triggerWelcomeEmail = (email = formData.email, userId = pendingUser?.id) => {
     const payload = {
       email: email.trim().toLowerCase(),
       name: formData.name.trim(),
@@ -103,7 +103,19 @@ const SignUp = () => {
       template: 'welcome'
     };
 
-    await api.post('/auth/dispatch-welcome-email', payload);
+    const body = JSON.stringify(payload);
+    const url = `${api.defaults.baseURL}/auth/dispatch-welcome-email`;
+
+    if (navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) {
+      return;
+    }
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(() => {});
   };
 
   const startSignupPhoneVerification = async (user) => {
@@ -230,7 +242,7 @@ const SignUp = () => {
 
         await phoneConfirmation.confirm(code);
         await ensureSignupWallet(pendingUser?.id);
-        await triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email, pendingUser?.id);
+        triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email, pendingUser?.id);
 
         if (pendingUser?.id) {
           handleAuthSuccess(pendingUser);

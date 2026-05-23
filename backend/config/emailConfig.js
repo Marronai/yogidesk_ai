@@ -1,3 +1,4 @@
+const axios = require('axios');
 const nodemailer = require('nodemailer');
 
 const smtpHost = process.env.SMTP_HOST;
@@ -5,6 +6,8 @@ const smtpPort = Number(process.env.SMTP_PORT);
 const smtpUser = process.env.SMTP_USER;
 const smtpPass = process.env.SMTP_PASS;
 const emailFrom = process.env.EMAIL_FROM || 'welcome@yogidesk.com';
+const brevoApiKey = process.env.BREVO_API_KEY;
+const brevoEmailApiUrl = 'https://api.brevo.com/v3/smtp/email';
 
 const missingEmailVars = [];
 if (!smtpHost) missingEmailVars.push('SMTP_HOST');
@@ -12,9 +15,9 @@ if (!process.env.SMTP_PORT) missingEmailVars.push('SMTP_PORT');
 if (!smtpUser) missingEmailVars.push('SMTP_USER');
 if (!smtpPass) missingEmailVars.push('SMTP_PASS');
 
-if (missingEmailVars.length > 0) {
+if (!brevoApiKey && missingEmailVars.length > 0) {
   console.error(`❌ Missing email configuration variables in .env: ${missingEmailVars.join(', ')}.`);
-  console.error('   Email sending is disabled until these values are defined.');
+  console.error('   Email sending is disabled until these values are defined or BREVO_API_KEY is added.');
 }
 
 const transporter = missingEmailVars.length === 0
@@ -22,6 +25,9 @@ const transporter = missingEmailVars.length === 0
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 8000,
       auth: {
         user: smtpUser,
         pass: smtpPass
@@ -29,24 +35,91 @@ const transporter = missingEmailVars.length === 0
     })
   : null;
 
+const getBrevoSender = (senderType = 'system') => ({
+  name: 'Yogi Desk AI',
+  email: senderType === 'onboarding'
+    ? 'support@yogidesk-ai.com'
+    : 'no-reply@yogidesk-ai.com'
+});
+
+const sendViaBrevo = async ({ to, subject, html, senderType }) => {
+  if (!brevoApiKey) return false;
+
+  await axios.post(brevoEmailApiUrl, {
+    sender: getBrevoSender(senderType),
+    to: [{ email: to }],
+    subject,
+    htmlContent: html
+  }, {
+    headers: {
+      'api-key': brevoApiKey,
+      'Content-Type': 'application/json'
+    },
+    timeout: 6000
+  });
+
+  console.log(`Email sent via Brevo to ${to}`);
+  return true;
+};
+
+const sendViaSmtp = async ({ to, subject, html }) => {
+  if (!transporter || !emailFrom) return false;
+
+  const info = await transporter.sendMail({
+    from: emailFrom,
+    to,
+    subject,
+    html
+  });
+
+  console.log('Email sent via SMTP:', info.response);
+  return true;
+};
+
+const deliverMail = async ({ to, subject, html, senderType = 'system', purpose = 'email' }) => {
+  if (!to) {
+    console.error(`Failed to send ${purpose}: recipient email is missing.`);
+    return false;
+  }
+
+  try {
+    if (brevoApiKey) {
+      return await sendViaBrevo({ to, subject, html, senderType });
+    }
+
+    if (transporter) {
+      return await sendViaSmtp({ to, subject, html });
+    }
+
+    console.error(`Email sending is not configured for ${purpose}. Add BREVO_API_KEY or SMTP settings.`);
+    return false;
+  } catch (primaryError) {
+    console.error(`Primary ${purpose} email send failed:`, primaryError.response?.data || primaryError.message);
+
+    if (brevoApiKey && transporter) {
+      try {
+        return await sendViaSmtp({ to, subject, html });
+      } catch (smtpError) {
+        console.error(`SMTP fallback for ${purpose} failed:`, smtpError.message);
+      }
+    }
+
+    return false;
+  }
+};
+
 // 🛠️ Send OTP Email Function
 const sendOTP = async (email, userName, otp) => {
   try {
-    if (!transporter || !emailFrom) {
-      console.error('❌ Nodemailer is not configured for OTP emails. Missing SMTP settings or EMAIL_FROM.');
-      return false;
-    }
-
-    const mailOptions = {
-      from: emailFrom,
+    const sent = await deliverMail({
       to: email,
       subject: 'Your Yogi Desk AI OTP Code',
-      html: otpEmailTemplate(userName, otp)
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ OTP Email sent successfully:', info.response);
-    return true;
+      html: otpEmailTemplate(userName, otp),
+      senderType: 'system',
+      purpose: 'OTP'
+    });
+    if (sent) console.log('OTP email sent successfully');
+    return sent;
   } catch (error) {
     console.error('❌ Failed to send OTP email:', error.message);
     return false;
@@ -295,9 +368,9 @@ const welcomeEmailTemplate = (userName, businessName, email) => {
 
           <div class="detail-box">
             <p class="detail-title">What you get</p>
-            <p class="detail-line">� Prepaid wallet access with transparent message rates</p>
-            <p class="detail-line">• Admin access for your healthcare team</p>
-            <p class="detail-line">• Ready-made WhatsApp workflows and campaign tools</p>
+            <p class="detail-line">- Prepaid wallet access with transparent message rates</p>
+            <p class="detail-line">- Admin access for your healthcare team</p>
+            <p class="detail-line">- Ready-made WhatsApp workflows and campaign tools</p>
           </div>
 
           <a href="https://yogidesk-ai.com/dashboard" class="cta-button">Go to Dashboard</a>
@@ -320,21 +393,15 @@ const welcomeEmailTemplate = (userName, businessName, email) => {
 // 🛠️ Send Welcome Email Function
 const sendWelcomeEmail = async (email, userName, businessName) => {
   try {
-    if (!transporter) {
-      console.error('❌ Nodemailer is not configured for welcome emails.');
-      return false;
-    }
-
-    const mailOptions = {
-      from: emailFrom,
+    const sent = await deliverMail({
       to: email,
-      subject: '🎉 Welcome to Yogi Desk AI - Your Clinic Workspace Is Ready!',
-      html: welcomeEmailTemplate(userName, businessName, email)
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Welcome Email sent successfully:', info.response);
-    return true;
+      subject: 'Welcome to Yogi Desk AI - Your Clinic Workspace Is Ready!',
+      html: welcomeEmailTemplate(userName, businessName, email),
+      senderType: 'onboarding',
+      purpose: 'welcome'
+    });
+    if (sent) console.log('Welcome email sent successfully');
+    return sent;
   } catch (error) {
     console.error('❌ Failed to send welcome email:', error.message);
     return false;
@@ -471,21 +538,15 @@ const loginAlertTemplate = (userName, deviceInfo, ipAddress) => {
 
 const sendLoginAlert = async (email, userName, deviceInfo, ipAddress) => {
   try {
-    if (!transporter) {
-      console.error('❌ Nodemailer is not configured for login alerts.');
-      return false;
-    }
-
-    const mailOptions = {
-      from: emailFrom,
+    const sent = await deliverMail({
       to: email,
-      subject: '🔐 New Login Alert for Your Yogi Desk AI Account',
-      html: loginAlertTemplate(userName, deviceInfo, ipAddress)
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Login alert email sent successfully:', info.response);
-    return true;
+      subject: 'New Login Alert for Your Yogi Desk AI Account',
+      html: loginAlertTemplate(userName, deviceInfo, ipAddress),
+      senderType: 'system',
+      purpose: 'login alert'
+    });
+    if (sent) console.log('Login alert email sent successfully');
+    return sent;
   } catch (error) {
     console.error('❌ Failed to send login alert email:', error.message);
     return false;
@@ -494,6 +555,11 @@ const sendLoginAlert = async (email, userName, deviceInfo, ipAddress) => {
 
 // 🛠️ Verify Transporter Connection (Optional - for testing)
 const verifyConnection = async () => {
+  if (brevoApiKey) {
+    console.log('Brevo API key configured; transactional email will use Brevo HTTPS API.');
+    return true;
+  }
+
   if (!transporter) {
     console.error('❌ Nodemailer transporter unavailable: missing SMTP configuration.');
     return false;
@@ -510,6 +576,3 @@ const verifyConnection = async () => {
 };
 
 module.exports = { transporter, sendOTP, sendWelcomeEmail, sendLoginAlert, verifyConnection };
-
-
-

@@ -190,7 +190,7 @@ const Inbox = () => {
     try {
       const result = await supabase
         .from('inbox_messages')
-        .select('id, body, message_body, sender, is_private_note, created_at')
+        .select('id, body, created_at, sender')
         .eq('chat_id', chatId)
         .order('created_at', { ascending: true });
       if (result.error) throw result.error;
@@ -202,10 +202,11 @@ const Inbox = () => {
     setMessages(Array.isArray(data)
       ? data.map((item) => ({
         id: item.id,
-        text: item.body || item.message_body || '',
-        sender: item.sender || 'user',
-        type: item.is_private_note ? 'private' : 'public',
-        is_private_note: Boolean(item.is_private_note),
+        text: item.body || '',
+        sender: item.sender || 'user', // Fallback to map from the standard sender string context
+        from_me: item.sender === 'agent' || item.sender === 'doctor',
+        type: 'public',
+        is_private_note: false,
         time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
       }))
       : []);
@@ -237,6 +238,7 @@ const Inbox = () => {
       id: Date.now(),
       text,
       sender: 'agent',
+      from_me: true,
       type: isPrivateNote ? 'private' : 'public',
       is_private_note: isPrivateNote,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -451,9 +453,12 @@ const Inbox = () => {
                   No messages in this chat yet.
                 </div>
               )}
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.sender === 'agent' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                  <div className={`relative z-10 max-w-[70%] rounded-2xl p-3 shadow-sm ${msg.is_private_note || msg.type === 'private' ? 'rounded-br-none border-2 border-yellow-200 bg-yellow-50 text-yellow-900' : msg.sender === 'agent' ? 'rounded-br-none bg-[#D9FDD3] text-slate-800' : 'rounded-bl-none bg-white text-slate-800'}`}>
+              {messages.map((msg) => {
+                const isDoctorMessage = msg.sender === 'doctor' || msg.from_me === true;
+                
+                return (
+                <div key={msg.id} className={`flex ${isDoctorMessage ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
+                  <div className={`relative z-10 max-w-[70%] rounded-2xl p-3 shadow-sm ${msg.is_private_note || msg.type === 'private' ? 'rounded-br-none border-2 border-yellow-200 bg-yellow-50 text-yellow-900' : isDoctorMessage ? 'rounded-br-none bg-[#D9FDD3] text-slate-800' : 'rounded-bl-none bg-white text-slate-800'}`}>
                     {(msg.is_private_note || msg.type === 'private') && (
                       <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-yellow-600">
                         <Lock size={10} /> Private Note
@@ -462,11 +467,12 @@ const Inbox = () => {
                     <p className="text-[13.5px] font-medium leading-relaxed">{msg.text}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
-                      {msg.sender === 'agent' && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
+                      {isDoctorMessage && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {isGhostMode && (
