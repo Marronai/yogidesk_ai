@@ -74,11 +74,14 @@ const Inbox = () => {
       try {
         const { data, error } = await supabase
           .from('inbox_chats')
-          .select('id, name, last_message, updated_at, phone')
-          .eq('user_id', user.id)
+          .select('id, last_message, updated_at, name, patient_name')
           .order('updated_at', { ascending: false });
         if (error) throw error;
-        chatData = data || [];
+        chatData = (data || []).filter((chat) => (
+          !chat.user_id && !chat.admin_id && !chat.doctor_id
+        ) || (
+          String(chat.user_id || chat.admin_id || chat.doctor_id) === String(user.id)
+        ));
       } catch (error) {
         logInboxError(error);
       }
@@ -94,17 +97,20 @@ const Inbox = () => {
         : [fallbackAgent];
 
       const mappedChats = Array.isArray(chatData)
-        ? chatData.map((chat) => ({
-          id: chat.id,
-          name: chat.name || chat.patient_name || 'Unknown Patient',
-          phone: chat.phone || '',
-          lastMsg: chat.last_message || '',
-          time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          unread: Number(chat.unread_count || 0),
-          status: chat.status || 'Offline',
-          assigned_agent_id: chat.assigned_agent_id,
-          metadata: chat.metadata || {},
-        }))
+        ? chatData.map((chat) => {
+          const displayName = chat.name || chat.patient_name || 'Unknown Patient';
+          return {
+            id: chat.id,
+            name: displayName,
+            phone: chat.phone || '',
+            lastMsg: chat.last_message || '',
+            time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            unread: Number(chat.unread_count || 0),
+            status: chat.status || 'Offline',
+            assigned_agent_id: chat.assigned_agent_id,
+            metadata: chat.metadata || {},
+          };
+        })
         : [];
 
       setAgents(mappedAgents);

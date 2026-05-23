@@ -862,7 +862,8 @@ app.post('/api/campaigns/schedule', async (req, res) => {
             scheduledFor: new Date(baseTime + index * 3 * 60 * 1000).toISOString()
         }));
         const fallbackRows = queueRows.map((row) => ({
-            user_id: row.user_id,
+            user_id: row.user_id || row.doctor_id,
+            doctor_id: row.doctor_id || row.user_id,
             template_name: row.template_name,
             recipient_name: row.recipient_name,
             recipient_phone: row.recipient_phone,

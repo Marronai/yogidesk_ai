@@ -24,10 +24,11 @@ const isSchemaCacheError = (error) => {
     );
 };
 
-const buildCampaignQueuePayload = ({ userId, template = {}, recipient = {}, scheduledFor }) => {
-    const doctorId = userId || template.user_id || template.doctor_id || null;
+const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
+    const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
+    const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
     return {
-        user_id: doctorId,
+        user_id: resolvedUserId,
         doctor_id: doctorId,
         template_id: template.id || null,
         template_name: template.template_name || template.name || 'WhatsApp Template',
@@ -52,6 +53,7 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
         if (error) throw error;
         return { inserted: true, fallbackRequired: false };
     } catch (error) {
+        console.error("Campaign Queue Insert Error:", error.message);
         if (isSchemaCacheError(error)) {
             console.error("Supabase Cached Schema Crash:", error.message);
             try {
