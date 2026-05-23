@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check,
   CheckCheck,
@@ -15,6 +15,7 @@ import {
   Smile,
   User,
   UserPlus,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 
@@ -41,16 +42,121 @@ const Inbox = () => {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
+  const [reloadToken, setReloadToken] = useState(0);
+  const [tagFilter, setTagFilter] = useState('ALL');
+  const [customTagInput, setCustomTagInput] = useState('');
+  const [showPhone, setShowPhone] = useState(false);
+  const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
 
   const selectedTags = useMemo(() => selectedChat?.metadata?.tags || [], [selectedChat]);
+  const allTags = useMemo(() => {
+    const tags = new Set(tagOptions);
+    conversations.forEach((chat) => {
+      (chat.metadata?.tags || []).forEach((tag) => tags.add(tag));
+    });
+    return Array.from(tags);
+  }, [conversations]);
+  const visibleConversations = useMemo(() => (
+    tagFilter === 'ALL'
+      ? conversations
+      : conversations.filter((chat) => (chat.metadata?.tags || []).includes(tagFilter))
+  ), [conversations, tagFilter]);
 
   const getUser = async () => {
     const { data } = await supabase.auth.getUser();
     return data?.user || { id: localStorage.getItem('user_id') };
   };
 
+  const loadInbox = useCallback(async () => {
+    const user = await getUser();
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    let teamData = [];
+    let chatData = [];
+
+    try {
+      const { data, error } = await supabase
+        .from('team_members')
+        .select('id, name, email, status')
+        .eq('admin_id', user.id)
+        .in('status', ['ACTIVE', 'INVITED']);
+      if (error) throw error;
+      teamData = data || [];
+    } catch (error) {
+      logInboxError(error);
+    }
+
+    try {
+      let result = await supabase
+        .from('inbox_chats')
+        .select('id, last_message, updated_at, name, patient_name, phone, status, scheduled_at, assigned_agent_id, metadata, unread_count')
+        .order('updated_at', { ascending: false });
+
+      if (result.error) {
+        const safeResult = await supabase
+          .from('inbox_chats')
+          .select('id, last_message, updated_at, name, patient_name, status, scheduled_at')
+          .order('updated_at', { ascending: false });
+        result = safeResult;
+      }
+
+      if (result.error) throw result.error;
+      chatData = result.data || [];
+    } catch (error) {
+      logInboxError(error);
+    }
+
+    const mappedAgents = Array.isArray(teamData) && teamData.length
+      ? teamData.map((agent) => ({
+        id: agent.id,
+        name: agent.name || agent.email,
+        role: 'STAFF',
+      }))
+      : [fallbackAgent];
+
+    const mappedChats = Array.isArray(chatData)
+      ? chatData.map((chat) => {
+        const displayName = chat.name || chat.patient_name || 'Unknown Patient';
+        return {
+          id: chat.id,
+          name: displayName,
+          phone: chat.phone || '',
+          lastMsg: chat.last_message || '',
+          time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          unread: Number(chat.unread_count || 0),
+          status: chat.status || 'Offline',
+          scheduled_at: chat.scheduled_at || null,
+          assigned_agent_id: chat.assigned_agent_id,
+          metadata: chat.metadata || {},
+        };
+      })
+      : [];
+
+    setAgents(mappedAgents);
+    setActiveAgent(mappedAgents[0]);
+    setConversations(mappedChats);
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      let shouldRefresh = false;
+      setConversations((prev) => prev.map((chat) => {
+        if (String(chat.status || '').toUpperCase() !== 'QUEUED') return chat;
+        const target = new Date(chat.scheduled_at || '').getTime();
+        if (Number.isFinite(target) && target <= current) {
+          shouldRefresh = true;
+          return { ...chat, status: 'SENT', lastMsg: 'Sent' };
+        }
+        return chat;
+      }));
+      if (shouldRefresh) window.setTimeout(() => setReloadToken((value) => value + 1), 0);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -74,91 +180,8 @@ const Inbox = () => {
   };
 
   useEffect(() => {
-    let active = true;
-
-    const loadInbox = async () => {
-      const user = await getUser();
-      if (!user?.id) {
-        if (active) setLoading(false);
-        return;
-      }
-
-      let teamData = [];
-      let chatData = [];
-
-      try {
-        const { data, error } = await supabase
-          .from('team_members')
-          .select('id, name, email, status')
-          .eq('admin_id', user.id)
-          .in('status', ['ACTIVE', 'INVITED']);
-        if (error) throw error;
-        teamData = data || [];
-      } catch (error) {
-        logInboxError(error);
-      }
-
-      try {
-        let result = await supabase
-          .from('inbox_chats')
-          .select('id, last_message, updated_at, name, patient_name, phone, status, scheduled_at')
-          .order('updated_at', { ascending: false });
-
-        if (result.error) {
-          const safeResult = await supabase
-            .from('inbox_chats')
-            .select('id, last_message, updated_at, name, patient_name')
-            .order('updated_at', { ascending: false });
-          result = safeResult;
-        }
-
-        if (result.error) throw result.error;
-        chatData = (result.data || []).filter((chat) => (
-          !chat.user_id && !chat.admin_id && !chat.doctor_id
-        ) || (
-          String(chat.user_id || chat.admin_id || chat.doctor_id) === String(user.id)
-        ));
-      } catch (error) {
-        logInboxError(error);
-      }
-
-      if (!active) return;
-
-      const mappedAgents = Array.isArray(teamData) && teamData.length
-        ? teamData.map((agent) => ({
-          id: agent.id,
-          name: agent.name || agent.email,
-          role: 'STAFF',
-        }))
-        : [fallbackAgent];
-
-      const mappedChats = Array.isArray(chatData)
-        ? chatData.map((chat) => {
-          const displayName = chat.name || chat.patient_name || 'Unknown Patient';
-          return {
-            id: chat.id,
-            name: displayName,
-            phone: chat.phone || '',
-            lastMsg: chat.last_message || '',
-            time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-            unread: Number(chat.unread_count || 0),
-            status: chat.status || 'Offline',
-            scheduled_at: chat.scheduled_at || null,
-            assigned_agent_id: chat.assigned_agent_id,
-            metadata: chat.metadata || {},
-          };
-        })
-        : [];
-
-      setAgents(mappedAgents);
-      setActiveAgent(mappedAgents[0]);
-      setConversations(mappedChats);
-      setLoading(false);
-    };
-
     loadInbox();
-    return () => { active = false; };
-  }, []);
+  }, [loadInbox, reloadToken]);
 
   const loadMessages = async (chatId) => {
     let data = [];
@@ -246,12 +269,49 @@ const Inbox = () => {
     }
   };
 
+  const addCustomTag = () => {
+    const tag = customTagInput.trim();
+    if (!tag) return;
+    appendTag(tag.startsWith('#') ? tag : `#${tag}`);
+    setCustomTagInput('');
+  };
+
+  const loadChatBackground = (chatId) => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(`chat_bg_${chatId}`) || 'null');
+      setChatBg(stored || { type: 'color', value: '#E5DDD5' });
+    } catch {
+      setChatBg({ type: 'color', value: '#E5DDD5' });
+    }
+  };
+
+  const saveChatBackground = (nextBg) => {
+    if (!selectedChat?.id) return;
+    setChatBg(nextBg);
+    localStorage.setItem(`chat_bg_${selectedChat.id}`, JSON.stringify(nextBg));
+  };
+
+  const handleBackgroundUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => saveChatBackground({ type: 'image', value: reader.result });
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
   const openChat = (chat) => {
     setSelectedChat(chat);
+    setShowPhone(false);
     const agent = agents.find((item) => String(item.id) === String(chat.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
+    loadChatBackground(chat.id);
     loadMessages(chat.id);
   };
+
+  const chatViewportStyle = chatBg.type === 'image'
+    ? { backgroundImage: `url(${chatBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : { backgroundColor: chatBg.value || '#E5DDD5' };
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F0F2F5] font-sans">
@@ -268,6 +328,14 @@ const Inbox = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input type="text" placeholder="Search chats..." className="w-full rounded-xl border border-slate-100 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all focus:bg-white" />
           </div>
+          <select
+            value={tagFilter}
+            onChange={(event) => setTagFilter(event.target.value)}
+            className="mt-3 w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500 outline-none"
+          >
+            <option value="ALL">All tags</option>
+            {allTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+          </select>
         </div>
 
         <div className="custom-scrollbar flex-1 overflow-y-auto">
@@ -276,7 +344,7 @@ const Inbox = () => {
               Your inbox is empty. Waiting for new patient chats...
             </div>
           )}
-          {conversations.map((chat) => (
+          {visibleConversations.map((chat) => (
             <button
               key={chat.id}
               type="button"
@@ -310,7 +378,7 @@ const Inbox = () => {
         </div>
       </div>
 
-      <div className="relative flex flex-1 flex-col bg-[#E5DDD5]">
+      <div className="relative flex flex-1 flex-col" style={chatViewportStyle}>
         {selectedChat ? (
           <>
             <div className="z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
@@ -415,25 +483,74 @@ const Inbox = () => {
 
       {selectedChat && (
         <div className="hidden w-72 flex-col space-y-8 overflow-y-auto border-l border-slate-200 bg-white p-6 xl:flex">
-          <div className="flex flex-col items-center">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-100 text-2xl font-black text-blue-600 shadow-sm">{selectedChat.name.charAt(0)}</div>
-            <h2 className="font-bold text-slate-800">{selectedChat.name}</h2>
-            <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">{selectedChat.phone}</p>
+          <div className="space-y-4">
+            <button
+              onClick={() => setIsGhostMode(!isGhostMode)}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-black transition-all ${isGhostMode ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-500'}`}
+            >
+              {isGhostMode ? <Eye size={14} /> : <EyeOff size={14} />}
+              {isGhostMode ? 'Ghost Mode ON' : 'Ghost Mode'}
+            </button>
+            <div>
+              <h4 className="border-b pb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Patient Tags</h4>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[...new Set([...tagOptions, ...selectedTags])].map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => appendTag(tag)}
+                    className={`rounded-full border px-3 py-1 text-[10px] font-bold italic ${selectedTags.includes(tag) ? 'border-green-100 bg-green-50 text-green-600' : 'border-slate-100 bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-600'}`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={customTagInput}
+                  onChange={(event) => setCustomTagInput(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && addCustomTag()}
+                  placeholder="Custom tag"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold outline-none"
+                />
+                <button onClick={addCustomTag} className="rounded-lg bg-slate-900 px-3 py-2 text-[10px] font-black text-white">Add</button>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            <h4 className="border-b pb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Customer Tags</h4>
-            <div className="flex flex-wrap gap-2">
-              {tagOptions.map((tag) => (
+          <div
+            className="flex flex-col items-center"
+            onMouseEnter={() => setShowPhone(true)}
+            onMouseLeave={() => setShowPhone(false)}
+          >
+            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-100 text-2xl font-black text-blue-600 shadow-sm">{selectedChat.name.charAt(0)}</div>
+            <h2 className="font-bold text-slate-800">{selectedChat.name}</h2>
+            <button
+              onClick={() => setShowPhone((value) => !value)}
+              className="mt-2 inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-bold uppercase tracking-widest text-slate-400"
+            >
+              {showPhone ? <EyeOff size={12} /> : <Eye size={12} />}
+              {showPhone ? selectedChat.phone || 'No phone' : '••••• •••••'}
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="border-b pb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Chat Wallpaper</h4>
+            <div className="grid grid-cols-5 gap-2">
+              {['#E5DDD5', '#F0F9FF', '#F7F7EE', '#EEF7F2', '#FFF7ED'].map((color) => (
                 <button
-                  key={tag}
-                  onClick={() => appendTag(tag)}
-                  className={`rounded-full border px-3 py-1 text-[10px] font-bold italic ${selectedTags.includes(tag) ? 'border-green-100 bg-green-50 text-green-600' : 'border-slate-100 bg-slate-50 text-slate-500 hover:bg-blue-50 hover:text-blue-600'}`}
-                >
-                  {tag}
-                </button>
+                  key={color}
+                  onClick={() => saveChatBackground({ type: 'color', value: color })}
+                  className="h-8 rounded-lg border border-slate-200"
+                  style={{ backgroundColor: color }}
+                  aria-label={color}
+                />
               ))}
             </div>
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-100">
+              <ImageIcon size={14} />
+              Upload Image
+              <input type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
+            </label>
           </div>
 
           <div className="space-y-4 pt-4">

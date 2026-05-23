@@ -24,11 +24,46 @@ const isSchemaCacheError = (error) => {
     );
 };
 
-const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
+const resolveScheduledIso = (scheduledFor, index = 0) => {
+    const parsed = scheduledFor ? new Date(scheduledFor) : null;
+    const date = parsed && Number.isFinite(parsed.getTime())
+        ? parsed
+        : new Date(Date.now() + Number(index || 0) * 3 * 60 * 1000);
+    return date.toISOString();
+};
+
+const cleanMetaAxiosError = (error) => {
+    let providerMessage = error?.message || 'Meta request failed.';
+    try {
+        const data = error?.response?.data;
+        if (typeof data === 'string') {
+            try {
+                const parsed = JSON.parse(data);
+                providerMessage = parsed?.error?.message || parsed?.message || data;
+            } catch {
+                providerMessage = data;
+            }
+        } else if (data && typeof data === 'object') {
+            providerMessage = data?.error?.message || data?.message || providerMessage;
+        }
+    } catch {
+        providerMessage = error?.message || 'Meta request failed.';
+    }
+
+    return {
+        success: false,
+        msg: providerMessage,
+        message: providerMessage,
+        status: error?.response?.status || 500
+    };
+};
+
+const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor, index = 0 }) => {
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
     const variables = template.variables || template.variablesData || template.payload?.variables || {};
     const templateText = template.templateText || template.bodyText || template.body_content || template.text || '';
+    const scheduledIso = resolveScheduledIso(scheduledFor, index);
     return {
         user_id: resolvedUserId,
         doctor_id: doctorId,
@@ -46,7 +81,8 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
             text: templateText
         },
         status: 'PENDING',
-        scheduled_for: scheduledFor
+        scheduled_for: scheduledIso,
+        scheduled_at: scheduledIso
     };
 };
 
@@ -63,21 +99,22 @@ const buildMinimalCampaignQueuePayload = (row = {}) => ({
     }
 });
 
-const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
+const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor, index = 0 }) => {
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
     const recipientName = String(recipient.patientName || recipient.name || recipient.recipient_name || 'Patient').trim();
     const recipientPhone = String(recipient.patientPhone || recipient.phone || recipient.recipient_phone || '').trim();
+    const scheduledIso = resolveScheduledIso(scheduledFor, index);
     return {
         user_id: resolvedUserId,
         doctor_id: doctorId,
-        name: recipientName,
-        patient_name: recipientName,
-        patient_phone: recipientPhone,
-        phone: recipientPhone,
+        name: recipientName || 'Patient',
+        patient_name: recipientName || 'Patient',
+        patient_phone: recipientPhone || 'unknown',
+        phone: recipientPhone || 'unknown',
         last_message: `Queued: ${template.template_name || template.name || 'WhatsApp Template'}`,
         status: 'QUEUED',
-        scheduled_at: scheduledFor,
+        scheduled_at: scheduledIso,
         updated_at: new Date().toISOString(),
         metadata: {
             template_id: template.id || null,
@@ -124,18 +161,19 @@ const insertQueuedInboxChatRows = async ({ rows = [] }) => {
     if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { inserted: false };
 
     const fallbackRows = rows.map((row) => ({
-        name: row.name,
-        phone: row.phone,
+        name: row.name || row.patient_name || 'Patient',
+        phone: row.phone || row.patient_phone || 'unknown',
         patient_name: row.patient_name || row.name || 'Patient',
-        patient_phone: row.patient_phone || row.phone || '',
+        patient_phone: row.patient_phone || row.phone || 'unknown',
         status: row.status,
-        doctor_id: row.doctor_id || row.user_id || null
+        doctor_id: row.doctor_id || row.user_id || null,
+        scheduled_at: resolveScheduledIso(row.scheduled_at),
     }));
     const minimalRows = rows.map((row) => ({
-        name: row.name || row.patient_name,
-        phone: row.phone,
+        name: row.name || row.patient_name || 'Patient',
+        phone: row.phone || row.patient_phone || 'unknown',
         patient_name: row.patient_name || row.name || 'Patient',
-        patient_phone: row.patient_phone || row.phone || '',
+        patient_phone: row.patient_phone || row.phone || 'unknown',
         status: row.status,
         doctor_id: row.doctor_id || row.user_id || null
     }));
@@ -456,7 +494,8 @@ exports.sendTestMessage = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("WhatsApp Error:", error.response ? error.response.data : error.message);
+        const metaError = cleanMetaAxiosError(error);
+        console.error("WhatsApp Error:", metaError.message);
         if (error.response?.status === 401) {
             console.error("CRITICAL: Meta Cloud API Token is Invalid or Expired. Please regenerate a Permanent System User Access Token in the Meta Business Suite.");
             return res.status(401).json({
@@ -467,7 +506,7 @@ exports.sendTestMessage = async (req, res) => {
         res.status(500).json({ 
             success: false, 
             msg: "Message failed", 
-            error: error.response ? error.response.data : error.message 
+            error: metaError.message
         });
     }
 };
@@ -689,7 +728,8 @@ exports.submitTemplate = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Meta Absolute Array Failure:", JSON.stringify(error.response?.data || error.message));
+        const metaError = cleanMetaAxiosError(error);
+        console.error("Meta Absolute Array Failure:", metaError.message);
         if (error.response?.status === 401) {
             console.error("CRITICAL: Meta Cloud API Token is Invalid or Expired. Please regenerate a Permanent System User Access Token in the Meta Business Suite.");
             return res.status(401).json({
@@ -700,7 +740,7 @@ exports.submitTemplate = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Template submission failed',
-            error: error.response ? error.response.data : error.message
+            error: metaError.message
         });
     }
 };
