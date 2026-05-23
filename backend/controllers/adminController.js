@@ -51,3 +51,26 @@ exports.getMetricsSummary = async (req, res) => {
     res.status(500).json({ success: false, message: "Metrics aggregation failed", error: error.message });
   }
 };
+
+/**
+ * Clean Wallet Balance Sync Endpoint
+ */
+exports.getWalletBalance = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query?.userId;
+    if (!userId) return res.status(401).json({ success: false, message: "Unauthorized access" });
+
+    const { data: walletRow, error } = await supabase
+      .from('wallets')
+      .select('balance')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const balanceValue = parseFloat(walletRow?.balance || 0).toFixed(2);
+    return res.status(200).json({ success: true, balance: Number(balanceValue) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Wallet balance sync failed", error: error.message });
+  }
+};

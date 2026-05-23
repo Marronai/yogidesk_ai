@@ -15,7 +15,7 @@ const Campaigns = () => {
   const [activeVariableKey, setActiveVariableKey] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState('');
-  const [wallet] = useState(() => getWallet());
+  const [walletBalance, setWalletBalance] = useState(0);
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(selectedTemplateId));
   const variableKeys = Array.from(new Set(
@@ -75,8 +75,19 @@ const Campaigns = () => {
   const templateType = String(selectedTemplate?.category || 'utility').toLowerCase();
   const unitCost = calculateMessageCost(templateType, 1);
   const totalCost = Number((patients.length * unitCost).toFixed(2));
-  const hasCredits = wallet.balance >= totalCost && totalCost > 0;
+  const hasCredits = walletBalance >= totalCost && totalCost > 0;
   const missingVariableKeys = variableKeys.filter((key) => !String(templateVariables[key] || '').trim());
+
+  const refreshWallet = async () => {
+    try {
+      const response = await api.get('/api/wallet/balance', { params: { userId } });
+      if (response.data.success) {
+        setWalletBalance(response.data.balance);
+      }
+    } catch (err) {
+      console.error("Wallet sync error:", err);
+    }
+  };
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2400); };
 
@@ -117,6 +128,7 @@ const Campaigns = () => {
     setPatients([]);
     setLedgerMatches([]);
     fetchCampaignData();
+    refreshWallet();
   }, [userId]);
   useEffect(() => {
     const timer = setTimeout(() => lookupLedger(searchTerm), 250);
@@ -161,6 +173,7 @@ const Campaigns = () => {
         }))
       });
       notify('Campaign queued with 3-minute intervals.');
+      refreshWallet();
     } catch (error) {
       notify(error?.response?.data?.msg || 'Campaign scheduling failed.');
     } finally {
@@ -181,8 +194,8 @@ const Campaigns = () => {
             <div className="mt-1 text-2xl font-black">{patients.length}</div>
           </div>
           <div className="rounded-2xl border border-orange-100 bg-white px-5 py-4 text-orange-700 shadow-sm">
-            <div className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><Wallet size={14}/> Deduction</div>
-            <div className="mt-1 text-2xl font-black">Rs. {totalCost.toFixed(2)}</div>
+            <div className="text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><Wallet size={14}/> Wallet Balance</div>
+            <div className="mt-1 text-2xl font-black">₹{walletBalance.toFixed(2)}</div>
           </div>
           <button onClick={fetchCampaignData} className="rounded-2xl border border-slate-100 bg-white px-5 py-4 text-slate-500 shadow-sm font-black flex items-center justify-center gap-2">
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''}/> Refresh

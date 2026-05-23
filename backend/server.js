@@ -7,6 +7,7 @@ const { supabase, supabaseAdmin } = require('./config/supabase');
 const emailConfig = require('./config/emailConfig');
 const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
 const { saveMetaConnection } = require('./controllers/whatsappController');
+const { getWalletBalance } = require('./controllers/adminController');
 
 const app = express();
 
@@ -49,64 +50,6 @@ const sanitizeMetaPhoneNumber = (value) => {
     const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
 };
-const extractVariableSample = (variable) => {
-    if (variable === null || variable === undefined) return '';
-    if (typeof variable !== 'object') return String(variable).trim();
-    return String(
-        variable.value ||
-        variable.sample ||
-        variable.example ||
-        variable.text ||
-        variable.customValue ||
-        variable.custom ||
-        ''
-    ).trim();
-};
-const normalizeBodyVariableSamples = (...sources) => {
-    const samplesByIndex = new Map();
-
-    sources.forEach((source) => {
-        if (!source) return;
-
-        if (Array.isArray(source)) {
-            source.forEach((item, position) => {
-                const rawIndex = typeof item === 'object' && item !== null
-                    ? item.index || item.position || item.key || item.variable || item.placeholder || position + 1
-                    : position + 1;
-                const index = Number(String(rawIndex).replace(/\D/g, ''));
-                const sample = extractVariableSample(item);
-                if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
-            });
-            return;
-        }
-
-        if (typeof source === 'object') {
-            Object.entries(source).forEach(([rawKey, rawValue]) => {
-                const index = Number(String(rawKey).replace(/\D/g, ''));
-                const sample = extractVariableSample(rawValue);
-                if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
-            });
-        }
-    });
-
-    return samplesByIndex;
-};
-const getBodyExample = (bodyText, ...sampleSources) => {
-    const indexes = Array.from(String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g), (match) => Number(match[1]))
-        .filter(Number.isFinite)
-        .sort((a, b) => a - b);
-
-    if (!indexes.length) return null;
-
-    const samplesByIndex = normalizeBodyVariableSamples(...sampleSources);
-    const defaultSamples = ['Sample Patient Name', 'Sample Clinic Location', '20-May-2026', '04:00 PM'];
-
-    return {
-        body_text: [
-            indexes.map((index, position) => samplesByIndex.get(index) || defaultSamples[position] || `Sample Value ${index}`)
-        ]
-    };
-};
 const cleanCredentialValue = (value) => String(value || '').trim();
 const invalidMetaConfigurationResponse = {
     success: false,
@@ -143,41 +86,6 @@ const isMissingColumnError = (error) => {
     const message = String(error?.message || error?.details || '').toLowerCase();
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
-const getStoredMetaCredentials = async (userId) => {
-    if (!supabase?.from || !userId) return {};
-
-    let result = await supabase
-        .from('doctor_profiles')
-        .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (!result.error && result.data) {
-        return {
-            accessToken: result.data.whatsapp_access_token || null,
-            phoneNumberId: result.data.whatsapp_phone_number_id || null,
-            businessAccountId: result.data.whatsapp_business_account_id || null,
-        };
-    }
-
-    if (result.error && !isMissingColumnError(result.error)) {
-        throw result.error;
-    }
-
-    result = await supabase
-        .from('doctor_profiles')
-        .select('system_user_token,meta_phone_number_id,meta_waba_id')
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (result.error) throw result.error;
-
-    return {
-        accessToken: result.data?.system_user_token || null,
-        phoneNumberId: result.data?.meta_phone_number_id || null,
-        businessAccountId: result.data?.meta_waba_id || null,
-    };
-};
 const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, accessToken }) => {
     try {
         await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
@@ -208,10 +116,7 @@ const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, acces
         return false;
     }
 };
-const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components, bodyVariableParameters, variablesData, customVariables }) => {
-    const sampleSources = [bodyVariableParameters, customVariables, variablesData];
-    const bodyExample = getBodyExample(bodyText, ...sampleSources);
-
+const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
     if (Array.isArray(components) && components.length > 0) {
         return components.map((component) => {
             if (!component?.type) return null;
@@ -227,8 +132,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
             }
             if (component.type === 'BODY') {
                 const text = String(component.text || bodyText || '').trim();
-                const example = getBodyExample(text, ...sampleSources);
-                return text ? { type: 'BODY', text, ...(example && { example }) } : null;
+                return text ? { type: 'BODY', text } : null;
             }
             if (component.type === 'FOOTER') {
                 const text = String(component.text || '').trim();
@@ -237,7 +141,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
             if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
                 const buttonList = component.buttons.map((btn) => {
                     const text = String(btn.text || '').trim();
-                    if (String(btn.type || '').toUpperCase() === 'URL') {
+                    if (btn.type === 'URL') {
                         const url = String(btn.url || '').trim();
                         return text && url ? { type: 'URL', text, url } : null;
                     }
@@ -265,7 +169,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
         graphComponents.push({ type: 'HEADER', format: 'LOCATION' });
     }
     if (cleanBodyText) {
-        graphComponents.push({ type: 'BODY', text: cleanBodyText, ...(bodyExample && { example: bodyExample }) });
+        graphComponents.push({ type: 'BODY', text: cleanBodyText });
     }
     if (cleanFooterText) {
         graphComponents.push({ type: 'FOOTER', text: cleanFooterText });
@@ -273,7 +177,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
 
     const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
         const text = String(btn.text || '').trim();
-        if (String(btn.type || '').toUpperCase() === 'URL') {
+        if (btn.type === 'URL') {
             const url = String(btn.url || '').trim();
             return text && url ? { type: 'URL', text, url } : null;
         }
@@ -308,6 +212,7 @@ const attachDoctorSession = (req, res, next) => {
 };
 
 app.get('/api/user/usage', attachDoctorSession, getUserUsage);
+app.get('/api/wallet/balance', attachDoctorSession, getWalletBalance);
 app.post('/api/patients', attachDoctorSession, addPatient);
 app.post('/api/patients/bulk', attachDoctorSession, addPatients);
 
@@ -572,15 +477,20 @@ app.post('/api/webhook/meta', async (req, res) => {
 const syncTemplatesFromMetaInBackground = async (userId) => {
     if (!supabase?.from || !userId) return;
 
-    const userMeta = await getStoredMetaCredentials(userId);
+    const { data: userMeta, error: credentialError } = await supabase
+        .from('doctor_profiles')
+        .select('system_user_token,meta_waba_id')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (!userMeta?.businessAccountId || !userMeta?.accessToken) {
+    if (credentialError || !userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+        if (credentialError) console.warn('Background template sync credential error:', credentialError.message);
         return;
     }
 
-    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.businessAccountId}/message_templates`;
+    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
     const response = await require('axios').get(graphUrl, {
-        headers: { Authorization: `Bearer ${userMeta.accessToken}` }
+        headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
     });
 
     const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -689,15 +599,20 @@ app.get('/api/templates/sync', async (req, res) => {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
 
-        const userMeta = await getStoredMetaCredentials(userId);
+        const { data: userMeta, error: credentialError } = await supabase
+            .from('doctor_profiles')
+            .select('system_user_token,meta_waba_id')
+            .eq('id', userId)
+            .maybeSingle();
 
-        if (!userMeta?.businessAccountId || !userMeta?.accessToken) {
+        if (credentialError) throw credentialError;
+        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
-        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.businessAccountId}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.meta_waba_id}/message_templates`;
         const response = await require('axios').get(graphUrl, {
-            params: { access_token: userMeta.accessToken }
+            params: { access_token: userMeta.system_user_token }
         });
 
         const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -753,10 +668,7 @@ app.post('/api/templates', async (req, res) => {
             components = [],
             messaging_product: messagingProduct = 'whatsapp',
             whatsapp_business_account_id: requestBusinessAccountId,
-            whatsapp_access_token: requestAccessToken,
-            bodyVariableParameters = [],
-            customVariables = [],
-            variablesData = {}
+            whatsapp_access_token: requestAccessToken
         } = req.body;
 
         if (!userId) {
@@ -773,29 +685,24 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Template body text is required.' });
         }
 
-        const userMeta = await getStoredMetaCredentials(userId).catch((credentialError) => {
-            console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
-            return {};
-        });
+        const { data: userMeta, error: credentialError } = await supabase
+            .from('doctor_profiles')
+            .select('system_user_token,meta_phone_number_id,meta_waba_id')
+            .eq('id', userId)
+            .maybeSingle();
 
-        const businessAccountId = requestBusinessAccountId || userMeta?.businessAccountId || null;
-        const accessToken = requestAccessToken || userMeta?.accessToken || null;
+        if (credentialError || !userMeta) {
+            console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
+        }
+
+        const businessAccountId = requestBusinessAccountId || userMeta?.meta_waba_id || null;
+        const accessToken = requestAccessToken || userMeta?.system_user_token || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
         }
 
-        const graphComponents = buildTemplateComponents({
-            bodyText,
-            headerType,
-            headerText,
-            footerText,
-            buttons,
-            components,
-            bodyVariableParameters,
-            customVariables,
-            variablesData
-        });
+        const graphComponents = buildTemplateComponents({ bodyText, headerType, headerText, footerText, buttons, components });
         const sanitizedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
         const metaLanguage = normalizeTemplateLanguage(language);
 
@@ -805,7 +712,6 @@ app.post('/api/templates', async (req, res) => {
             name: formattedName,
             language: metaLanguage,
             category,
-            parameter_format: 'positional',
             components: graphComponents
         }, {
             params: {
@@ -1137,11 +1043,17 @@ const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
     try {
-        const data = await getStoredMetaCredentials(userId);
+        const { data, error } = await supabase
+            .from('doctor_profiles')
+            .select('meta_phone_number_id,meta_waba_id,system_user_token')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (error || !data) return {};
         return {
-            phoneNumberId: data.phoneNumberId || null,
-            businessAccountId: data.businessAccountId || null,
-            accessToken: data.accessToken || null,
+            phoneNumberId: data.meta_phone_number_id || null,
+            businessAccountId: data.meta_waba_id || null,
+            accessToken: data.system_user_token || null,
         };
     } catch (err) {
         console.error('Meta credential lookup failed:', err.message || err);
@@ -1166,24 +1078,6 @@ const sendCampaignMessageToMeta = async (queueItem) => {
         }
     };
 
-    const resolveCampaignVariable = (value) => {
-        const rawValue = String(value || '').trim();
-        const match = rawValue.match(/^\[\[([a-z._]+)\]\]$/i);
-        if (!match) return rawValue;
-
-        const fieldKey = match[1];
-        const recipient = queueItem.payload?.recipient || {};
-        const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-        const fieldMap = {
-            'patient.name': recipient.name || '',
-            'patient.phone': recipient.phone || queueItem.recipient_phone || '',
-            'patient.appointment_time': recipient.appointment_time || '',
-            today
-        };
-
-        return String(fieldMap[fieldKey] || 'Not available').trim();
-    };
-
     const variables = queueItem.payload?.template?.variables || {};
     const variableKeys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
     if (variableKeys.length > 0) {
@@ -1191,7 +1085,7 @@ const sendCampaignMessageToMeta = async (queueItem) => {
             type: 'body',
             parameters: variableKeys.map((key) => ({
                 type: 'text',
-                text: resolveCampaignVariable(variables[key])
+                text: String(variables[key] || '')
             }))
         }];
     }
@@ -1298,15 +1192,15 @@ const processCampaignQueue = async () => {
 
 setInterval(processCampaignQueue, 10000);
 
-// ====== AUTOMATIC META STATUS SYNC POLLING (5 MINUTES) ======
+// ====== AUTOMATIC META STATUS SYNC POLLING (1 MINUTE) ======
 setInterval(async () => {
     if (!supabase) return;
     try {
-        // Fetch templates whose Meta status can still change after review or resubmission.
+        // Fetch all templates currently in PENDING state
         const { data: pendingTemplates } = await supabase
             .from('whatsapp_templates')
             .select('user_id, template_name, id, status')
-            .or('status.eq.PENDING,status.eq.PENDING_REVIEW,status.eq.REJECTED');
+            .or('status.eq.PENDING,status.eq.PENDING_REVIEW');
 
         if (!pendingTemplates?.length) return;
 
@@ -1318,15 +1212,19 @@ setInterval(async () => {
         }, {});
 
         for (const userId in userGroups) {
-            const profile = await getStoredMetaCredentials(userId);
+            const { data: profile } = await supabase
+                .from('doctor_profiles')
+                .select('system_user_token, meta_waba_id')
+                .eq('id', userId)
+                .maybeSingle();
 
-            if (!profile?.accessToken || !profile?.businessAccountId) continue;
+            if (!profile?.system_user_token || !profile?.meta_waba_id) continue;
 
             for (const t of userGroups[userId]) {
                 try {
-                    const url = `https://graph.facebook.com/v21.0/${profile.businessAccountId}/message_templates?name=${t.template_name}`;
+                    const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates?name=${t.template_name}`;
                     const res = await require('axios').get(url, {
-                        headers: { Authorization: `Bearer ${profile.accessToken}` }
+                        headers: { Authorization: `Bearer ${profile.system_user_token}` }
                     });
                     const metaData = res.data.data?.[0];
                     if (metaData) {
@@ -1341,7 +1239,7 @@ setInterval(async () => {
     } catch (err) {
         console.error('Background Sync Polling Error:', err.message);
     }
-}, 5 * 60 * 1000);
+}, 60000);
 
 // ====== PORT LISTEN ENGINE ======
 const PORT = process.env.PORT || 5000;

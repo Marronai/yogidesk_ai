@@ -7,6 +7,12 @@ const missingSubAccountConfigResponse = {
     message: "WhatsApp API profile configuration missing for this sub-account."
 };
 
+const shouldBypassCampaignWalletCheck = () => (
+    process.env.NODE_ENV === 'development' ||
+    process.env.BYPASS_CAMPAIGN_WALLET_CHECK === 'true' ||
+    process.env.YOGIDESK_TEST_WALLET_BYPASS === 'true'
+);
+
 const extractVariableValue = (value) => {
     if (value === null || value === undefined) return '';
     if (typeof value !== 'object') return String(value).trim();
@@ -511,3 +517,5 @@ exports.submitTemplate = async (req, res) => {
         });
     }
 };
+
+exports.shouldBypassCampaignWalletCheck = shouldBypassCampaignWalletCheck;

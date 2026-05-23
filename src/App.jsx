@@ -44,9 +44,12 @@ import SuperAdminRoute from './components/SuperAdminRoute';
 
 const AppContent = () => {
   const location = useLocation();
-  // Exclude footer from auth screens and internal dashboard views
-  const excludeFooterRoutes = ['/login', '/signup', '/dashboard', '/templates', '/settings', '/hospital', '/yogi-core-control-center', '/admin'];
-  const shouldRenderFooter = !excludeFooterRoutes.some(route => location.pathname.startsWith(route));
+  
+  // Comprehensive internal route exclusion array
+  const internalDashboardPaths = ['/login', '/signup', '/dashboard', '/templates', '/settings', '/campaigns', '/yogi-core-control-center'];
+  
+  // Check if current URL starts with any internal application route
+  const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
 
   return (
       <>
@@ -126,7 +129,8 @@ const AppContent = () => {
           {/* Agar kuch galat type kare toh wapas Landing Page par bhej do */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        {shouldRenderFooter && <Footer />}
+        {/* Render footer ONLY on public marketing pages */}
+        {!isInternalRoute && <Footer />}
       </>
   );
 };

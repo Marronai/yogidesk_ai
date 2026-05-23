@@ -34,6 +34,7 @@ const formatDoctorName = (name = 'Doctor') => {
 const DashboardHome = () => {
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
+  const [walletBalance, setWalletBalance] = useState(0);
   const [stats, setStats] = useState({ weekly_sent: 0, leads_today: 0, ghost_mode: false });
   const [usage, setUsage] = useState({ lifetime_patients_count: 0, limit: 500 });
   const [profile, setProfile] = useState({
@@ -61,6 +62,17 @@ const DashboardHome = () => {
       const todayStartIso = toFilterIsoString(todayStart);
       if (!weekStartIso || !todayStartIso) return;
 
+      const refreshWalletBalance = async () => {
+        try {
+          const response = await api.get('/api/wallet/balance', { params: { userId } });
+          if (active && response.data.success) {
+            setWalletBalance(response.data.balance);
+          }
+        } catch (err) {
+          console.error("Wallet sync error:", err);
+        }
+      };
+
       const results = await Promise.allSettled([
         supabase.from('wallets').select('balance,is_first_recharge,welcome_gift_active').eq('user_id', userId).maybeSingle(),
         supabase.from('campaign_queue').select('id', { count: 'exact', head: false }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStartIso),
@@ -70,7 +82,8 @@ const DashboardHome = () => {
 
       const walletResult = results[0]?.status === 'fulfilled' ? results[0].value : null;
       if (active && walletResult?.data) setWallet(saveWallet(walletResult.data));
-      
+      refreshWalletBalance();
+
       const sentResult = results[1]?.status === 'fulfilled' ? results[1].value : null;
       const leadResult = results[2]?.status === 'fulfilled' ? results[2].value : null;
       const usageResult = results[3]?.status === 'fulfilled' ? results[3].value : null;
@@ -139,12 +152,12 @@ const DashboardHome = () => {
             <div className="flex justify-between items-end mb-2">
               <div>
                 <p className="text-gray-500 text-sm font-medium">Wallet Balance</p>
-                <h3 className="text-3xl font-extrabold text-gray-900">Rs. {wallet.balance.toFixed(2)}</h3>
+              <h3 className="text-3xl font-extrabold text-gray-900">Rs. {walletBalance.toFixed(2)}</h3>
               </div>
               <div className="p-2 bg-orange-50 text-brand rounded-xl"><Wallet size={20} /></div>
             </div>
             <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
-              <div className="bg-gradient-to-r from-orange-400 to-red-500 h-3 rounded-full" style={{ width: `${Math.min(100, wallet.balance)}%` }} />
+              <div className="bg-gradient-to-r from-orange-400 to-red-500 h-3 rounded-full" style={{ width: `${Math.min(100, walletBalance)}%` }} />
             </div>
             <p className="text-xs text-gray-500 mt-2 font-medium">Utility Rs. {MESSAGE_RATES.utility.toFixed(2)}/msg · Marketing Rs. {MESSAGE_RATES.marketing.toFixed(2)}/msg</p>
           </div>
