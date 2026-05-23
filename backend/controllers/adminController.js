@@ -1,6 +1,13 @@
 require('dotenv').config();
-const { createClient } = require('@supabase/supabase-js');
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const { supabase: sharedSupabase, supabaseAdmin } = require('../config/supabase');
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !supabaseKey) {
+  console.error("CRITICAL CONFIGURATION ERROR: Supabase environment credentials evaluating to undefined.");
+}
+
+const supabase = supabaseAdmin || sharedSupabase;
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 
@@ -20,6 +27,10 @@ exports.requireSuperAdmin = (req, res, next) => {
  */
 exports.getMetricsSummary = async (req, res) => {
   try {
+    if (!supabase?.from) {
+      return res.status(500).json({ success: false, message: "Supabase client is not initialized." });
+    }
+
     // 1. Fetch all doctor profiles
     const { data: doctors, error: dError } = await supabase
       .from('doctor_profiles')
@@ -57,6 +68,10 @@ exports.getMetricsSummary = async (req, res) => {
  */
 exports.getWalletBalance = async (req, res) => {
   try {
+    if (!supabase?.from) {
+      return res.status(500).json({ success: false, message: "Supabase client is not initialized." });
+    }
+
     const userId = req.user?.id || req.query?.userId;
     if (!userId) return res.status(401).json({ success: false, message: "Unauthorized access" });
 
