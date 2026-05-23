@@ -9,7 +9,9 @@ const { getUserUsage, addPatient, addPatients } = require('./controllers/patient
 const {
     saveMetaConnection,
     buildCampaignQueuePayload,
+    buildQueuedInboxChatPayload,
     insertCampaignQueueRows,
+    insertQueuedInboxChatRows,
     safeInsertInboxRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
@@ -861,6 +863,12 @@ app.post('/api/campaigns/schedule', async (req, res) => {
             recipient,
             scheduledFor: new Date(baseTime + index * 3 * 60 * 1000).toISOString()
         }));
+        const inboxChatRows = uniqueRecipients.map((recipient, index) => buildQueuedInboxChatPayload({
+            userId,
+            template,
+            recipient,
+            scheduledFor: new Date(baseTime + index * 3 * 60 * 1000).toISOString()
+        }));
         const fallbackRows = queueRows.map((row) => ({
             user_id: row.user_id || row.doctor_id,
             doctor_id: row.doctor_id || row.user_id,
@@ -875,6 +883,9 @@ app.post('/api/campaigns/schedule', async (req, res) => {
         if (queueInsertResult.fallbackRequired) {
             Promise.resolve().then(() => processCampaignFallbackRows(queueRows));
         }
+        Promise.resolve()
+            .then(() => insertQueuedInboxChatRows({ rows: inboxChatRows }))
+            .catch((error) => console.error('Queued inbox chat insert failed:', error.message || error));
 
         const { error: countError } = await supabase
             .from('wallets')
@@ -1162,6 +1173,12 @@ const processCampaignFallbackRows = async (rows = []) => {
             };
 
             await Promise.allSettled([
+                supabase.from('inbox_chats').update({
+                    status: 'SENT',
+                    last_message: `Sent template: ${row.template_name}`,
+                    updated_at: new Date().toISOString(),
+                    metadata: logPayload
+                }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id || row.doctor_id,
                     amount: getUnitCost(row.template_category),
@@ -1243,6 +1260,12 @@ const processCampaignQueue = async () => {
             await Promise.allSettled([
                 supabase.from('wallets').update({ balance: nextBalance }).eq('user_id', row.user_id),
                 supabase.from('campaign_queue').update({ status: 'SENT', sent_at: new Date().toISOString(), meta_response: metaResult }).eq('id', row.id),
+                supabase.from('inbox_chats').update({
+                    status: 'SENT',
+                    last_message: `Sent template: ${row.template_name}`,
+                    updated_at: new Date().toISOString(),
+                    metadata: logPayload
+                }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id,
                     amount: unitCost,

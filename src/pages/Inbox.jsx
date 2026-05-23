@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Check,
   CheckCheck,
+  Clock3,
   Eye,
   EyeOff,
   Lock,
@@ -38,12 +40,37 @@ const Inbox = () => {
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
 
   const selectedTags = useMemo(() => selectedChat?.metadata?.tags || [], [selectedChat]);
 
   const getUser = async () => {
     const { data } = await supabase.auth.getUser();
     return data?.user || { id: localStorage.getItem('user_id') };
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const formatCountdown = (scheduledAt) => {
+    const target = new Date(scheduledAt || '').getTime();
+    if (!Number.isFinite(target)) return 'Sending...';
+    const remainingMs = target - now;
+    if (remainingMs <= 0) return 'Sending...';
+    const totalSeconds = Math.ceil(remainingMs / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `Sending in ${minutes}:${seconds}`;
+  };
+
+  const renderStatusBadge = (status) => {
+    const normalized = String(status || '').toUpperCase();
+    if (normalized === 'SENT') return <Check size={13} className="text-slate-400" />;
+    if (normalized === 'DELIVERED') return <CheckCheck size={14} className="text-slate-400" />;
+    if (normalized === 'READ') return <CheckCheck size={14} className="text-blue-500" />;
+    return null;
   };
 
   useEffect(() => {
@@ -72,12 +99,21 @@ const Inbox = () => {
       }
 
       try {
-        const { data, error } = await supabase
+        let result = await supabase
           .from('inbox_chats')
-          .select('id, last_message, updated_at, name, patient_name')
+          .select('id, last_message, updated_at, name, patient_name, phone, status, scheduled_at')
           .order('updated_at', { ascending: false });
-        if (error) throw error;
-        chatData = (data || []).filter((chat) => (
+
+        if (result.error) {
+          const safeResult = await supabase
+            .from('inbox_chats')
+            .select('id, last_message, updated_at, name, patient_name')
+            .order('updated_at', { ascending: false });
+          result = safeResult;
+        }
+
+        if (result.error) throw result.error;
+        chatData = (result.data || []).filter((chat) => (
           !chat.user_id && !chat.admin_id && !chat.doctor_id
         ) || (
           String(chat.user_id || chat.admin_id || chat.doctor_id) === String(user.id)
@@ -107,6 +143,7 @@ const Inbox = () => {
             time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
             unread: Number(chat.unread_count || 0),
             status: chat.status || 'Offline',
+            scheduled_at: chat.scheduled_at || null,
             assigned_agent_id: chat.assigned_agent_id,
             metadata: chat.metadata || {},
           };
@@ -251,11 +288,21 @@ const Inbox = () => {
                 <div className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${chat.status === 'Active' ? 'bg-green-500' : 'bg-slate-300'}`} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center justify-between">
+                <div className="mb-1 flex items-center justify-between gap-2">
                   <h3 className="truncate text-sm font-bold text-slate-800">{chat.name}</h3>
-                  <span className="text-[10px] font-medium text-slate-400">{chat.time}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400">
+                    {chat.time}
+                    {renderStatusBadge(chat.status)}
+                  </span>
                 </div>
-                <p className="truncate text-xs text-slate-500">{chat.lastMsg}</p>
+                {String(chat.status || '').toUpperCase() === 'QUEUED' ? (
+                  <p className="inline-flex max-w-full items-center gap-1 rounded-full bg-orange-50 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-orange-600">
+                    <Clock3 size={12} />
+                    {formatCountdown(chat.scheduled_at)}
+                  </p>
+                ) : (
+                  <p className="truncate text-xs text-slate-500">{chat.lastMsg}</p>
+                )}
               </div>
               {chat.unread > 0 && <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">{chat.unread}</div>}
             </button>

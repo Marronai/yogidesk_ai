@@ -43,6 +43,30 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
     };
 };
 
+const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
+    const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
+    const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
+    const recipientName = String(recipient.name || '').trim() || 'Unknown Patient';
+    const recipientPhone = String(recipient.phone || '').trim();
+    return {
+        user_id: resolvedUserId,
+        doctor_id: doctorId,
+        name: recipientName,
+        patient_name: recipientName,
+        phone: recipientPhone,
+        last_message: `Queued: ${template.template_name || template.name || 'WhatsApp Template'}`,
+        status: 'QUEUED',
+        scheduled_at: scheduledFor,
+        updated_at: new Date().toISOString(),
+        metadata: {
+            template_id: template.id || null,
+            template_name: template.template_name || template.name || 'WhatsApp Template',
+            template_category: template.category || 'UTILITY',
+            recipient,
+        }
+    };
+};
+
 const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
     if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) {
         return { inserted: false, fallbackRequired: true };
@@ -69,6 +93,50 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
         }
 
         throw error;
+    }
+};
+
+const insertQueuedInboxChatRows = async ({ rows = [] }) => {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { inserted: false };
+
+    const fallbackRows = rows.map((row) => ({
+        name: row.name,
+        patient_name: row.patient_name,
+        phone: row.phone,
+        last_message: row.last_message,
+        status: row.status,
+        scheduled_at: row.scheduled_at,
+        updated_at: row.updated_at,
+        metadata: row.metadata
+    }));
+    const minimalRows = rows.map((row) => ({
+        name: row.name || row.patient_name,
+        patient_name: row.patient_name || row.name,
+        last_message: row.last_message,
+        updated_at: row.updated_at
+    }));
+
+    try {
+        const { error } = await supabase.from('inbox_chats').insert(rows);
+        if (error) throw error;
+        return { inserted: true };
+    } catch (error) {
+        logInboxDatabaseError(error);
+        try {
+            const { error: fallbackError } = await supabase.from('inbox_chats').insert(fallbackRows);
+            if (fallbackError) throw fallbackError;
+            return { inserted: true };
+        } catch (fallbackError) {
+            logInboxDatabaseError(fallbackError);
+            try {
+                const { error: minimalError } = await supabase.from('inbox_chats').insert(minimalRows);
+                if (minimalError) throw minimalError;
+                return { inserted: true };
+            } catch (minimalError) {
+                logInboxDatabaseError(minimalError);
+                return { inserted: false, error: minimalError };
+            }
+        }
     }
 };
 
@@ -601,6 +669,8 @@ exports.submitTemplate = async (req, res) => {
 
 exports.shouldBypassCampaignWalletCheck = shouldBypassCampaignWalletCheck;
 exports.buildCampaignQueuePayload = buildCampaignQueuePayload;
+exports.buildQueuedInboxChatPayload = buildQueuedInboxChatPayload;
 exports.insertCampaignQueueRows = insertCampaignQueueRows;
+exports.insertQueuedInboxChatRows = insertQueuedInboxChatRows;
 exports.safeInsertInboxRows = safeInsertInboxRows;
 exports.logInboxDatabaseError = logInboxDatabaseError;
