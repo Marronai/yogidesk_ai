@@ -43,6 +43,15 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
     };
 };
 
+const buildMinimalCampaignQueuePayload = (row = {}) => ({
+    template_name: row.template_name || row.payload?.template?.template_name || row.payload?.template?.name || 'WhatsApp Template',
+    status: row.status || 'PENDING',
+    doctor_id: row.doctor_id || row.user_id || null,
+    user_id: row.user_id || row.doctor_id || null,
+    language: row.language || row.payload?.template?.language || 'en_US',
+    recipient_phone: row.recipient_phone || row.phone || row.payload?.recipient?.phone || ''
+});
+
 const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
@@ -81,8 +90,11 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
         if (isSchemaCacheError(error)) {
             console.error("Supabase Cached Schema Crash:", error.message);
             try {
-                if (fallbackRows.length > 0) {
-                    const { error: fallbackError } = await supabase.from('campaign_queue').insert(fallbackRows);
+                const safeFallbackRows = fallbackRows.length > 0
+                    ? fallbackRows.map(buildMinimalCampaignQueuePayload)
+                    : rows.map(buildMinimalCampaignQueuePayload);
+                if (safeFallbackRows.length > 0) {
+                    const { error: fallbackError } = await supabase.from('campaign_queue').insert(safeFallbackRows);
                     if (fallbackError) throw fallbackError;
                     return { inserted: true, fallbackRequired: false };
                 }
@@ -101,23 +113,19 @@ const insertQueuedInboxChatRows = async ({ rows = [] }) => {
 
     const fallbackRows = rows.map((row) => ({
         name: row.name,
-        patient_name: row.patient_name,
         phone: row.phone,
-        last_message: row.last_message,
         status: row.status,
-        scheduled_at: row.scheduled_at,
-        updated_at: row.updated_at,
-        metadata: row.metadata
+        doctor_id: row.doctor_id || row.user_id || null
     }));
     const minimalRows = rows.map((row) => ({
         name: row.name || row.patient_name,
-        patient_name: row.patient_name || row.name,
-        last_message: row.last_message,
-        updated_at: row.updated_at
+        phone: row.phone,
+        status: row.status,
+        doctor_id: row.doctor_id || row.user_id || null
     }));
 
     try {
-        const { error } = await supabase.from('inbox_chats').insert(rows);
+        const { error } = await supabase.from('inbox_chats').insert(fallbackRows);
         if (error) throw error;
         return { inserted: true };
     } catch (error) {
@@ -433,6 +441,13 @@ exports.sendTestMessage = async (req, res) => {
 
     } catch (error) {
         console.error("WhatsApp Error:", error.response ? error.response.data : error.message);
+        if (error.response?.status === 401) {
+            console.error("CRITICAL: Meta Cloud API Token is Invalid or Expired. Please regenerate a Permanent System User Access Token in the Meta Business Suite.");
+            return res.status(401).json({
+                success: false,
+                msg: "Meta Authentication Failed. Please check your Permanent Access Token in Settings."
+            });
+        }
         res.status(500).json({ 
             success: false, 
             msg: "Message failed", 
@@ -659,6 +674,13 @@ exports.submitTemplate = async (req, res) => {
 
     } catch (error) {
         console.error("Meta Absolute Array Failure:", JSON.stringify(error.response?.data || error.message));
+        if (error.response?.status === 401) {
+            console.error("CRITICAL: Meta Cloud API Token is Invalid or Expired. Please regenerate a Permanent System User Access Token in the Meta Business Suite.");
+            return res.status(401).json({
+                success: false,
+                msg: "Meta Authentication Failed. Please check your Permanent Access Token in Settings."
+            });
+        }
         res.status(500).json({
             success: false,
             message: 'Template submission failed',

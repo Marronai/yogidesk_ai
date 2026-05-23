@@ -1142,12 +1142,23 @@ const sendCampaignMessageToMeta = async (queueItem) => {
         }];
     }
 
-    const response = await require('axios').post(url, payload, {
-        headers: {
-            'Authorization': `Bearer ${finalToken}`,
-            'Content-Type': 'application/json'
+    let response;
+    try {
+        response = await require('axios').post(url, payload, {
+            headers: {
+                'Authorization': `Bearer ${finalToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+    } catch (error) {
+        if (error.response?.status === 401) {
+            console.error("CRITICAL: Meta Cloud API Token is Invalid or Expired. Please regenerate a Permanent System User Access Token in the Meta Business Suite.");
+            const authError = new Error("Meta Authentication Failed. Please check your Permanent Access Token in Settings.");
+            authError.clientPayload = { success: false, msg: "Meta Authentication Failed. Please check your Permanent Access Token in Settings." };
+            throw authError;
         }
-    });
+        throw error;
+    }
 
     return {
         ok: true,
@@ -1176,8 +1187,7 @@ const processCampaignFallbackRows = async (rows = []) => {
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
                     last_message: `Sent template: ${row.template_name}`,
-                    updated_at: new Date().toISOString(),
-                    metadata: logPayload
+                    updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id || row.doctor_id,
@@ -1198,6 +1208,9 @@ const processCampaignFallbackRows = async (rows = []) => {
                 }] }),
             ]);
         } catch (error) {
+            if (error.clientPayload) {
+                console.error(error.clientPayload.msg);
+            }
             console.error('Campaign fallback dispatch failed:', error.message || error);
         }
     }
@@ -1243,6 +1256,9 @@ const processCampaignQueue = async () => {
                 metaResult = await sendCampaignMessageToMeta(row);
             } catch (sendError) {
                 await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: sendError.message || 'Meta send failed' }).eq('id', row.id);
+                if (sendError.clientPayload) {
+                    console.error(sendError.clientPayload.msg);
+                }
                 console.error('Campaign send failed for row', row.id, sendError.message || sendError);
                 continue;
             }
@@ -1263,8 +1279,7 @@ const processCampaignQueue = async () => {
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
                     last_message: `Sent template: ${row.template_name}`,
-                    updated_at: new Date().toISOString(),
-                    metadata: logPayload
+                    updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id,
