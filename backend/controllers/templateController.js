@@ -148,7 +148,7 @@ const getUserMetaCredentials = async (userId) => {
   if (!supabase?.from || !userId) return {};
   const { data, error } = await supabase
     .from('doctor_profiles')
-    .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+    .select('meta_phone_number_id,meta_waba_id,system_user_token')
     .eq('id', userId)
     .maybeSingle();
   if (error || !data) {
@@ -156,9 +156,9 @@ const getUserMetaCredentials = async (userId) => {
     return {};
   }
   return {
-    phoneNumberId: data.whatsapp_phone_number_id || null,
-    businessAccountId: data.whatsapp_business_account_id || null,
-    accessToken: data.whatsapp_access_token || null
+    phoneNumberId: data.meta_phone_number_id || null,
+    businessAccountId: data.meta_waba_id || null,
+    accessToken: data.system_user_token || null
   };
 };
 

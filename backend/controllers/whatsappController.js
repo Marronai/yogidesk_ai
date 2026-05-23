@@ -201,11 +201,11 @@ exports.syncTemplateStatus = async (req, res) => {
         // Fetch credentials from doctor profile
         const { data: profile } = await supabase
             .from('doctor_profiles')
-            .select('whatsapp_access_token, whatsapp_business_account_id')
+            .select('system_user_token, meta_waba_id')
             .eq('id', doctorId)
             .maybeSingle();
 
-        if (!profile?.whatsapp_business_account_id || !profile?.whatsapp_access_token) {
+        if (!profile?.meta_waba_id || !profile?.system_user_token) {
             return res.status(400).json({ success: false, message: "Meta configuration missing." });
         }
 
@@ -213,11 +213,11 @@ exports.syncTemplateStatus = async (req, res) => {
 
         for (const template of templates) {
             try {
-                const url = `https://graph.facebook.com/v21.0/${profile.whatsapp_business_account_id}/message_templates`;
+                const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates`;
                 const response = await axios.get(url, {
                     params: {
                         name: template.template_name,
-                        access_token: profile.whatsapp_access_token
+                        access_token: profile.system_user_token
                     }
                 });
 

@@ -482,18 +482,18 @@ const syncTemplatesFromMetaInBackground = async (userId) => {
 
     const { data: userMeta, error: credentialError } = await supabase
         .from('doctor_profiles')
-        .select('whatsapp_access_token,whatsapp_business_account_id')
+        .select('system_user_token,meta_waba_id')
         .eq('id', userId)
         .maybeSingle();
 
-    if (credentialError || !userMeta?.whatsapp_business_account_id || !userMeta?.whatsapp_access_token) {
+    if (credentialError || !userMeta?.meta_waba_id || !userMeta?.system_user_token) {
         if (credentialError) console.warn('Background template sync credential error:', credentialError.message);
         return;
     }
 
-    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.whatsapp_business_account_id}/message_templates`;
+    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
     const response = await require('axios').get(graphUrl, {
-        headers: { Authorization: `Bearer ${userMeta.whatsapp_access_token}` }
+        headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
     });
 
     const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -604,18 +604,18 @@ app.get('/api/templates/sync', async (req, res) => {
 
         const { data: userMeta, error: credentialError } = await supabase
             .from('doctor_profiles')
-            .select('whatsapp_access_token,whatsapp_business_account_id')
+            .select('system_user_token,meta_waba_id')
             .eq('id', userId)
             .maybeSingle();
 
         if (credentialError) throw credentialError;
-        if (!userMeta?.whatsapp_business_account_id || !userMeta?.whatsapp_access_token) {
+        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
-        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.whatsapp_business_account_id}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.meta_waba_id}/message_templates`;
         const response = await require('axios').get(graphUrl, {
-            params: { access_token: userMeta.whatsapp_access_token }
+            params: { access_token: userMeta.system_user_token }
         });
 
         const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -690,7 +690,7 @@ app.post('/api/templates', async (req, res) => {
 
         const { data: userMeta, error: credentialError } = await supabase
             .from('doctor_profiles')
-            .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+            .select('system_user_token,meta_phone_number_id,meta_waba_id')
             .eq('id', userId)
             .maybeSingle();
 
@@ -698,8 +698,8 @@ app.post('/api/templates', async (req, res) => {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
         }
 
-        const businessAccountId = requestBusinessAccountId || userMeta?.whatsapp_business_account_id || null;
-        const accessToken = requestAccessToken || userMeta?.whatsapp_access_token || null;
+        const businessAccountId = requestBusinessAccountId || userMeta?.meta_waba_id || null;
+        const accessToken = requestAccessToken || userMeta?.system_user_token || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -786,9 +786,9 @@ app.post('/api/settings/meta-connection', async (req, res) => {
 
         const profilePayload = {
             id: sessionUser.id,
-            whatsapp_phone_number_id: phoneNumberId,
-            whatsapp_business_account_id: businessAccountId,
-            whatsapp_access_token: accessToken
+            meta_phone_number_id: phoneNumberId,
+            meta_waba_id: businessAccountId,
+            system_user_token: accessToken
         };
 
         if (name) profilePayload.name = name;
@@ -800,7 +800,7 @@ app.post('/api/settings/meta-connection', async (req, res) => {
             .from('doctor_profiles')
             .update(profilePayload)
             .eq('id', sessionUser.id)
-            .select('id,whatsapp_phone_number_id,whatsapp_business_account_id')
+            .select('id,meta_phone_number_id,meta_waba_id')
             .maybeSingle();
 
         if (error || !data) {
@@ -1050,15 +1050,15 @@ const getUserMetaCredentials = async (userId) => {
     try {
         const { data, error } = await supabase
             .from('doctor_profiles')
-            .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+            .select('meta_phone_number_id,meta_waba_id,system_user_token')
             .eq('id', userId)
             .maybeSingle();
 
         if (error || !data) return {};
         return {
-            phoneNumberId: data.whatsapp_phone_number_id || null,
-            businessAccountId: data.whatsapp_business_account_id || null,
-            accessToken: data.whatsapp_access_token || null,
+            phoneNumberId: data.meta_phone_number_id || null,
+            businessAccountId: data.meta_waba_id || null,
+            accessToken: data.system_user_token || null,
         };
     } catch (err) {
         console.error('Meta credential lookup failed:', err.message || err);
@@ -1219,17 +1219,17 @@ setInterval(async () => {
         for (const userId in userGroups) {
             const { data: profile } = await supabase
                 .from('doctor_profiles')
-                .select('whatsapp_access_token, whatsapp_business_account_id')
+                .select('system_user_token, meta_waba_id')
                 .eq('id', userId)
                 .maybeSingle();
 
-            if (!profile?.whatsapp_access_token || !profile?.whatsapp_business_account_id) continue;
+            if (!profile?.system_user_token || !profile?.meta_waba_id) continue;
 
             for (const t of userGroups[userId]) {
                 try {
-                    const url = `https://graph.facebook.com/v21.0/${profile.whatsapp_business_account_id}/message_templates?name=${t.template_name}`;
+                    const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates?name=${t.template_name}`;
                     const res = await require('axios').get(url, {
-                        headers: { Authorization: `Bearer ${profile.whatsapp_access_token}` }
+                        headers: { Authorization: `Bearer ${profile.system_user_token}` }
                     });
                     const metaData = res.data.data?.[0];
                     if (metaData) {
