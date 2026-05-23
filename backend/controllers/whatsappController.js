@@ -27,6 +27,8 @@ const isSchemaCacheError = (error) => {
 const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
+    const variables = template.variables || template.variablesData || template.payload?.variables || {};
+    const templateText = template.templateText || template.bodyText || template.body_content || template.text || '';
     return {
         user_id: resolvedUserId,
         doctor_id: doctorId,
@@ -37,7 +39,12 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
         recipient_name: String(recipient.name || '').trim(),
         recipient_phone: String(recipient.phone || '').trim(),
         phone: String(recipient.phone || '').trim(),
-        payload: { template, recipient },
+        payload: {
+            template,
+            recipient,
+            variables,
+            text: templateText
+        },
         status: 'PENDING',
         scheduled_for: scheduledFor
     };
@@ -49,19 +56,24 @@ const buildMinimalCampaignQueuePayload = (row = {}) => ({
     doctor_id: row.doctor_id || row.user_id || null,
     user_id: row.user_id || row.doctor_id || null,
     language: row.language || row.payload?.template?.language || 'en_US',
-    recipient_phone: row.recipient_phone || row.phone || row.payload?.recipient?.phone || ''
+    recipient_phone: row.recipient_phone || row.phone || row.payload?.recipient?.phone || '',
+    payload: {
+        variables: row.payload?.variables || row.payload?.template?.variables || row.payload?.template?.variablesData || {},
+        text: row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content || ''
+    }
 });
 
 const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, template = {}, recipient = {}, scheduledFor }) => {
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
-    const recipientName = String(recipient.name || '').trim() || 'Unknown Patient';
-    const recipientPhone = String(recipient.phone || '').trim();
+    const recipientName = String(recipient.patientName || recipient.name || recipient.recipient_name || 'Patient').trim();
+    const recipientPhone = String(recipient.patientPhone || recipient.phone || recipient.recipient_phone || '').trim();
     return {
         user_id: resolvedUserId,
         doctor_id: doctorId,
         name: recipientName,
         patient_name: recipientName,
+        patient_phone: recipientPhone,
         phone: recipientPhone,
         last_message: `Queued: ${template.template_name || template.name || 'WhatsApp Template'}`,
         status: 'QUEUED',
@@ -114,12 +126,16 @@ const insertQueuedInboxChatRows = async ({ rows = [] }) => {
     const fallbackRows = rows.map((row) => ({
         name: row.name,
         phone: row.phone,
+        patient_name: row.patient_name || row.name || 'Patient',
+        patient_phone: row.patient_phone || row.phone || '',
         status: row.status,
         doctor_id: row.doctor_id || row.user_id || null
     }));
     const minimalRows = rows.map((row) => ({
         name: row.name || row.patient_name,
         phone: row.phone,
+        patient_name: row.patient_name || row.name || 'Patient',
+        patient_phone: row.patient_phone || row.phone || '',
         status: row.status,
         doctor_id: row.doctor_id || row.user_id || null
     }));
