@@ -81,6 +81,10 @@ const getSupabaseSessionUser = async (req) => {
 
     return data.user;
 };
+const isMissingColumnError = (error) => {
+    const message = String(error?.message || error?.details || '').toLowerCase();
+    return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
 const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, accessToken }) => {
     try {
         await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
@@ -757,11 +761,29 @@ app.get('/api/settings/meta-connection', async (req, res) => {
             return res.status(401).json({ success: false, message: "Unauthorized" });
         }
 
-        const { data, error } = await (supabaseAdmin || supabase)
+        const client = supabaseAdmin || supabase;
+        let { data, error } = await client
             .from('doctor_profiles')
             .select('meta_phone_number_id,meta_waba_id,system_user_token')
             .eq('id', sessionUser.id)
             .maybeSingle();
+
+        if (error && isMissingColumnError(error)) {
+            const fallbackResult = await client
+                .from('doctor_profiles')
+                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+                .eq('id', sessionUser.id)
+                .maybeSingle();
+
+            data = fallbackResult.data
+                ? {
+                    meta_phone_number_id: fallbackResult.data.whatsapp_phone_number_id || '',
+                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id || '',
+                    system_user_token: fallbackResult.data.whatsapp_access_token || ''
+                }
+                : null;
+            error = fallbackResult.error;
+        }
 
         if (error) throw error;
 

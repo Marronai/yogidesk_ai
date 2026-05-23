@@ -137,6 +137,11 @@ const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, acces
     }
 };
 
+const isMissingColumnError = (error) => {
+    const message = String(error?.message || error?.details || '').toLowerCase();
+    return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
+
 /**
  * Dedicated handler for saving Meta Connection credentials.
  * Strictly avoids supabase.auth.updateUser() to prevent session resets.
@@ -177,10 +182,25 @@ exports.saveMetaConnection = async (req, res) => {
             ...(name && { name: String(name).trim() }),
             ...(email && { email: String(email).trim() })
         };
+        const legacyProfilePayload = {
+            whatsapp_phone_number_id: phoneNumberId,
+            whatsapp_business_account_id: businessAccountId,
+            whatsapp_access_token: accessToken,
+            ...(name && { name: String(name).trim() }),
+            ...(email && { email: String(email).trim() })
+        };
 
-        const { error } = await (supabaseAdmin || supabase)
+        const client = supabaseAdmin || supabase;
+        let { error } = await client
             .from('doctor_profiles')
             .upsert({ id: sessionUser.id, ...profilePayload }, { onConflict: 'id' });
+
+        if (error && isMissingColumnError(error)) {
+            const fallbackResult = await client
+                .from('doctor_profiles')
+                .upsert({ id: sessionUser.id, ...legacyProfilePayload }, { onConflict: 'id' });
+            error = fallbackResult.error;
+        }
 
         if (error) throw error;
 
