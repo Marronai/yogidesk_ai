@@ -13,6 +13,61 @@ const shouldBypassCampaignWalletCheck = () => (
     process.env.YOGIDESK_TEST_WALLET_BYPASS === 'true'
 );
 
+const isSchemaCacheError = (error) => {
+    const message = String(error?.message || error?.details || error || '').toLowerCase();
+    return (
+        error?.code === 'PGRST204' ||
+        message.includes('schema cache') ||
+        message.includes('could not find') ||
+        message.includes('column') ||
+        message.includes('relationship')
+    );
+};
+
+const buildCampaignQueuePayload = ({ userId, template = {}, recipient = {}, scheduledFor }) => {
+    const doctorId = userId || template.user_id || template.doctor_id || null;
+    return {
+        user_id: doctorId,
+        doctor_id: doctorId,
+        template_id: template.id || null,
+        template_name: template.template_name || template.name || 'WhatsApp Template',
+        template_category: template.category || 'UTILITY',
+        recipient_name: String(recipient.name || '').trim(),
+        recipient_phone: String(recipient.phone || '').trim(),
+        payload: { template, recipient },
+        status: 'PENDING',
+        scheduled_for: scheduledFor
+    };
+};
+
+const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) {
+        return { inserted: false, fallbackRequired: true };
+    }
+
+    try {
+        const { error } = await supabase.from('campaign_queue').insert(rows);
+        if (error) throw error;
+        return { inserted: true, fallbackRequired: false };
+    } catch (error) {
+        if (isSchemaCacheError(error)) {
+            console.error("Supabase Cached Schema Crash:", error.message);
+            try {
+                if (fallbackRows.length > 0) {
+                    const { error: fallbackError } = await supabase.from('campaign_queue').insert(fallbackRows);
+                    if (fallbackError) throw fallbackError;
+                    return { inserted: true, fallbackRequired: false };
+                }
+            } catch (fallbackError) {
+                console.error("Supabase Cached Schema Crash:", fallbackError.message);
+            }
+            return { inserted: false, fallbackRequired: true, error };
+        }
+
+        throw error;
+    }
+};
+
 const extractVariableValue = (value) => {
     if (value === null || value === undefined) return '';
     if (typeof value !== 'object') return String(value).trim();
@@ -519,3 +574,5 @@ exports.submitTemplate = async (req, res) => {
 };
 
 exports.shouldBypassCampaignWalletCheck = shouldBypassCampaignWalletCheck;
+exports.buildCampaignQueuePayload = buildCampaignQueuePayload;
+exports.insertCampaignQueueRows = insertCampaignQueueRows;

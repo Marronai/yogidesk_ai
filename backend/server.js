@@ -6,7 +6,11 @@ const axios = require('axios');
 const { supabase, supabaseAdmin } = require('./config/supabase');
 const emailConfig = require('./config/emailConfig');
 const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
-const { saveMetaConnection } = require('./controllers/whatsappController');
+const {
+    saveMetaConnection,
+    buildCampaignQueuePayload,
+    insertCampaignQueueRows
+} = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 
 const app = express();
@@ -850,21 +854,25 @@ app.post('/api/campaigns/schedule', async (req, res) => {
         }
 
         const baseTime = Date.now();
-        const queueRows = uniqueRecipients.map((recipient, index) => ({
-            user_id: userId,
-            template_id: template.id || null,
-            template_name: template.template_name || template.name || 'WhatsApp Template',
-            template_category: template.category || 'UTILITY',
-            recipient_name: recipient.name,
-            recipient_phone: recipient.phone,
-            payload: { template, recipient },
-            status: 'PENDING',
-            scheduled_for: new Date(baseTime + index * 3 * 60 * 1000).toISOString(),
-            created_at: new Date().toISOString()
+        const queueRows = uniqueRecipients.map((recipient, index) => buildCampaignQueuePayload({
+            userId,
+            template,
+            recipient,
+            scheduledFor: new Date(baseTime + index * 3 * 60 * 1000).toISOString()
+        }));
+        const fallbackRows = queueRows.map((row) => ({
+            user_id: row.user_id,
+            template_name: row.template_name,
+            recipient_name: row.recipient_name,
+            recipient_phone: row.recipient_phone,
+            status: row.status,
+            scheduled_for: row.scheduled_for
         }));
 
-        const { error: insertError } = await supabase.from('campaign_queue').insert(queueRows);
-        if (insertError) throw insertError;
+        const queueInsertResult = await insertCampaignQueueRows({ rows: queueRows, fallbackRows });
+        if (queueInsertResult.fallbackRequired) {
+            Promise.resolve().then(() => processCampaignFallbackRows(queueRows));
+        }
 
         const { error: countError } = await supabase
             .from('wallets')
@@ -1105,6 +1113,44 @@ const sendCampaignMessageToMeta = async (queueItem) => {
         whatsapp_business_account_id: credentials.businessAccountId,
         response: response.data
     };
+};
+
+const processCampaignFallbackRows = async (rows = []) => {
+    for (const row of rows) {
+        try {
+            const metaResult = await sendCampaignMessageToMeta(row);
+            const logPayload = {
+                queue_id: null,
+                recipient_name: row.recipient_name,
+                recipient_phone: row.recipient_phone,
+                template_name: row.template_name,
+                meta_result: metaResult,
+                fallback_dispatch: true,
+            };
+
+            await Promise.allSettled([
+                supabase.from('wallet_transactions').insert([{
+                    user_id: row.user_id || row.doctor_id,
+                    amount: getUnitCost(row.template_category),
+                    type: 'message_debit',
+                    description: `Fallback campaign sent to ${row.recipient_phone} using ${row.template_name}`,
+                    metadata: logPayload,
+                    created_at: new Date().toISOString(),
+                }]),
+                supabase.from('inbox').insert([{
+                    user_id: row.user_id || row.doctor_id,
+                    patient_name: row.recipient_name,
+                    patient_phone: row.recipient_phone,
+                    direction: 'OUTBOUND',
+                    message: `Sent template: ${row.template_name}`,
+                    metadata: logPayload,
+                    created_at: new Date().toISOString(),
+                }]),
+            ]);
+        } catch (error) {
+            console.error('Campaign fallback dispatch failed:', error.message || error);
+        }
+    }
 };
 
 const processCampaignQueue = async () => {
