@@ -50,11 +50,11 @@ exports.addTeamMember = async (req, res) => {
 
     await newMember.save();
 
-    // 📧 Resend Invite Email Injection
+    // 📧 Brevo invite email dispatch
     const loginLink = process.env.FRONTEND_URL || 'https://yogidesk-ai.com/login';
     const inviteHTML = getInviteEmailHTML(name, loginLink, password);
     sendDirectBrandMail(email, "You are invited to join Yogi Desk AI Team", inviteHTML, 'system')
-      .catch(err => console.error("Resend Mailer Invite Error:", err.message));
+      .catch(err => console.error("Brevo invite mail error:", err.message));
 
     res.json({ msg: "Member Added Successfully", member: newMember });
 

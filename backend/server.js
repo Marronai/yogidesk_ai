@@ -11,8 +11,7 @@ const {
     buildCampaignQueuePayload,
     buildQueuedInboxChatPayload,
     insertCampaignQueueRows,
-    insertQueuedInboxChatRows,
-    safeInsertInboxRows
+    insertQueuedInboxChatRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 
@@ -36,6 +35,21 @@ const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
+const resolveCampaignVariableValue = (value, recipient = {}) => {
+    const rawValue = String(value || '').trim();
+    const token = rawValue.replace(/^\[\[|\]\]$/g, '');
+    const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const replacements = {
+        'patient.name': recipient.name || recipient.patientName || recipient.recipient_name || 'Patient',
+        'patient.phone': recipient.phone || recipient.patientPhone || recipient.recipient_phone || '',
+        'patient.appointment_time': recipient.appointment_time || recipient.appointmentTime || '',
+        today
+    };
+
+    return rawValue.startsWith('[[') && rawValue.endsWith(']]')
+        ? String(replacements[token] || '')
+        : rawValue;
+};
 const getUnitCost = (category) => RATE_CARD[String(category || 'UTILITY').toUpperCase()] || RATE_CARD.UTILITY;
 const formatTemplateName = (value) => (
     String(value || '')
@@ -200,8 +214,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
 };
 const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function' ? emailConfig.sendWelcomeEmail : async () => false;
 const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function' ? emailConfig.sendLoginAlert : async () => false;
-const mailTransporter = emailConfig.transporter;
-const emailFrom = process.env.EMAIL_FROM || 'welcome@yogidesk.com';
+const sendDirectEmail = typeof emailConfig.sendDirectEmail === 'function' ? emailConfig.sendDirectEmail : async () => false;
 
 // ====== HEALTH CHECK ENDPOINT ======
 app.get('/api/health', (req, res) => {
@@ -267,22 +280,20 @@ app.post('/api/team/dispatch-invite-email', async (req, res) => {
     try {
         const { email, name, inviteLink } = req.body || {};
         if (!email || !inviteLink) return res.status(400).json({ success: false, msg: 'Email and invite link are required' });
-        if (!mailTransporter) return res.status(202).json({ success: false, msg: 'SMTP unavailable' });
-
-        await mailTransporter.sendMail({
-            from: emailFrom,
-            to: email,
-            subject: 'You have been invited to Yogi Desk',
-            html: `
+        const sent = await sendDirectEmail(
+            email,
+            'You have been invited to Yogi Desk',
+            `
               <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:14px">
                 <h2 style="margin:0 0 12px;color:#111827">Yogi Desk team invite</h2>
                 <p style="color:#4b5563;line-height:1.6">Hi ${name || 'there'}, your clinic admin has invited you to join their Yogi Desk workspace.</p>
                 <p><a href="${inviteLink}" style="display:inline-block;background:#ff6b00;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700">Accept Invite</a></p>
               </div>
-            `
-        });
+            `,
+            'system'
+        );
 
-        return res.status(200).json({ success: true });
+        return res.status(sent ? 200 : 202).json({ success: sent });
     } catch (error) {
         console.error('Team invite email dispatch error:', error.message);
         return res.status(202).json({ success: false });
@@ -831,7 +842,8 @@ app.post('/api/campaigns/schedule', async (req, res) => {
         const uniqueRecipients = recipients
             .map((recipient) => ({
                 name: String(recipient.name || '').trim(),
-                phone: normalizePhone(recipient.phone)
+                phone: normalizePhone(recipient.phone),
+                appointment_time: String(recipient.appointment_time || recipient.appointmentTime || '').trim()
             }))
             .filter((recipient) => {
                 if (!recipient.name || !recipient.phone || seen.has(recipient.phone)) return false;
@@ -859,7 +871,15 @@ app.post('/api/campaigns/schedule', async (req, res) => {
         const baseTime = Date.now();
         const queueRows = uniqueRecipients.map((recipient, index) => buildCampaignQueuePayload({
             userId,
-            template,
+            template: {
+                ...template,
+                variables: Object.fromEntries(
+                    Object.entries(template.variables || {}).map(([key, value]) => [
+                        key,
+                        resolveCampaignVariableValue(value, recipient)
+                    ])
+                )
+            },
             recipient,
             scheduledFor: new Date(baseTime + index * 3 * 60 * 1000).toISOString()
         }));
@@ -883,9 +903,10 @@ app.post('/api/campaigns/schedule', async (req, res) => {
         if (queueInsertResult.fallbackRequired) {
             Promise.resolve().then(() => processCampaignFallbackRows(queueRows));
         }
+        await insertQueuedInboxChatRows({ rows: inboxChatRows });
         Promise.resolve()
-            .then(() => insertQueuedInboxChatRows({ rows: inboxChatRows }))
-            .catch((error) => console.error('Queued inbox chat insert failed:', error.message || error));
+            .then(() => processCampaignQueue())
+            .catch((error) => console.error('Immediate campaign dispatch failed:', error.message || error));
 
         const { error: countError } = await supabase
             .from('wallets')
@@ -1122,7 +1143,7 @@ const sendCampaignMessageToMeta = async (queueItem) => {
     const url = `https://graph.facebook.com/v17.0/${finalPhoneId}/messages`;
     const payload = {
         messaging_product: 'whatsapp',
-        to: queueItem.recipient_phone,
+        to: sanitizeMetaPhoneNumber(queueItem.recipient_phone),
         type: 'template',
         template: {
             name: queueItem.template_name,
@@ -1197,15 +1218,6 @@ const processCampaignFallbackRows = async (rows = []) => {
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
                 }]),
-                safeInsertInboxRows({ table: 'inbox', rows: [{
-                    user_id: row.user_id || row.doctor_id,
-                    patient_name: row.recipient_name,
-                    patient_phone: row.recipient_phone,
-                    direction: 'OUTBOUND',
-                    message: `Sent template: ${row.template_name}`,
-                    metadata: logPayload,
-                    created_at: new Date().toISOString(),
-                }] }),
             ]);
         } catch (error) {
             if (error.clientPayload) {
@@ -1289,15 +1301,6 @@ const processCampaignQueue = async () => {
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
                 }]),
-                safeInsertInboxRows({ table: 'inbox', rows: [{
-                    user_id: row.user_id,
-                    patient_name: row.recipient_name,
-                    patient_phone: row.recipient_phone,
-                    direction: 'OUTBOUND',
-                    message: `Sent template: ${row.template_name}`,
-                    metadata: logPayload,
-                    created_at: new Date().toISOString(),
-                }] }),
             ]);
         }
     } catch (error) {

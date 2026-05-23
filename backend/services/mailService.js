@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const BREVO_SMTP_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
 const sendDirectBrandMail = async (to, subject, htmlContent, senderType = 'system') => {
   const fromEmail = senderType === 'onboarding'
@@ -8,7 +8,7 @@ const sendDirectBrandMail = async (to, subject, htmlContent, senderType = 'syste
     : 'no-reply@yogidesk-ai.com';
 
   try {
-    await axios.post(BREVO_SMTP_EMAIL_API_URL, {
+    await axios.post(BREVO_EMAIL_API_URL, {
       sender: { name: 'Yogi Desk AI', email: fromEmail },
       to: [{ email: to }],
       subject: subject,

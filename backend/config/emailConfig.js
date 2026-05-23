@@ -1,39 +1,11 @@
 const axios = require('axios');
-const nodemailer = require('nodemailer');
 
-const smtpHost = process.env.SMTP_HOST;
-const smtpPort = Number(process.env.SMTP_PORT);
-const smtpUser = process.env.SMTP_USER;
-const smtpPass = process.env.SMTP_PASS;
-const emailFrom = process.env.EMAIL_FROM || 'welcome@yogidesk.com';
 const brevoApiKey = process.env.BREVO_API_KEY;
 const brevoEmailApiUrl = 'https://api.brevo.com/v3/smtp/email';
 
-const missingEmailVars = [];
-if (!smtpHost) missingEmailVars.push('SMTP_HOST');
-if (!process.env.SMTP_PORT) missingEmailVars.push('SMTP_PORT');
-if (!smtpUser) missingEmailVars.push('SMTP_USER');
-if (!smtpPass) missingEmailVars.push('SMTP_PASS');
-
-if (!brevoApiKey && missingEmailVars.length > 0) {
-  console.error(`❌ Missing email configuration variables in .env: ${missingEmailVars.join(', ')}.`);
-  console.error('   Email sending is disabled until these values are defined or BREVO_API_KEY is added.');
+if (!brevoApiKey) {
+  console.error('Brevo email is not configured. Please add BREVO_API_KEY in the backend environment.');
 }
-
-const transporter = missingEmailVars.length === 0
-  ? nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      connectionTimeout: 5000,
-      greetingTimeout: 5000,
-      socketTimeout: 8000,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass
-      }
-    })
-  : null;
 
 const getBrevoSender = (senderType = 'system') => ({
   name: 'Yogi Desk AI',
@@ -62,19 +34,6 @@ const sendViaBrevo = async ({ to, subject, html, senderType }) => {
   return true;
 };
 
-const sendViaSmtp = async ({ to, subject, html }) => {
-  if (!transporter || !emailFrom) return false;
-
-  const info = await transporter.sendMail({
-    from: emailFrom,
-    to,
-    subject,
-    html
-  });
-
-  console.log('Email sent via SMTP:', info.response);
-  return true;
-};
 
 const deliverMail = async ({ to, subject, html, senderType = 'system', purpose = 'email' }) => {
   if (!to) {
@@ -83,27 +42,14 @@ const deliverMail = async ({ to, subject, html, senderType = 'system', purpose =
   }
 
   try {
-    if (brevoApiKey) {
-      return await sendViaBrevo({ to, subject, html, senderType });
+    if (!brevoApiKey) {
+      console.error(`Email sending is not configured for ${purpose}. Add BREVO_API_KEY.`);
+      return false;
     }
 
-    if (transporter) {
-      return await sendViaSmtp({ to, subject, html });
-    }
-
-    console.error(`Email sending is not configured for ${purpose}. Add BREVO_API_KEY or SMTP settings.`);
-    return false;
+    return await sendViaBrevo({ to, subject, html, senderType });
   } catch (primaryError) {
-    console.error(`Primary ${purpose} email send failed:`, primaryError.response?.data || primaryError.message);
-
-    if (brevoApiKey && transporter) {
-      try {
-        return await sendViaSmtp({ to, subject, html });
-      } catch (smtpError) {
-        console.error(`SMTP fallback for ${purpose} failed:`, smtpError.message);
-      }
-    }
-
+    console.error(`Brevo ${purpose} email send failed:`, primaryError.response?.data || primaryError.message);
     return false;
   }
 };
@@ -553,26 +499,25 @@ const sendLoginAlert = async (email, userName, deviceInfo, ipAddress) => {
   }
 };
 
-// 🛠️ Verify Transporter Connection (Optional - for testing)
+// Brevo connection/config check
+const sendDirectEmail = async (to, subject, htmlContent, senderType = 'system') => (
+  deliverMail({
+    to,
+    subject,
+    html: htmlContent,
+    senderType,
+    purpose: 'direct'
+  })
+);
+
 const verifyConnection = async () => {
-  if (brevoApiKey) {
-    console.log('Brevo API key configured; transactional email will use Brevo HTTPS API.');
-    return true;
-  }
-
-  if (!transporter) {
-    console.error('❌ Nodemailer transporter unavailable: missing SMTP configuration.');
+  if (!brevoApiKey) {
+    console.error('Brevo email unavailable: missing BREVO_API_KEY.');
     return false;
   }
 
-  try {
-    await transporter.verify();
-    console.log('✅ Nodemailer transporter connected successfully');
-    return true;
-  } catch (error) {
-    console.error('❌ Nodemailer connection failed:', error.message);
-    return false;
-  }
+  console.log('Brevo API key configured; transactional email will use Brevo HTTPS API.');
+  return true;
 };
 
-module.exports = { transporter, sendOTP, sendWelcomeEmail, sendLoginAlert, verifyConnection };
+module.exports = { sendOTP, sendWelcomeEmail, sendLoginAlert, sendDirectEmail, verifyConnection };

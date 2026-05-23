@@ -185,31 +185,19 @@ const Inbox = () => {
     loadInbox();
   }, [loadInbox, reloadToken]);
 
-  const loadMessages = async (chatId) => {
-    let data = [];
-    try {
-      const result = await supabase
-        .from('inbox_messages')
-        .select('id, body, created_at, sender')
-        .eq('chat_id', chatId)
-        .order('created_at', { ascending: true });
-      if (result.error) throw result.error;
-      data = result.data || [];
-    } catch (error) {
-      logInboxError(error);
-    }
+  const mapStoredMessage = (item) => ({
+    id: item.id || item.created_at || Date.now(),
+    text: item.body || item.text || '',
+    sender: item.sender || 'user',
+    from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
+    type: item.type || (item.is_private_note ? 'private' : 'public'),
+    is_private_note: Boolean(item.is_private_note),
+    time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
+  });
 
-    setMessages(Array.isArray(data)
-      ? data.map((item) => ({
-        id: item.id,
-        text: item.body || '',
-        sender: item.sender || 'user', // Fallback to map from the standard sender string context
-        from_me: item.sender === 'agent' || item.sender === 'doctor',
-        type: 'public',
-        is_private_note: false,
-        time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      }))
-      : []);
+  const loadMessages = (chat) => {
+    const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
+    setMessages(storedMessages.map(mapStoredMessage));
   };
 
   const updateConversation = (chatId, patch) => {
@@ -248,14 +236,32 @@ const Inbox = () => {
     setMessage('');
 
     try {
-      const { error } = await supabase.from('inbox_messages').insert([{
-        chat_id: selectedChat.id,
+      const storedMessage = {
+        id: created.id,
         body: text,
         sender: 'agent',
+        from_me: true,
+        type: created.type,
         is_private_note: isPrivateNote,
         created_at: new Date().toISOString(),
-      }]);
+      };
+      const metadata = {
+        ...(selectedChat.metadata || {}),
+        messages: [...(selectedChat.metadata?.messages || []), storedMessage],
+      };
+      const { error } = await supabase
+        .from('inbox_chats')
+        .update({
+          metadata,
+          last_message: isPrivateNote ? selectedChat.lastMsg : text,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', selectedChat.id);
       if (error) throw error;
+      updateConversation(selectedChat.id, {
+        metadata,
+        ...(isPrivateNote ? {} : { lastMsg: text }),
+      });
     } catch (error) {
       logInboxError(error);
     }
@@ -312,7 +318,7 @@ const Inbox = () => {
     const agent = agents.find((item) => String(item.id) === String(chat.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
-    loadMessages(chat.id);
+    loadMessages(chat);
   };
 
   const chatViewportStyle = chatBg.type === 'image'
