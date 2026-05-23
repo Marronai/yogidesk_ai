@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 // Layouts & Guards
 import MainLayout from './layout/MainLayout';
@@ -42,10 +42,14 @@ import SuperAdminRoute from './components/SuperAdminRoute';
  // Agar navbar bhi global hai
 
 
-const App = () => {
-  
+const AppContent = () => {
+  const location = useLocation();
+  // Exclude footer from auth screens and internal dashboard views
+  const excludeFooterRoutes = ['/login', '/signup', '/dashboard', '/templates', '/settings', '/hospital', '/yogi-core-control-center', '/admin'];
+  const shouldRenderFooter = !excludeFooterRoutes.some(route => location.pathname.startsWith(route));
+
   return (
-      <BrowserRouter>
+      <>
         <Routes>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<Terms />} />
@@ -122,8 +126,16 @@ const App = () => {
           {/* Agar kuch galat type kare toh wapas Landing Page par bhej do */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <Footer />
-      </BrowserRouter>
+        {shouldRenderFooter && <Footer />}
+      </>
+  );
+};
+
+const App = () => {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 };
 

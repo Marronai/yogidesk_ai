@@ -120,38 +120,6 @@ const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, acces
         return false;
     }
 };
-const readDoctorMetaConnection = async (doctorId) => {
-    const client = supabaseAdmin || supabase;
-    if (!client || !doctorId) return {};
-
-    const metaResult = await client
-        .from('doctor_profiles')
-        .select('meta_phone_number_id,meta_waba_id,system_user_token')
-        .eq('id', doctorId)
-        .maybeSingle();
-
-    if (!metaResult.error) {
-        return {
-            meta_phone_number_id: metaResult.data?.meta_phone_number_id || '',
-            meta_waba_id: metaResult.data?.meta_waba_id || '',
-            system_user_token: metaResult.data?.system_user_token || ''
-        };
-    }
-
-    const whatsappResult = await client
-        .from('doctor_profiles')
-        .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-        .eq('id', doctorId)
-        .maybeSingle();
-
-    if (whatsappResult.error) throw whatsappResult.error;
-
-    return {
-        meta_phone_number_id: whatsappResult.data?.whatsapp_phone_number_id || '',
-        meta_waba_id: whatsappResult.data?.whatsapp_business_account_id || '',
-        system_user_token: whatsappResult.data?.whatsapp_access_token || ''
-    };
-};
 const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
     if (Array.isArray(components) && components.length > 0) {
         return components.map((component) => {
@@ -787,25 +755,6 @@ app.post('/api/templates', async (req, res) => {
     }
 });
 
-app.get('/api/settings/meta-connection', async (req, res) => {
-    try {
-        if (!supabase) {
-            return res.status(500).json({ success: false, message: "Database connection unavailable." });
-        }
-
-        const sessionUser = await getSupabaseSessionUser(req);
-        if (!sessionUser?.id) {
-            return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
-        }
-
-        const data = await readDoctorMetaConnection(sessionUser.id);
-        return res.status(200).json({ success: true, data });
-    } catch (error) {
-        console.error('Meta settings fetch route failed:', error.message || error);
-        return res.status(400).json({ success: false, message: "Unable to fetch Meta configuration for this doctor profile." });
-    }
-});
-
 app.post('/api/settings/meta-connection', async (req, res) => {
     try {
         if (!supabase) {
@@ -817,9 +766,9 @@ app.post('/api/settings/meta-connection', async (req, res) => {
             return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
         }
 
-        const phoneNumberId = cleanCredentialValue(req.body.whatsappPhoneNumberId || req.body.meta_phone_number_id || req.body.whatsapp_phone_number_id);
-        const businessAccountId = cleanCredentialValue(req.body.whatsappBusinessAccountId || req.body.whatsappWabaId || req.body.meta_waba_id || req.body.whatsapp_business_account_id);
-        const accessToken = cleanCredentialValue(req.body.whatsappAccessToken || req.body.system_user_token || req.body.whatsapp_access_token);
+        const phoneNumberId = cleanCredentialValue(req.body.whatsappPhoneNumberId || req.body.whatsapp_phone_number_id);
+        const businessAccountId = cleanCredentialValue(req.body.whatsappBusinessAccountId || req.body.whatsappWabaId || req.body.whatsapp_business_account_id);
+        const accessToken = cleanCredentialValue(req.body.whatsappAccessToken || req.body.whatsapp_access_token);
         const name = cleanCredentialValue(req.body.name);
         const email = cleanCredentialValue(req.body.email || sessionUser.email);
 
@@ -835,54 +784,24 @@ app.post('/api/settings/meta-connection', async (req, res) => {
             return res.status(400).json(invalidMetaConfigurationResponse);
         }
 
-        const profileBasePayload = {
+        const profilePayload = {
             id: sessionUser.id,
-        };
-
-        if (name) profileBasePayload.name = name;
-        if (email) profileBasePayload.email = email;
-
-        const client = supabaseAdmin || supabase;
-        const metaPayload = {
-            ...profileBasePayload,
-            meta_phone_number_id: phoneNumberId,
-            meta_waba_id: businessAccountId,
-            system_user_token: accessToken
-        };
-        const whatsappPayload = {
-            ...profileBasePayload,
             whatsapp_phone_number_id: phoneNumberId,
             whatsapp_business_account_id: businessAccountId,
             whatsapp_access_token: accessToken
         };
 
-        let { data, error } = await client
+        if (name) profilePayload.name = name;
+        if (email) profilePayload.email = email;
+
+        // Perform isolated database update on profile table. 
+        // Avoids auth.updateUser() which triggers session re-validation and forced logouts.
+        const { data, error } = await (supabaseAdmin || supabase)
             .from('doctor_profiles')
-            .upsert(metaPayload, { onConflict: 'id' })
-            .select('id,meta_phone_number_id,meta_waba_id')
+            .update(profilePayload)
             .eq('id', sessionUser.id)
+            .select('id,whatsapp_phone_number_id,whatsapp_business_account_id')
             .maybeSingle();
-
-        if (error) {
-            const fallbackResult = await client
-                .from('doctor_profiles')
-                .upsert(whatsappPayload, { onConflict: 'id' })
-                .select('id,whatsapp_phone_number_id,whatsapp_business_account_id')
-                .eq('id', sessionUser.id)
-                .maybeSingle();
-
-            data = fallbackResult.data;
-            error = fallbackResult.error;
-        } else {
-            await client
-                .from('doctor_profiles')
-                .update({
-                    whatsapp_phone_number_id: phoneNumberId,
-                    whatsapp_business_account_id: businessAccountId,
-                    whatsapp_access_token: accessToken
-                })
-                .eq('id', sessionUser.id);
-        }
 
         if (error || !data) {
             console.error('Supabase Meta settings save failed:', error?.message || 'No profile row returned');
