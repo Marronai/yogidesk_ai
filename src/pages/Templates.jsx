@@ -73,12 +73,16 @@ const Templates = () => {
 
         const { data: profileData } = await supabase
           .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id,system_user_token,meta_phone_number_id,meta_waba_id')
           .eq('id', userId)
           .maybeSingle();
 
         setDoctorProfile(profileData || null);
-        if (profileData?.whatsapp_access_token && profileData?.whatsapp_phone_number_id && profileData?.whatsapp_business_account_id) {
+        if (
+          (profileData?.whatsapp_access_token || profileData?.system_user_token) &&
+          (profileData?.whatsapp_phone_number_id || profileData?.meta_phone_number_id) &&
+          (profileData?.whatsapp_business_account_id || profileData?.meta_waba_id)
+        ) {
           setError('');
         }
       } finally {
@@ -111,6 +115,11 @@ const Templates = () => {
   ];
 
   const metaCredentials = doctorProfile || {};
+  const resolveMetaCredentials = (profile = {}) => ({
+    accessToken: profile.whatsapp_access_token || profile.system_user_token || '',
+    phoneNumberId: profile.whatsapp_phone_number_id || profile.meta_phone_number_id || '',
+    businessAccountId: profile.whatsapp_business_account_id || profile.meta_waba_id || ''
+  });
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
 
   const formatTemplateName = (value, trimEdges = true) => {
@@ -353,20 +362,24 @@ const Templates = () => {
       const userId = authData?.user?.id || localStorage.getItem('user_id');
       if (!userId) throw new Error('User ID not found. Please login again.');
       let activeProfile = doctorProfile;
-      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token) {
+      let activeCredentials = resolveMetaCredentials(activeProfile || {});
+      if (!activeCredentials.businessAccountId || !activeCredentials.accessToken || !activeCredentials.phoneNumberId) {
         const { data: profileData } = await supabase
           .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id,system_user_token,meta_phone_number_id,meta_waba_id')
           .eq('id', userId)
           .maybeSingle();
         activeProfile = profileData || null;
         setDoctorProfile(activeProfile);
-        if (activeProfile?.whatsapp_access_token && activeProfile?.whatsapp_phone_number_id && activeProfile?.whatsapp_business_account_id) {
+        const refreshedCredentials = resolveMetaCredentials(activeProfile || {});
+        if (refreshedCredentials.accessToken && refreshedCredentials.phoneNumberId && refreshedCredentials.businessAccountId) {
           setError('');
         }
       }
 
-      if (!activeProfile?.whatsapp_business_account_id || !activeProfile?.whatsapp_access_token || !activeProfile?.whatsapp_phone_number_id) {
+      const credentials = resolveMetaCredentials(activeProfile || {});
+
+      if (!credentials.businessAccountId || !credentials.accessToken || !credentials.phoneNumberId) {
         throw new Error('Connect Meta API credentials in Settings before submitting templates.');
       }
 
@@ -374,14 +387,22 @@ const Templates = () => {
       const { components, buttons: buttonPayload } = buildTemplateComponents(bodyToSubmit);
       const bodyVariableParameters = (customVariables || [])
         .filter((variable) => new RegExp(`\\{\\{${variable.index}\\}\\}`).test(bodyToSubmit))
-        .sort((a, b) => a.index - b.index);
+        .sort((a, b) => a.index - b.index)
+        .map((variable) => ({
+          ...variable,
+          value: String(variableSamples?.[variable.index] || '').trim()
+        }));
+
+      const variablePayload = Object.fromEntries(
+        Object.entries(variableSamples || {}).map(([key, value]) => [key, String(value || '').trim()])
+      );
 
       await api.post(templateApiPath, {
         userId,
         messaging_product: 'whatsapp',
-        whatsapp_business_account_id: activeProfile.whatsapp_business_account_id,
-        whatsapp_access_token: activeProfile.whatsapp_access_token,
-        whatsapp_phone_number_id: activeProfile.whatsapp_phone_number_id || null,
+        whatsapp_business_account_id: credentials.businessAccountId,
+        whatsapp_access_token: credentials.accessToken,
+        whatsapp_phone_number_id: credentials.phoneNumberId || null,
         name: formattedTemplateName,
         bodyText: bodyToSubmit,
         language: languageToSubmit,
@@ -391,8 +412,8 @@ const Templates = () => {
         headerText: (template?.headerText || '').trim(),
         footerText: (template?.footerText || '').trim(),
         buttons: buttonPayload,
-        variablesData: variableSamples,
-        bodyVariableParameters: bodyVariableParameters, // This seems to be a duplicate or for internal tracking
+        variablesData: variablePayload,
+        bodyVariableParameters: bodyVariableParameters,
         customVariables: bodyVariableParameters
       });
 
@@ -428,7 +449,7 @@ const Templates = () => {
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Create WhatsApp Template</h1>
             <p className="text-slate-500 text-sm mt-1">Configure your message, media, and interactive buttons.</p>
           </div>
-          <button onClick={handleSubmit} disabled={saving || isProfileLoading || !metaCredentials.whatsapp_access_token || !allSamplesProvided} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
+          <button onClick={handleSubmit} disabled={saving || isProfileLoading || !resolveMetaCredentials(metaCredentials).accessToken || !allSamplesProvided} className="px-8 py-3 bg-[#25D366] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm shadow-lg shadow-green-100 hover:bg-[#1fb355] transition-all flex items-center gap-2">
             {isProfileLoading ? (
               <>
                 <Loader size={18} className="animate-spin" />

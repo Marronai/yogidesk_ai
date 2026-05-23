@@ -35,6 +35,50 @@ const sanitizeMetaPhoneNumber = (value) => {
   return digits.length === 10 ? `91${digits}` : digits;
 };
 
+const extractVariableSample = (variable) => {
+  if (variable === null || variable === undefined) return '';
+  if (typeof variable !== 'object') return String(variable).trim();
+  return String(
+    variable.value ||
+    variable.sample ||
+    variable.example ||
+    variable.text ||
+    variable.customValue ||
+    variable.custom ||
+    ''
+  ).trim();
+};
+
+const normalizeBodyVariableSamples = (...sources) => {
+  const samplesByIndex = new Map();
+
+  sources.forEach((source) => {
+    if (!source) return;
+
+    if (Array.isArray(source)) {
+      source.forEach((item, position) => {
+        const rawIndex = typeof item === 'object' && item !== null
+          ? item.index || item.position || item.key || item.variable || item.placeholder || position + 1
+          : position + 1;
+        const index = Number(String(rawIndex).replace(/\D/g, ''));
+        const sample = extractVariableSample(item);
+        if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
+      });
+      return;
+    }
+
+    if (typeof source === 'object') {
+      Object.entries(source).forEach(([rawKey, rawValue]) => {
+        const index = Number(String(rawKey).replace(/\D/g, ''));
+        const sample = extractVariableSample(rawValue);
+        if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
+      });
+    }
+  });
+
+  return samplesByIndex;
+};
+
 const getBodyExample = (bodyText, bodyVariableParameters = []) => {
   const indexes = Array.from(String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g), (match) => Number(match[1]))
     .filter(Number.isFinite)
@@ -42,16 +86,12 @@ const getBodyExample = (bodyText, bodyVariableParameters = []) => {
 
   if (!indexes.length) return null;
 
-  const labelsByIndex = new Map(
-    (Array.isArray(bodyVariableParameters) ? bodyVariableParameters : [])
-      .map((variable) => [Number(variable.index), String(variable.label || '').trim()])
-      .filter(([index, label]) => Number.isFinite(index) && label)
-  );
+  const samplesByIndex = normalizeBodyVariableSamples(bodyVariableParameters);
   const defaultSamples = ['Sample Patient Name', 'Sample Clinic Location', '20-May-2026', '04:00 PM'];
 
   return {
     body_text: [
-      indexes.map((index, position) => labelsByIndex.get(index) || defaultSamples[position] || `Sample Value ${index}`)
+      indexes.map((index, position) => samplesByIndex.get(index) || defaultSamples[position] || `Sample Value ${index}`)
     ]
   };
 };
@@ -86,7 +126,7 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
           const buttonList = component.buttons
             .map((btn) => {
               const text = String(btn.text || '').trim();
-              if (btn.type === 'URL') {
+              if (String(btn.type || '').toUpperCase() === 'URL') {
                 const url = String(btn.url || '').trim();
                 return text && url ? { type: 'URL', text, url } : null;
               }
@@ -129,7 +169,7 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
 
   const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
     const text = String(btn.text || '').trim();
-    if (btn.type === 'URL') {
+    if (String(btn.type || '').toUpperCase() === 'URL') {
       const url = String(btn.url || '').trim();
       return text && url ? { type: 'URL', text, url } : null;
     }
@@ -281,7 +321,8 @@ exports.createTemplate = async (req, res) => {
       whatsapp_business_account_id: requestBusinessAccountId,
       whatsapp_access_token: requestAccessToken,
       bodyVariableParameters = [],
-      customVariables = []
+      customVariables = [],
+      variablesData = {}
     } = req.body;
 
     if (!userId) {
@@ -305,9 +346,11 @@ exports.createTemplate = async (req, res) => {
       footerText,
       buttons,
       components,
-      bodyVariableParameters: Array.isArray(bodyVariableParameters) && bodyVariableParameters.length
-        ? bodyVariableParameters
-        : customVariables
+      bodyVariableParameters: [
+        ...(Array.isArray(bodyVariableParameters) ? bodyVariableParameters : []),
+        ...(Array.isArray(customVariables) ? customVariables : []),
+        variablesData
+      ]
     });
     const storedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
     const metaLanguage = normalizeTemplateLanguage(language);

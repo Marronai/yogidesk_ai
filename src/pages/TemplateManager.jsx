@@ -28,6 +28,46 @@ const TemplateManager = () => {
   const libraryTemplates = useMemo(() => getTemplatesBySpecialty(selectedSpecialty), [selectedSpecialty]);
   const [activeLang, setActiveLang] = useState('EN');
 
+  const fetchTemplates = useCallback(async ({ silent = false } = {}) => {
+    try {
+      const userId = localStorage.getItem('user_id');
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+
+      if (!silent) setSyncing(true);
+      const response = await api.get(templateApiPath, { params: { userId } });
+      setTemplates(Array.isArray(response.data) ? response.data : []);
+      setError('');
+    } catch (err) {
+      console.error('Template fetch failed:', err);
+      if (!silent) setError('Unable to load templates at the moment.');
+      setTemplates((current) => current || []);
+    } finally {
+      if (!silent) setSyncing(false);
+      setLoading(false);
+    }
+  }, [templateApiPath]);
+
+  const syncAndRefreshTemplates = useCallback(async ({ silent = false } = {}) => {
+    try {
+      if (!silent) setIsSyncingStatuses(true);
+      const userId = localStorage.getItem('user_id');
+      try {
+        await api.get('/templates/sync', { params: { userId } });
+      } catch {
+        await api.post('/whatsapp/templates/sync');
+      }
+      await fetchTemplates({ silent });
+    } catch (err) {
+      console.error('Template status sync failed:', err);
+      if (!silent) setError('Unable to sync template statuses right now.');
+    } finally {
+      if (!silent) setIsSyncingStatuses(false);
+    }
+  }, [fetchTemplates]);
+
   useEffect(() => {
     const fetchPlanData = async () => {
       const userId = localStorage.getItem('user_id');
@@ -41,30 +81,15 @@ const TemplateManager = () => {
       if (!error && data?.plan_tier) setPlanTier(data.plan_tier);
     };
 
-    const fetchTemplates = async () => {
-      try {
-        const userId = localStorage.getItem('user_id');
-        if (!userId) {
-          setLoading(false);
-          return;
-        }
-
-        setSyncing(true);
-        const response = await api.get(templateApiPath, { params: { userId } });
-        setTemplates(Array.isArray(response.data) ? response.data : []);
-      } catch (err) {
-        console.error('Template fetch failed:', err);
-        setError('Unable to load templates at the moment.');
-        setTemplates([]);
-      } finally {
-        setSyncing(false);
-        setLoading(false);
-      }
-    };
-
     fetchPlanData();
     fetchTemplates();
-  }, []);
+    syncAndRefreshTemplates({ silent: true });
+    const intervalId = window.setInterval(() => {
+      syncAndRefreshTemplates({ silent: true });
+    }, 5 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [fetchTemplates, syncAndRefreshTemplates]);
 
   const planLimits = {
     'Starter Clinic': 20,
@@ -118,19 +143,7 @@ const TemplateManager = () => {
   };
 
   const handleSyncStatuses = async () => {
-    setIsSyncingStatuses(true);
-    try {
-      const response = await api.post('/whatsapp/templates/sync');
-      if (response.data.success) {
-        const userId = localStorage.getItem('user_id');
-        const refreshResponse = await api.get(templateApiPath, { params: { userId } });
-        setTemplates(Array.isArray(refreshResponse.data) ? refreshResponse.data : []);
-      }
-    } catch (err) {
-      console.error('Manual sync failed:', err);
-    } finally {
-      setIsSyncingStatuses(false);
-    }
+    await syncAndRefreshTemplates();
   };
 
   const templateRows = Array.isArray(filteredTemplates) ? filteredTemplates : [];

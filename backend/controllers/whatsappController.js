@@ -438,12 +438,20 @@ exports.submitTemplate = async (req, res) => {
             if (buttons && buttons.length > 0) {
                 components.push({
                     type: 'buttons',
-                    buttons: buttons.map(btn => ({
-                        type: btn.type === 'URL' ? 'url' : 'phone_number',
-                        text: btn.text,
-                        ...(btn.type === 'URL' && { url: btn.url }),
-                        ...(btn.type === 'PHONE_NUMBER' && { phone_number: btn.phone_number })
-                    }))
+                    buttons: buttons
+                        .map((btn) => {
+                            const text = String(btn.text || '').trim();
+                            if (!text) return null;
+                            if (String(btn.type || '').toUpperCase() === 'URL') {
+                                const url = String(btn.url || '').trim();
+                                return url ? { type: 'url', text, url } : null;
+                            }
+                            const phoneNumber = String(btn.phone_number || btn.phone || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+                            const normalizedPhone = phoneNumber.length === 10 ? `91${phoneNumber}` : phoneNumber;
+                            return normalizedPhone ? { type: 'phone_number', text, phone_number: normalizedPhone } : null;
+                        })
+                        .filter(Boolean)
+                        .slice(0, 2)
                 });
             }
         }

@@ -49,6 +49,64 @@ const sanitizeMetaPhoneNumber = (value) => {
     const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
 };
+const extractVariableSample = (variable) => {
+    if (variable === null || variable === undefined) return '';
+    if (typeof variable !== 'object') return String(variable).trim();
+    return String(
+        variable.value ||
+        variable.sample ||
+        variable.example ||
+        variable.text ||
+        variable.customValue ||
+        variable.custom ||
+        ''
+    ).trim();
+};
+const normalizeBodyVariableSamples = (...sources) => {
+    const samplesByIndex = new Map();
+
+    sources.forEach((source) => {
+        if (!source) return;
+
+        if (Array.isArray(source)) {
+            source.forEach((item, position) => {
+                const rawIndex = typeof item === 'object' && item !== null
+                    ? item.index || item.position || item.key || item.variable || item.placeholder || position + 1
+                    : position + 1;
+                const index = Number(String(rawIndex).replace(/\D/g, ''));
+                const sample = extractVariableSample(item);
+                if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
+            });
+            return;
+        }
+
+        if (typeof source === 'object') {
+            Object.entries(source).forEach(([rawKey, rawValue]) => {
+                const index = Number(String(rawKey).replace(/\D/g, ''));
+                const sample = extractVariableSample(rawValue);
+                if (Number.isFinite(index) && index > 0 && sample) samplesByIndex.set(index, sample);
+            });
+        }
+    });
+
+    return samplesByIndex;
+};
+const getBodyExample = (bodyText, ...sampleSources) => {
+    const indexes = Array.from(String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g), (match) => Number(match[1]))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+
+    if (!indexes.length) return null;
+
+    const samplesByIndex = normalizeBodyVariableSamples(...sampleSources);
+    const defaultSamples = ['Sample Patient Name', 'Sample Clinic Location', '20-May-2026', '04:00 PM'];
+
+    return {
+        body_text: [
+            indexes.map((index, position) => samplesByIndex.get(index) || defaultSamples[position] || `Sample Value ${index}`)
+        ]
+    };
+};
 const cleanCredentialValue = (value) => String(value || '').trim();
 const invalidMetaConfigurationResponse = {
     success: false,
@@ -115,7 +173,10 @@ const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, acces
         return false;
     }
 };
-const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components }) => {
+const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText, buttons, components, bodyVariableParameters, variablesData, customVariables }) => {
+    const sampleSources = [bodyVariableParameters, customVariables, variablesData];
+    const bodyExample = getBodyExample(bodyText, ...sampleSources);
+
     if (Array.isArray(components) && components.length > 0) {
         return components.map((component) => {
             if (!component?.type) return null;
@@ -131,7 +192,8 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
             }
             if (component.type === 'BODY') {
                 const text = String(component.text || bodyText || '').trim();
-                return text ? { type: 'BODY', text } : null;
+                const example = getBodyExample(text, ...sampleSources);
+                return text ? { type: 'BODY', text, ...(example && { example }) } : null;
             }
             if (component.type === 'FOOTER') {
                 const text = String(component.text || '').trim();
@@ -140,7 +202,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
             if (component.type === 'BUTTONS' && Array.isArray(component.buttons)) {
                 const buttonList = component.buttons.map((btn) => {
                     const text = String(btn.text || '').trim();
-                    if (btn.type === 'URL') {
+                    if (String(btn.type || '').toUpperCase() === 'URL') {
                         const url = String(btn.url || '').trim();
                         return text && url ? { type: 'URL', text, url } : null;
                     }
@@ -168,7 +230,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
         graphComponents.push({ type: 'HEADER', format: 'LOCATION' });
     }
     if (cleanBodyText) {
-        graphComponents.push({ type: 'BODY', text: cleanBodyText });
+        graphComponents.push({ type: 'BODY', text: cleanBodyText, ...(bodyExample && { example: bodyExample }) });
     }
     if (cleanFooterText) {
         graphComponents.push({ type: 'FOOTER', text: cleanFooterText });
@@ -176,7 +238,7 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
 
     const sanitizedButtons = Array.isArray(buttons) ? buttons.slice(0, 2).map((btn) => {
         const text = String(btn.text || '').trim();
-        if (btn.type === 'URL') {
+        if (String(btn.type || '').toUpperCase() === 'URL') {
             const url = String(btn.url || '').trim();
             return text && url ? { type: 'URL', text, url } : null;
         }
@@ -666,7 +728,10 @@ app.post('/api/templates', async (req, res) => {
             components = [],
             messaging_product: messagingProduct = 'whatsapp',
             whatsapp_business_account_id: requestBusinessAccountId,
-            whatsapp_access_token: requestAccessToken
+            whatsapp_access_token: requestAccessToken,
+            bodyVariableParameters = [],
+            customVariables = [],
+            variablesData = {}
         } = req.body;
 
         if (!userId) {
@@ -700,7 +765,17 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
         }
 
-        const graphComponents = buildTemplateComponents({ bodyText, headerType, headerText, footerText, buttons, components });
+        const graphComponents = buildTemplateComponents({
+            bodyText,
+            headerType,
+            headerText,
+            footerText,
+            buttons,
+            components,
+            bodyVariableParameters,
+            customVariables,
+            variablesData
+        });
         const sanitizedButtons = graphComponents.find((component) => component.type === 'BUTTONS')?.buttons || [];
         const metaLanguage = normalizeTemplateLanguage(language);
 
@@ -710,6 +785,7 @@ app.post('/api/templates', async (req, res) => {
             name: formattedName,
             language: metaLanguage,
             category,
+            parameter_format: 'positional',
             components: graphComponents
         }, {
             params: {
@@ -1190,15 +1266,15 @@ const processCampaignQueue = async () => {
 
 setInterval(processCampaignQueue, 10000);
 
-// ====== AUTOMATIC META STATUS SYNC POLLING (1 MINUTE) ======
+// ====== AUTOMATIC META STATUS SYNC POLLING (5 MINUTES) ======
 setInterval(async () => {
     if (!supabase) return;
     try {
-        // Fetch all templates currently in PENDING state
+        // Fetch templates whose Meta status can still change after review or resubmission.
         const { data: pendingTemplates } = await supabase
             .from('whatsapp_templates')
             .select('user_id, template_name, id, status')
-            .or('status.eq.PENDING,status.eq.PENDING_REVIEW');
+            .or('status.eq.PENDING,status.eq.PENDING_REVIEW,status.eq.REJECTED');
 
         if (!pendingTemplates?.length) return;
 
@@ -1237,7 +1313,7 @@ setInterval(async () => {
     } catch (err) {
         console.error('Background Sync Polling Error:', err.message);
     }
-}, 60000);
+}, 5 * 60 * 1000);
 
 // ====== PORT LISTEN ENGINE ======
 const PORT = process.env.PORT || 5000;
