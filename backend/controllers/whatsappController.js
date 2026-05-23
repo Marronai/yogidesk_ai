@@ -63,6 +63,7 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
     const variables = template.variables || template.variablesData || template.payload?.variables || {};
     const templateText = template.templateText || template.bodyText || template.body_content || template.text || '';
+    const recipientPhone = String(recipient.patientPhone || recipient.phone || recipient.recipient_phone || '').trim();
     const scheduledIso = resolveScheduledIso(scheduledFor, index);
     return {
         user_id: resolvedUserId,
@@ -71,9 +72,10 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
         template_name: template.template_name || template.name || 'WhatsApp Template',
         template_category: template.category || 'UTILITY',
         language: template.language || 'en_US',
-        recipient_name: String(recipient.name || '').trim(),
-        recipient_phone: String(recipient.phone || '').trim(),
-        phone: String(recipient.phone || '').trim(),
+        recipient_name: String(recipient.patientName || recipient.name || recipient.recipient_name || 'Patient').trim(),
+        recipient_phone: recipientPhone,
+        phone: recipientPhone,
+        message_body: templateText,
         payload: {
             template,
             recipient,
@@ -93,6 +95,8 @@ const buildMinimalCampaignQueuePayload = (row = {}) => ({
     user_id: row.user_id || row.doctor_id || null,
     language: row.language || row.payload?.template?.language || 'en_US',
     recipient_phone: row.recipient_phone || row.phone || row.payload?.recipient?.phone || '',
+    phone: row.phone || row.recipient_phone || row.payload?.recipient?.phone || '',
+    message_body: row.message_body || row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content || '',
     payload: {
         variables: row.payload?.variables || row.payload?.template?.variables || row.payload?.template?.variablesData || {},
         text: row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content || ''
@@ -135,9 +139,8 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
         if (error) throw error;
         return { inserted: true, fallbackRequired: false };
     } catch (error) {
-        console.error("Campaign Queue Insert Error:", error.message);
+        const isPostgrestFailure = error?.code || error?.response?.status === 400 || isSchemaCacheError(error);
         if (isSchemaCacheError(error)) {
-            console.error("Supabase Cached Schema Crash:", error.message);
             try {
                 const safeFallbackRows = fallbackRows.length > 0
                     ? fallbackRows.map(buildMinimalCampaignQueuePayload)
@@ -148,12 +151,14 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
                     return { inserted: true, fallbackRequired: false };
                 }
             } catch (fallbackError) {
-                console.error("Supabase Cached Schema Crash:", fallbackError.message);
+                return { inserted: false, fallbackRequired: true, error: fallbackError };
             }
             return { inserted: false, fallbackRequired: true, error };
         }
 
-        throw error;
+        if (isPostgrestFailure) return { inserted: false, fallbackRequired: true, error };
+
+        return { inserted: false, fallbackRequired: true, error };
     }
 };
 

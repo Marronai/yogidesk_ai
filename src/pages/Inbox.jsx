@@ -11,6 +11,7 @@ import {
   Paperclip,
   Search,
   Send,
+  Settings,
   ShieldAlert,
   Smile,
   User,
@@ -46,6 +47,7 @@ const Inbox = () => {
   const [tagFilter, setTagFilter] = useState('ALL');
   const [customTagInput, setCustomTagInput] = useState('');
   const [showPhone, setShowPhone] = useState(false);
+  const [showBgMenu, setShowBgMenu] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
 
   const selectedTags = useMemo(() => selectedChat?.metadata?.tags || [], [selectedChat]);
@@ -278,7 +280,7 @@ const Inbox = () => {
 
   const loadChatBackground = (chatId) => {
     try {
-      const stored = JSON.parse(localStorage.getItem(`chat_bg_${chatId}`) || 'null');
+      const stored = JSON.parse(localStorage.getItem(`yogi_chat_wallpaper_${chatId}`) || 'null');
       setChatBg(stored || { type: 'color', value: '#E5DDD5' });
     } catch {
       setChatBg({ type: 'color', value: '#E5DDD5' });
@@ -288,7 +290,8 @@ const Inbox = () => {
   const saveChatBackground = (nextBg) => {
     if (!selectedChat?.id) return;
     setChatBg(nextBg);
-    localStorage.setItem(`chat_bg_${selectedChat.id}`, JSON.stringify(nextBg));
+    localStorage.setItem(`yogi_chat_wallpaper_${selectedChat.id}`, JSON.stringify(nextBg));
+    setShowBgMenu(false);
   };
 
   const handleBackgroundUpload = (event) => {
@@ -303,6 +306,7 @@ const Inbox = () => {
   const openChat = (chat) => {
     setSelectedChat(chat);
     setShowPhone(false);
+    setShowBgMenu(false);
     const agent = agents.find((item) => String(item.id) === String(chat.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
@@ -409,6 +413,39 @@ const Inbox = () => {
             </div>
 
             <div className="custom-scrollbar relative flex-1 space-y-4 overflow-y-auto p-6">
+              <div className="sticky top-0 z-30 flex justify-end">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowBgMenu((value) => !value)}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-white/70 bg-white/85 text-slate-500 shadow-sm backdrop-blur hover:bg-white"
+                    aria-label="Chat wallpaper settings"
+                  >
+                    <Settings size={16} />
+                  </button>
+                  {showBgMenu && (
+                    <div className="absolute right-0 top-11 w-56 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl">
+                      <div className="mb-3 grid grid-cols-5 gap-2">
+                        {['#E5DDD5', '#F0F9FF', '#F7F7EE', '#EEF7F2', '#111827'].map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            onClick={() => saveChatBackground({ type: 'color', value: color })}
+                            className="h-8 rounded-lg border border-slate-200"
+                            style={{ backgroundColor: color }}
+                            aria-label={color}
+                          />
+                        ))}
+                      </div>
+                      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-100">
+                        <ImageIcon size={14} />
+                        Upload Image
+                        <input type="file" accept="image/*" className="hidden" onChange={handleBackgroundUpload} />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
               {messages.length === 0 && (
                 <div className="rounded-2xl bg-white/70 p-6 text-center text-sm font-semibold text-slate-500">
                   No messages in this chat yet.
@@ -517,11 +554,7 @@ const Inbox = () => {
             </div>
           </div>
 
-          <div
-            className="flex flex-col items-center"
-            onMouseEnter={() => setShowPhone(true)}
-            onMouseLeave={() => setShowPhone(false)}
-          >
+          <div className="flex flex-col items-center">
             <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-100 text-2xl font-black text-blue-600 shadow-sm">{selectedChat.name.charAt(0)}</div>
             <h2 className="font-bold text-slate-800">{selectedChat.name}</h2>
             <button
