@@ -78,6 +78,27 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// 🛠️ HELPER: Silent activity logging
+const logDoctorActivity = async (userId) => {
+  if (!userId) return;
+  try {
+    const now = new Date().toISOString();
+    // Update local DB if needed (Assuming last_login_at exists in schema)
+    await User.findByIdAndUpdate(userId, { last_login_at: now }).catch(() => {});
+    
+    // Mirror to Supabase Analytical Profile
+    if (supabase) {
+      await supabase
+        .from('doctor_profiles')
+        .update({ last_login_at: now })
+        .eq('id', userId)
+        .catch(err => console.error("Activity Log Error:", err.message));
+    }
+  } catch (err) {
+    // Fail silently to avoid interrupting doctor workflow
+  }
+};
+
 // 1️⃣ REGISTER: Send OTP to email, set isVerified: false
 exports.register = async (req, res) => {
   try {
@@ -203,6 +224,7 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpires = undefined;
     user.isVerified = true;
     await user.save();
+    logDoctorActivity(user._id);
 
     const ipAddress = (req.headers['x-forwarded-for'] || req.ip || 'Unknown IP').split(',')[0].trim();
     const geo = ipAddress !== 'Unknown IP' ? geoip.lookup(ipAddress) : null;
@@ -249,6 +271,7 @@ exports.verifySignupOTP = async (req, res) => {
     user.isVerified = true;
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
+    logDoctorActivity(user._id);
 
     const token = generateToken(user);
     const userPayload = buildUserPayload(user);
@@ -323,6 +346,7 @@ exports.googleLogin = async (req, res) => {
 
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
+    logDoctorActivity(user._id);
 
     const token = generateToken(user);
     const userPayload = buildUserPayload(user);
@@ -437,5 +461,38 @@ exports.verifyWhatsAppOTP = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ msg: "OTP verification process failed", error: error.message });
+  }
+};
+
+// 9️⃣ INITIALIZE SUPER ADMIN: Hardlocked capacity (Max 2)
+exports.initializeSuperAdmin = async (req, res) => {
+  try {
+    const { name, email, password, secretKey } = req.body;
+
+    // Security secondary check
+    if (secretKey !== process.env.SUPER_ADMIN_INIT_KEY) {
+      return res.status(401).json({ msg: "Unauthorized initialization attempt" });
+    }
+
+    const adminCount = await User.countDocuments({ role: 'super_admin' });
+    if (adminCount >= 2) {
+      return res.status(403).json({ 
+        success: false, 
+        msg: "Initialization Hardlocked: Maximum Super Admin capacity reached." 
+      });
+    }
+
+    const admin = await User.create({
+      name,
+      email,
+      password,
+      role: 'super_admin',
+      isVerified: true,
+      subscriptionStatus: 'active'
+    });
+
+    res.status(201).json({ success: true, msg: "Super Admin initialized successfully." });
+  } catch (error) {
+    res.status(500).json({ msg: "Admin Init Error", error: error.message });
   }
 };

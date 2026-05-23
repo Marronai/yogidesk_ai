@@ -16,6 +16,7 @@ const Settings = () => {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
+  const [hasExistingConnection, setHasExistingConnection] = useState(false);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
 
@@ -42,25 +43,31 @@ const Settings = () => {
       const { authUser, userId } = await getActiveAccount();
       const { data, error } = await supabase
         .from('doctor_profiles')
-        .select('name,email,whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+        .select('name,email')
         .eq('id', userId)
         .maybeSingle();
 
       if (error) throw error;
 
+      const { data: connectionResult } = await api.get('/settings/meta-connection');
+      const connectionData = connectionResult?.data || {};
+      const metaPhoneNumberId = connectionData.meta_phone_number_id || '';
+      const metaWabaId = connectionData.meta_waba_id || '';
+      const systemUserToken = connectionData.system_user_token || '';
+      const connectionExists = Boolean(metaPhoneNumberId && metaWabaId && systemUserToken);
+
       const nextForm = {
         name: data?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
         email: data?.email || authUser?.email || localStorage.getItem('user_email') || '',
-        whatsappPhoneNumberId: data?.whatsapp_phone_number_id || '',
-        whatsappBusinessAccountId: data?.whatsapp_business_account_id || '',
-        whatsappAccessToken: data?.whatsapp_access_token || '',
+        whatsappPhoneNumberId: metaPhoneNumberId,
+        whatsappBusinessAccountId: metaWabaId,
+        whatsappAccessToken: systemUserToken,
       };
 
       setFormData(nextForm);
+      setHasExistingConnection(connectionExists);
       setConnectionStatus(
-        nextForm.whatsappPhoneNumberId && nextForm.whatsappBusinessAccountId && nextForm.whatsappAccessToken
-          ? 'connected'
-          : 'disconnected'
+        connectionExists ? 'connected' : 'disconnected'
       );
     } catch {
       showToast('error', 'Failed to update connection settings. Please try again.');
@@ -140,6 +147,7 @@ const Settings = () => {
           ? 'connected'
           : 'disconnected'
       );
+      setHasExistingConnection(Boolean(payload.whatsappPhoneNumberId && payload.whatsappBusinessAccountId && payload.whatsappAccessToken));
       showToast('success', 'Connection settings saved successfully.');
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
@@ -266,8 +274,9 @@ const Settings = () => {
                     type="text"
                     value={formData.whatsappPhoneNumberId}
                     onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
+                    disabled={hasExistingConnection}
                     placeholder="Enter your WhatsApp Phone Number ID"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   />
                 </div>
               </div>
@@ -278,8 +287,9 @@ const Settings = () => {
                   type="text"
                   value={formData.whatsappBusinessAccountId}
                   onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
+                  disabled={hasExistingConnection}
                   placeholder="Enter your WABA ID"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 />
               </div>
 
@@ -289,8 +299,9 @@ const Settings = () => {
                   type="password"
                   value={formData.whatsappAccessToken}
                   onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
+                  disabled={hasExistingConnection}
                   placeholder="EAAMz..."
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 />
               </div>
             </div>
@@ -300,16 +311,22 @@ const Settings = () => {
                 Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
               </div>
 
-              <button
-                type="button"
-                onClick={handleSaveConnection}
-                disabled={savingConnection || loadingProfile}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-              >
-                {savingConnection ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                {savingConnection ? 'Saving...' : 'Save Connection'}
-              </button>
+              {!hasExistingConnection && (
+                <button
+                  type="button"
+                  onClick={handleSaveConnection}
+                  disabled={savingConnection || loadingProfile}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                >
+                  {savingConnection ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                  {savingConnection ? 'Saving...' : 'Save Connection'}
+                </button>
+              )}
             </div>
+
+            {hasExistingConnection && (
+              <p className="text-xs text-slate-400 mt-2">Your API connection is locked securely. To modify or transfer credentials, please submit an official request to Yogi Desk Admin Support.</p>
+            )}
           </section>
 
           <div className="sticky bottom-4 z-10 rounded-3xl border border-slate-100 bg-white/95 p-4 shadow-xl shadow-slate-200/60 backdrop-blur">

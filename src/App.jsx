@@ -37,6 +37,8 @@ import AdminLogin from './admin/AdminLogin';
 import AdminPrivateRoute from './admin/AdminPrivateRoute';
 import TermsConditions from './pages/TermsConditions';
 import Footer from './components/Footer';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import SuperAdminRoute from './components/SuperAdminRoute';
  // Agar navbar bhi global hai
 
 
@@ -104,6 +106,13 @@ const App = () => {
               <Route path="/hospital/discharge" element={<HospitalDischarge />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
 
+          </Route>
+
+          {/* ============================== */}
+          {/* 4. SUPER ADMIN (HIDDEN)        */}
+          {/* ============================== */}
+          <Route element={<SuperAdminRoute />}>
+            <Route path="/yogi-core-control-center" element={<SuperAdminDashboard />} />
           </Route>
 
           {/* ============================== */}
