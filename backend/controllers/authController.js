@@ -3,13 +3,10 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const axios = require('axios');
 const geoip = require('geoip-lite');
-const { createClient } = require('@supabase/supabase-js');
+const { supabase } = require('../config/supabase');
 
 const { sendDirectBrandMail } = require('../services/mailService');
 const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
-
-// Initialize Supabase Client for OTP management
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const runSupabaseOperation = async (operationPromise) => {
   const timeoutPromise = new Promise((_, reject) => {

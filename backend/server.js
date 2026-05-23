@@ -3,9 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
+const { supabase, supabaseAdmin } = require('./config/supabase');
 const emailConfig = require('./config/emailConfig');
 const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
+const { saveMetaConnection } = require('./controllers/whatsappController');
 
 const app = express();
 
@@ -22,24 +23,6 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// ====== SUPABASE INITIALIZATION ======
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-let supabase;
-let supabaseAdmin;
-if (supabaseUrl && supabaseAnonKey) {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-    console.log("Data service initialized successfully.");
-} else {
-    console.log("Warning: data service credentials are missing.");
-}
-
-if (supabaseUrl && supabaseServiceKey) {
-    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-}
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
@@ -755,65 +738,16 @@ app.post('/api/templates', async (req, res) => {
     }
 });
 
-app.post('/api/settings/meta-connection', async (req, res) => {
-    try {
-        if (!supabase) {
-            return res.status(500).json({ success: false, message: "Database connection unavailable." });
-        }
-
-        const sessionUser = await getSupabaseSessionUser(req);
-        if (!sessionUser?.id) {
-            return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
-        }
-
-        const phoneNumberId = cleanCredentialValue(req.body.whatsappPhoneNumberId || req.body.whatsapp_phone_number_id);
-        const businessAccountId = cleanCredentialValue(req.body.whatsappBusinessAccountId || req.body.whatsappWabaId || req.body.whatsapp_business_account_id);
-        const accessToken = cleanCredentialValue(req.body.whatsappAccessToken || req.body.whatsapp_access_token);
-        const name = cleanCredentialValue(req.body.name);
-        const email = cleanCredentialValue(req.body.email || sessionUser.email);
-
-        const credentialsAreComplete = phoneNumberId && businessAccountId && accessToken;
-        const credentialsAreFormatted = /^\d+$/.test(phoneNumberId) && /^\d+$/.test(businessAccountId) && accessToken.length >= 20;
-
-        if (!credentialsAreComplete || !credentialsAreFormatted) {
-            return res.status(400).json(invalidMetaConfigurationResponse);
-        }
-
-        const isMetaValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
-        if (!isMetaValid) {
-            return res.status(400).json(invalidMetaConfigurationResponse);
-        }
-
-        const profilePayload = {
-            id: sessionUser.id,
-            meta_phone_number_id: phoneNumberId,
-            meta_waba_id: businessAccountId,
-            system_user_token: accessToken
-        };
-
-        if (name) profilePayload.name = name;
-        if (email) profilePayload.email = email;
-
-        // Perform isolated database update on profile table. 
-        // Avoids auth.updateUser() which triggers session re-validation and forced logouts.
-        const { data, error } = await (supabaseAdmin || supabase)
-            .from('doctor_profiles')
-            .update(profilePayload)
-            .eq('id', sessionUser.id)
-            .select('id,meta_phone_number_id,meta_waba_id')
-            .maybeSingle();
-
-        if (error || !data) {
-            console.error('Supabase Meta settings save failed:', error?.message || 'No profile row returned');
-            return res.status(400).json({ success: false, message: "Unable to save Meta configuration for this doctor profile." });
-        }
-
-        return res.status(200).json({ success: true, message: "Connection settings saved successfully.", data });
-    } catch (error) {
-        console.error('Meta settings connection route failed:', error.response?.data || error.message || error);
-        return res.status(400).json(invalidMetaConfigurationResponse);
-    }
-});
+/**
+ * REFACTORED: Dedicated route for Meta Connection Configuration.
+ * Now strictly uses session-level profile updates via the controller.
+ */
+app.post('/api/settings/meta-connection', async (req, res, next) => {
+    const sessionUser = await getSupabaseSessionUser(req);
+    if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized" });
+    req.user = sessionUser;
+    next();
+}, saveMetaConnection);
 
 // ====== CAMPAIGN SCHEDULER ======
 app.post('/api/campaigns/schedule', async (req, res) => {

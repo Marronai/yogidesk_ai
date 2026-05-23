@@ -1,10 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+const { supabase, supabaseAdmin } = require('../config/supabase');
 
 const missingSubAccountConfigResponse = {
     success: false,
@@ -117,6 +113,76 @@ const getDoctorMetaCredentials = async (doctorId) => {
         businessAccountId: data.meta_waba_id || null,
         accessToken: process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null
     };
+};
+
+/**
+ * Validates Meta Credentials against Graph API
+ */
+const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, accessToken }) => {
+    try {
+        await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
+            params: { fields: 'id,display_phone_number,verified_name' },
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 10000
+        });
+        await axios.get(`https://graph.facebook.com/v21.0/${businessAccountId}`, {
+            params: { fields: 'id,name' },
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 10000
+        });
+        return true;
+    } catch (error) {
+        console.error('Meta validation error:', error.response?.data || error.message);
+        return false;
+    }
+};
+
+/**
+ * Dedicated handler for saving Meta Connection credentials.
+ * Strictly avoids supabase.auth.updateUser() to prevent session resets.
+ */
+exports.saveMetaConnection = async (req, res) => {
+    try {
+        const sessionUser = req.user; // Assumes user is attached via middleware
+        if (!sessionUser?.id) {
+            return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
+        }
+
+        const { whatsappPhoneNumberId, whatsappWabaId, whatsappAccessToken, name, email } = req.body;
+        
+        const phoneNumberId = String(whatsappPhoneNumberId || '').trim();
+        const businessAccountId = String(whatsappWabaId || '').trim();
+        const accessToken = String(whatsappAccessToken || '').trim();
+
+        if (!phoneNumberId || !businessAccountId || !accessToken) {
+            return res.status(400).json({ success: false, message: "Invalid Meta configuration. All credentials are required." });
+        }
+
+        const isValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
+        if (!isValid) {
+            return res.status(400).json({ success: false, message: "Invalid Meta configuration or access token permissions." });
+        }
+
+        const profilePayload = {
+            meta_phone_number_id: phoneNumberId,
+            meta_waba_id: businessAccountId,
+            system_user_token: accessToken,
+            ...(name && { name: String(name).trim() }),
+            ...(email && { email: String(email).trim() })
+        };
+
+        const { error } = await (supabaseAdmin || supabase)
+            .from('doctor_profiles')
+            .update(profilePayload)
+            .eq('id', sessionUser.id);
+
+        if (error) throw error;
+
+        return res.status(200).json({ success: true, message: "Connection configurations saved securely." });
+    } catch (error) {
+        console.error('Meta save failure:', error.message);
+        return res.status(500).json({ success: false, message: "Internal Server Error during configuration save." });
+    }
 };
 
 // 1. Send Test Message Function
