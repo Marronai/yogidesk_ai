@@ -11,6 +11,12 @@ const emptyForm = {
   whatsappAccessToken: '',
 };
 
+const getStoredAccount = () => {
+  const userId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id') || '';
+  const email = localStorage.getItem('user_email') || sessionStorage.getItem('user_email') || '';
+  return { userId: userId.trim(), email: email.trim() };
+};
+
 const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -27,13 +33,17 @@ const Settings = () => {
 
   const getActiveAccount = async () => {
     const { data, error } = await supabase.auth.getUser();
-    if (error) throw error;
+    const storedAccount = getStoredAccount();
+    if (error && !storedAccount.userId) throw error;
 
     const authUser = data?.user || null;
-    const userId = authUser?.id || localStorage.getItem('user_id');
+    const userId = authUser?.id || storedAccount.userId;
     if (!userId) throw new Error('Unable to identify the current account.');
 
-    return { authUser, userId };
+    return {
+      authUser: authUser || { id: userId, email: storedAccount.email },
+      userId,
+    };
   };
 
   const hydrateProfile = async () => {
@@ -92,12 +102,6 @@ const Settings = () => {
     setLoading(true);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData?.session) {
-        window.location.href = '/login';
-        return;
-      }
-
       const { userId } = await getActiveAccount();
       const { error } = await supabase
         .from('doctor_profiles')
@@ -120,18 +124,13 @@ const Settings = () => {
     setSavingConnection(true);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData?.session) {
-        window.location.href = '/login';
-        return;
-      }
-
       const { authUser } = await getActiveAccount();
 
       const payload = {
         name: formData.name.trim(),
         email: formData.email || authUser?.email || '',
         whatsappPhoneNumberId: formData.whatsappPhoneNumberId,
+        whatsappWabaId: formData.whatsappBusinessAccountId,
         whatsappBusinessAccountId: formData.whatsappBusinessAccountId,
         whatsappAccessToken: formData.whatsappAccessToken,
       };

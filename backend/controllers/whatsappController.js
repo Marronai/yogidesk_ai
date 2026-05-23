@@ -148,10 +148,17 @@ exports.saveMetaConnection = async (req, res) => {
             return res.status(401).json({ success: false, message: "Authenticated doctor session is required." });
         }
 
-        const { whatsappPhoneNumberId, whatsappWabaId, whatsappAccessToken, name, email } = req.body;
+        const {
+            whatsappPhoneNumberId,
+            whatsappWabaId,
+            whatsappBusinessAccountId,
+            whatsappAccessToken,
+            name,
+            email
+        } = req.body;
         
         const phoneNumberId = String(whatsappPhoneNumberId || '').trim();
-        const businessAccountId = String(whatsappWabaId || '').trim();
+        const businessAccountId = String(whatsappWabaId || whatsappBusinessAccountId || '').trim();
         const accessToken = String(whatsappAccessToken || '').trim();
 
         if (!phoneNumberId || !businessAccountId || !accessToken) {
@@ -173,8 +180,7 @@ exports.saveMetaConnection = async (req, res) => {
 
         const { error } = await (supabaseAdmin || supabase)
             .from('doctor_profiles')
-            .update(profilePayload)
-            .eq('id', sessionUser.id);
+            .upsert({ id: sessionUser.id, ...profilePayload }, { onConflict: 'id' });
 
         if (error) throw error;
 

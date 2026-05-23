@@ -50,7 +50,9 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = Number(error.response?.status);
-    if (status === 401 || status === 403) {
+    const requestUrl = String(error.config?.url || '');
+    const isSessionValidationRequest = requestUrl.includes('/auth/check-session');
+    if ((status === 401 || status === 403) && isSessionValidationRequest) {
       console.log("Session expired or invalid");
       localStorage.clear();
       alert("You have been logged out because you logged in on another device.");
