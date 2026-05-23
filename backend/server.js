@@ -1166,6 +1166,24 @@ const sendCampaignMessageToMeta = async (queueItem) => {
         }
     };
 
+    const resolveCampaignVariable = (value) => {
+        const rawValue = String(value || '').trim();
+        const match = rawValue.match(/^\[\[([a-z._]+)\]\]$/i);
+        if (!match) return rawValue;
+
+        const fieldKey = match[1];
+        const recipient = queueItem.payload?.recipient || {};
+        const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        const fieldMap = {
+            'patient.name': recipient.name || '',
+            'patient.phone': recipient.phone || queueItem.recipient_phone || '',
+            'patient.appointment_time': recipient.appointment_time || '',
+            today
+        };
+
+        return String(fieldMap[fieldKey] || 'Not available').trim();
+    };
+
     const variables = queueItem.payload?.template?.variables || {};
     const variableKeys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
     if (variableKeys.length > 0) {
@@ -1173,7 +1191,7 @@ const sendCampaignMessageToMeta = async (queueItem) => {
             type: 'body',
             parameters: variableKeys.map((key) => ({
                 type: 'text',
-                text: String(variables[key] || '')
+                text: resolveCampaignVariable(variables[key])
             }))
         }];
     }
