@@ -32,8 +32,10 @@ const buildCampaignQueuePayload = ({ userId, template = {}, recipient = {}, sche
         template_id: template.id || null,
         template_name: template.template_name || template.name || 'WhatsApp Template',
         template_category: template.category || 'UTILITY',
+        language: template.language || 'en_US',
         recipient_name: String(recipient.name || '').trim(),
         recipient_phone: String(recipient.phone || '').trim(),
+        phone: String(recipient.phone || '').trim(),
         payload: { template, recipient },
         status: 'PENDING',
         scheduled_for: scheduledFor

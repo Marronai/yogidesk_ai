@@ -1052,17 +1052,42 @@ const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
     try {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
             .from('doctor_profiles')
             .select('meta_phone_number_id,meta_waba_id,system_user_token')
             .eq('id', userId)
             .maybeSingle();
 
+        if (error) {
+            const message = String(error?.message || error?.details || '').toLowerCase();
+            const isMissingColumn = error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+            if (!isMissingColumn) return {};
+
+            const fallbackResult = await supabase
+                .from('doctor_profiles')
+                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+                .eq('id', userId)
+                .maybeSingle();
+
+            data = fallbackResult.data
+                ? {
+                    meta_phone_number_id: fallbackResult.data.whatsapp_phone_number_id,
+                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id,
+                    system_user_token: fallbackResult.data.whatsapp_access_token
+                }
+                : null;
+            error = fallbackResult.error;
+        }
+
         if (error || !data) return {};
+        const finalToken = data.system_user_token || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null;
+        const finalPhoneId = data.meta_phone_number_id || process.env.WHATSAPP_PHONE_NUMBER_ID || null;
+        console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
+
         return {
-            phoneNumberId: data.meta_phone_number_id || null,
+            phoneNumberId: finalPhoneId,
             businessAccountId: data.meta_waba_id || null,
-            accessToken: data.system_user_token || null,
+            accessToken: finalToken,
         };
     } catch (err) {
         console.error('Meta credential lookup failed:', err.message || err);
@@ -1071,12 +1096,18 @@ const getUserMetaCredentials = async (userId) => {
 };
 
 const sendCampaignMessageToMeta = async (queueItem) => {
-    const credentials = await getUserMetaCredentials(queueItem.user_id);
-    if (!credentials.phoneNumberId || !credentials.accessToken) {
+    const doctorId = queueItem.user_id || queueItem.doctor_id || queueItem.payload?.template?.user_id || queueItem.payload?.template?.doctor_id;
+    const credentials = await getUserMetaCredentials(doctorId);
+    const finalToken = credentials.accessToken || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null;
+    const finalPhoneId = credentials.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || null;
+
+    console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
+
+    if (!finalPhoneId || !finalToken) {
         throw new Error('Missing WhatsApp phone number ID or access token for campaign send. Please configure Meta credentials in settings.');
     }
 
-    const url = `https://graph.facebook.com/v17.0/${credentials.phoneNumberId}/messages`;
+    const url = `https://graph.facebook.com/v17.0/${finalPhoneId}/messages`;
     const payload = {
         messaging_product: 'whatsapp',
         to: queueItem.recipient_phone,
@@ -1101,7 +1132,7 @@ const sendCampaignMessageToMeta = async (queueItem) => {
 
     const response = await require('axios').post(url, payload, {
         headers: {
-            'Authorization': `Bearer ${credentials.accessToken}`,
+            'Authorization': `Bearer ${finalToken}`,
             'Content-Type': 'application/json'
         }
     });
@@ -1109,8 +1140,8 @@ const sendCampaignMessageToMeta = async (queueItem) => {
     return {
         ok: true,
         provider: 'meta_whatsapp',
-        user_id: queueItem.user_id,
-        phone_number_id: credentials.phoneNumberId,
+        user_id: doctorId,
+        phone_number_id: finalPhoneId,
         whatsapp_business_account_id: credentials.businessAccountId,
         response: response.data
     };

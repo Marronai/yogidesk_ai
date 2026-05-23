@@ -74,7 +74,7 @@ const Inbox = () => {
       try {
         const { data, error } = await supabase
           .from('inbox_chats')
-          .select('id, name, phone, last_message, updated_at, unread_count, status, assigned_agent_id, metadata')
+          .select('id, name, last_message, updated_at, phone')
           .eq('user_id', user.id)
           .order('updated_at', { ascending: false });
         if (error) throw error;
@@ -96,7 +96,7 @@ const Inbox = () => {
       const mappedChats = Array.isArray(chatData)
         ? chatData.map((chat) => ({
           id: chat.id,
-          name: chat.name || chat.phone || 'Patient',
+          name: chat.name || chat.patient_name || 'Unknown Patient',
           phone: chat.phone || '',
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
