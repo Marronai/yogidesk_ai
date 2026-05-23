@@ -19,6 +19,14 @@ import { supabase } from '../config/supabaseClient';
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
+const logInboxError = (error) => {
+  const message = error?.message || error?.details || String(error || '');
+  if (error?.code === 'PGRST205' || String(message).toLowerCase().includes('schema cache')) {
+    console.error('Supabase Inbox Logging Crash:', message);
+    return;
+  }
+  console.error('Supabase Inbox Logging Error:', message);
+};
 
 const Inbox = () => {
   const [isGhostMode, setIsGhostMode] = useState(false);
@@ -48,18 +56,32 @@ const Inbox = () => {
         return;
       }
 
-      const [{ data: teamData }, { data: chatData }] = await Promise.all([
-        supabase
+      let teamData = [];
+      let chatData = [];
+
+      try {
+        const { data, error } = await supabase
           .from('team_members')
-          .select('id, name, email, role, status')
+          .select('id, name, email, status')
           .eq('admin_id', user.id)
-          .in('status', ['ACTIVE', 'INVITED']),
-        supabase
+          .in('status', ['ACTIVE', 'INVITED']);
+        if (error) throw error;
+        teamData = data || [];
+      } catch (error) {
+        logInboxError(error);
+      }
+
+      try {
+        const { data, error } = await supabase
           .from('inbox_chats')
           .select('id, name, phone, last_message, updated_at, unread_count, status, assigned_agent_id, metadata')
           .eq('user_id', user.id)
-          .order('updated_at', { ascending: false }),
-      ]);
+          .order('updated_at', { ascending: false });
+        if (error) throw error;
+        chatData = data || [];
+      } catch (error) {
+        logInboxError(error);
+      }
 
       if (!active) return;
 
@@ -67,7 +89,7 @@ const Inbox = () => {
         ? teamData.map((agent) => ({
           id: agent.id,
           name: agent.name || agent.email,
-          role: agent.role || 'STAFF',
+          role: 'STAFF',
         }))
         : [fallbackAgent];
 
@@ -96,11 +118,18 @@ const Inbox = () => {
   }, []);
 
   const loadMessages = async (chatId) => {
-    const { data } = await supabase
-      .from('inbox_messages')
-      .select('id, body, message_body, sender, is_private_note, created_at')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
+    let data = [];
+    try {
+      const result = await supabase
+        .from('inbox_messages')
+        .select('id, body, message_body, sender, is_private_note, created_at')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
+      if (result.error) throw result.error;
+      data = result.data || [];
+    } catch (error) {
+      logInboxError(error);
+    }
 
     setMessages(Array.isArray(data)
       ? data.map((item) => ({
@@ -124,7 +153,12 @@ const Inbox = () => {
     if (!agent || !selectedChat) return;
     setActiveAgent(agent);
     updateConversation(selectedChat.id, { assigned_agent_id: agent.id });
-    await supabase.from('inbox_chats').update({ assigned_agent_id: agent.id }).eq('id', selectedChat.id);
+    try {
+      const { error } = await supabase.from('inbox_chats').update({ assigned_agent_id: agent.id }).eq('id', selectedChat.id);
+      if (error) throw error;
+    } catch (error) {
+      logInboxError(error);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -143,20 +177,30 @@ const Inbox = () => {
     setMessages((prev) => [...prev, created]);
     setMessage('');
 
-    await supabase.from('inbox_messages').insert([{
-      chat_id: selectedChat.id,
-      body: text,
-      sender: 'agent',
-      is_private_note: isPrivateNote,
-      created_at: new Date().toISOString(),
-    }]);
+    try {
+      const { error } = await supabase.from('inbox_messages').insert([{
+        chat_id: selectedChat.id,
+        body: text,
+        sender: 'agent',
+        is_private_note: isPrivateNote,
+        created_at: new Date().toISOString(),
+      }]);
+      if (error) throw error;
+    } catch (error) {
+      logInboxError(error);
+    }
   };
 
   const appendTag = async (tag) => {
     if (!selectedChat || selectedTags.includes(tag)) return;
     const metadata = { ...(selectedChat.metadata || {}), tags: [...selectedTags, tag] };
     updateConversation(selectedChat.id, { metadata });
-    await supabase.from('inbox_chats').update({ metadata }).eq('id', selectedChat.id);
+    try {
+      const { error } = await supabase.from('inbox_chats').update({ metadata }).eq('id', selectedChat.id);
+      if (error) throw error;
+    } catch (error) {
+      logInboxError(error);
+    }
   };
 
   const openChat = (chat) => {

@@ -9,7 +9,8 @@ const { getUserUsage, addPatient, addPatients } = require('./controllers/patient
 const {
     saveMetaConnection,
     buildCampaignQueuePayload,
-    insertCampaignQueueRows
+    insertCampaignQueueRows,
+    safeInsertInboxRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 
@@ -1137,7 +1138,7 @@ const processCampaignFallbackRows = async (rows = []) => {
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
                 }]),
-                supabase.from('inbox').insert([{
+                safeInsertInboxRows({ table: 'inbox', rows: [{
                     user_id: row.user_id || row.doctor_id,
                     patient_name: row.recipient_name,
                     patient_phone: row.recipient_phone,
@@ -1145,7 +1146,7 @@ const processCampaignFallbackRows = async (rows = []) => {
                     message: `Sent template: ${row.template_name}`,
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
-                }]),
+                }] }),
             ]);
         } catch (error) {
             console.error('Campaign fallback dispatch failed:', error.message || error);
@@ -1218,7 +1219,7 @@ const processCampaignQueue = async () => {
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
                 }]),
-                supabase.from('inbox').insert([{
+                safeInsertInboxRows({ table: 'inbox', rows: [{
                     user_id: row.user_id,
                     patient_name: row.recipient_name,
                     patient_phone: row.recipient_phone,
@@ -1226,7 +1227,7 @@ const processCampaignQueue = async () => {
                     message: `Sent template: ${row.template_name}`,
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
-                }]),
+                }] }),
             ]);
         }
     } catch (error) {

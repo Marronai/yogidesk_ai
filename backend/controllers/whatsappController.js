@@ -68,6 +68,28 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
     }
 };
 
+const logInboxDatabaseError = (error) => {
+    const message = String(error?.message || error?.details || error || '');
+    const normalized = message.toLowerCase();
+    if (error?.code === 'PGRST205' || normalized.includes('schema cache') || normalized.includes('inbox_chats') || normalized.includes('inbox_messages')) {
+        console.error("Supabase Inbox Logging Crash:", message);
+        return;
+    }
+    console.error("Supabase Inbox Logging Error:", message);
+};
+
+const safeInsertInboxRows = async ({ table = 'inbox', rows = [] }) => {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { inserted: false };
+    try {
+        const { error } = await supabase.from(table).insert(rows);
+        if (error) throw error;
+        return { inserted: true };
+    } catch (error) {
+        logInboxDatabaseError(error);
+        return { inserted: false, error };
+    }
+};
+
 const extractVariableValue = (value) => {
     if (value === null || value === undefined) return '';
     if (typeof value !== 'object') return String(value).trim();
@@ -576,3 +598,5 @@ exports.submitTemplate = async (req, res) => {
 exports.shouldBypassCampaignWalletCheck = shouldBypassCampaignWalletCheck;
 exports.buildCampaignQueuePayload = buildCampaignQueuePayload;
 exports.insertCampaignQueueRows = insertCampaignQueueRows;
+exports.safeInsertInboxRows = safeInsertInboxRows;
+exports.logInboxDatabaseError = logInboxDatabaseError;
