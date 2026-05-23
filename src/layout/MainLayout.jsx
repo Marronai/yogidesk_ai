@@ -18,7 +18,8 @@ const MainLayout = () => {
         await api.get('/auth/check-session');
         // Agar success hai to kuch mat karo, sab sahi hai
       } catch (error) {
-        if (error.response?.status === 401) {
+        const status = Number(error.response?.status);
+        if (status === 401 || status === 403) {
           console.log("Session expired or invalid");
           localStorage.clear();
           alert("You have been logged out because you logged in on another device.");

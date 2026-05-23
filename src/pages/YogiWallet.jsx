@@ -5,6 +5,12 @@ import { PRICING_RULES } from '../constants/templateLibrary';
 import { saveWallet } from '../utils/wallet';
 
 const quickAmounts = [200, 500, 1000];
+const normalizeSupabaseId = (value) => {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') return String(value.id || value.user_id || value.sub || '').trim();
+  return String(value || '').trim();
+};
+const isCleanFilterValue = (value) => Boolean(value && value !== 'undefined' && value !== 'null' && value !== '[object Object]');
 
 const loadRazorpayCheckout = () => new Promise((resolve, reject) => {
   if (window.Razorpay) {
@@ -35,14 +41,14 @@ const YogiWallet = () => {
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
 
-  const userId = localStorage.getItem('user_id');
+  const userId = normalizeSupabaseId(localStorage.getItem('user_id'));
 
   const fetchWalletData = useCallback(async () => {
-    if (!userId) return;
+    if (!isCleanFilterValue(userId)) return;
 
     const { data, error } = await supabase
       .from('wallets')
-      .select('balance, is_first_recharge, welcome_gift_active')
+      .select('balance,is_first_recharge,welcome_gift_active')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -75,7 +81,7 @@ const YogiWallet = () => {
   }, [userId]);
 
   const fetchTransactions = useCallback(async () => {
-    if (!userId) return;
+    if (!isCleanFilterValue(userId)) return;
     const { data, error } = await supabase
       .from('wallet_transactions')
       .select('*')
@@ -92,9 +98,11 @@ const YogiWallet = () => {
   }, [fetchWalletData, fetchTransactions]);
 
   const creditWallet = async (rechargeAmount, paymentResponse) => {
+    if (!isCleanFilterValue(userId)) return;
+
     const { data: currentWallet, error } = await supabase
       .from('wallets')
-      .select('balance, welcome_gift_active')
+      .select('balance,welcome_gift_active')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -133,7 +141,7 @@ const YogiWallet = () => {
     const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
 
     setPaymentError('');
-    if (!userId || !Number.isFinite(rechargeAmount)) return;
+    if (!isCleanFilterValue(userId) || !Number.isFinite(rechargeAmount)) return;
     if (rechargeAmount < 100) {
       setPaymentError('Minimum recharge amount is ₹100.');
       alert('Minimum recharge amount is ₹100.');

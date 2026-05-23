@@ -16,6 +16,16 @@ import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
+const normalizeSupabaseId = (value) => {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object') return String(value.id || value.user_id || value.sub || '').trim();
+  return String(value || '').trim();
+};
+const isCleanFilterValue = (value) => Boolean(value && value !== 'undefined' && value !== 'null' && value !== '[object Object]');
+const toFilterIsoString = (date) => {
+  const value = date instanceof Date ? date : new Date(date);
+  return Number.isNaN(value.getTime()) ? null : value.toISOString();
+};
 const formatDoctorName = (name = 'Doctor') => {
   const cleanName = String(name || 'Doctor').trim();
   return /^dr\.?\s/i.test(cleanName) ? cleanName : `Dr. ${cleanName}`;
@@ -37,21 +47,24 @@ const DashboardHome = () => {
     const loadProfile = async () => {
       const { data } = await supabase.auth.getUser();
       const meta = data?.user?.user_metadata || {};
-      const userId = data?.user?.id || localStorage.getItem('user_id');
+      const userId = normalizeSupabaseId(data?.user?.id || localStorage.getItem('user_id'));
       const role = normalizeRole(meta.role || meta.user_role || meta.account_role);
       const name = meta.staff_name || meta.full_name || meta.name || data?.user?.email || profile.name;
       if (active) setProfile({ role, name });
-      if (!userId) return;
+      if (!isCleanFilterValue(userId)) return;
 
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - 7);
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
+      const weekStartIso = toFilterIsoString(weekStart);
+      const todayStartIso = toFilterIsoString(todayStart);
+      if (!weekStartIso || !todayStartIso) return;
 
       const results = await Promise.allSettled([
-        supabase.from('wallets').select('balance, is_first_recharge, welcome_gift_active').eq('user_id', userId).maybeSingle(),
-        supabase.from('campaign_queue').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStart.toISOString()),
-        supabase.from('patients_ledger').select('id', { count: 'exact', head: true }).eq('user_id', userId).gte('created_at', todayStart.toISOString()),
+        supabase.from('wallets').select('balance,is_first_recharge,welcome_gift_active').eq('user_id', userId).maybeSingle(),
+        supabase.from('campaign_queue').select('id', { count: 'exact', head: false }).eq('user_id', userId).eq('status', 'SENT').gte('sent_at', weekStartIso),
+        supabase.from('patients_ledger').select('id', { count: 'exact', head: false }).eq('user_id', userId).gte('created_at', todayStartIso),
         api.get(backendPath('/api/user/usage'), { params: { userId } }).catch(() => ({ data: null }))
       ]);
 
@@ -64,8 +77,8 @@ const DashboardHome = () => {
 
       if (active) {
         setStats({
-          weekly_sent: sentResult.count || 0,
-          leads_today: leadResult.count || 0,
+          weekly_sent: sentResult?.count || 0,
+          leads_today: leadResult?.count || 0,
           ghost_mode: false
         });
         if (usageResult.data) {
