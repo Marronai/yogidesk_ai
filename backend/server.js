@@ -143,6 +143,41 @@ const isMissingColumnError = (error) => {
     const message = String(error?.message || error?.details || '').toLowerCase();
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
+const getStoredMetaCredentials = async (userId) => {
+    if (!supabase?.from || !userId) return {};
+
+    let result = await supabase
+        .from('doctor_profiles')
+        .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (!result.error && result.data) {
+        return {
+            accessToken: result.data.whatsapp_access_token || null,
+            phoneNumberId: result.data.whatsapp_phone_number_id || null,
+            businessAccountId: result.data.whatsapp_business_account_id || null,
+        };
+    }
+
+    if (result.error && !isMissingColumnError(result.error)) {
+        throw result.error;
+    }
+
+    result = await supabase
+        .from('doctor_profiles')
+        .select('system_user_token,meta_phone_number_id,meta_waba_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+    if (result.error) throw result.error;
+
+    return {
+        accessToken: result.data?.system_user_token || null,
+        phoneNumberId: result.data?.meta_phone_number_id || null,
+        businessAccountId: result.data?.meta_waba_id || null,
+    };
+};
 const validateMetaCredentials = async ({ phoneNumberId, businessAccountId, accessToken }) => {
     try {
         await axios.get(`https://graph.facebook.com/v21.0/${phoneNumberId}`, {
@@ -537,20 +572,15 @@ app.post('/api/webhook/meta', async (req, res) => {
 const syncTemplatesFromMetaInBackground = async (userId) => {
     if (!supabase?.from || !userId) return;
 
-    const { data: userMeta, error: credentialError } = await supabase
-        .from('doctor_profiles')
-        .select('system_user_token,meta_waba_id')
-        .eq('id', userId)
-        .maybeSingle();
+    const userMeta = await getStoredMetaCredentials(userId);
 
-    if (credentialError || !userMeta?.meta_waba_id || !userMeta?.system_user_token) {
-        if (credentialError) console.warn('Background template sync credential error:', credentialError.message);
+    if (!userMeta?.businessAccountId || !userMeta?.accessToken) {
         return;
     }
 
-    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
+    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.businessAccountId}/message_templates`;
     const response = await require('axios').get(graphUrl, {
-        headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
+        headers: { Authorization: `Bearer ${userMeta.accessToken}` }
     });
 
     const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -659,20 +689,15 @@ app.get('/api/templates/sync', async (req, res) => {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
 
-        const { data: userMeta, error: credentialError } = await supabase
-            .from('doctor_profiles')
-            .select('system_user_token,meta_waba_id')
-            .eq('id', userId)
-            .maybeSingle();
+        const userMeta = await getStoredMetaCredentials(userId);
 
-        if (credentialError) throw credentialError;
-        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+        if (!userMeta?.businessAccountId || !userMeta?.accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
-        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.meta_waba_id}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.businessAccountId}/message_templates`;
         const response = await require('axios').get(graphUrl, {
-            params: { access_token: userMeta.system_user_token }
+            params: { access_token: userMeta.accessToken }
         });
 
         const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -748,18 +773,13 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Template body text is required.' });
         }
 
-        const { data: userMeta, error: credentialError } = await supabase
-            .from('doctor_profiles')
-            .select('system_user_token,meta_phone_number_id,meta_waba_id')
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (credentialError || !userMeta) {
+        const userMeta = await getStoredMetaCredentials(userId).catch((credentialError) => {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
-        }
+            return {};
+        });
 
-        const businessAccountId = requestBusinessAccountId || userMeta?.meta_waba_id || null;
-        const accessToken = requestAccessToken || userMeta?.system_user_token || null;
+        const businessAccountId = requestBusinessAccountId || userMeta?.businessAccountId || null;
+        const accessToken = requestAccessToken || userMeta?.accessToken || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -1117,17 +1137,11 @@ const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
     try {
-        const { data, error } = await supabase
-            .from('doctor_profiles')
-            .select('meta_phone_number_id,meta_waba_id,system_user_token')
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (error || !data) return {};
+        const data = await getStoredMetaCredentials(userId);
         return {
-            phoneNumberId: data.meta_phone_number_id || null,
-            businessAccountId: data.meta_waba_id || null,
-            accessToken: data.system_user_token || null,
+            phoneNumberId: data.phoneNumberId || null,
+            businessAccountId: data.businessAccountId || null,
+            accessToken: data.accessToken || null,
         };
     } catch (err) {
         console.error('Meta credential lookup failed:', err.message || err);
@@ -1286,19 +1300,15 @@ setInterval(async () => {
         }, {});
 
         for (const userId in userGroups) {
-            const { data: profile } = await supabase
-                .from('doctor_profiles')
-                .select('system_user_token, meta_waba_id')
-                .eq('id', userId)
-                .maybeSingle();
+            const profile = await getStoredMetaCredentials(userId);
 
-            if (!profile?.system_user_token || !profile?.meta_waba_id) continue;
+            if (!profile?.accessToken || !profile?.businessAccountId) continue;
 
             for (const t of userGroups[userId]) {
                 try {
-                    const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates?name=${t.template_name}`;
+                    const url = `https://graph.facebook.com/v21.0/${profile.businessAccountId}/message_templates?name=${t.template_name}`;
                     const res = await require('axios').get(url, {
-                        headers: { Authorization: `Bearer ${profile.system_user_token}` }
+                        headers: { Authorization: `Bearer ${profile.accessToken}` }
                     });
                     const metaData = res.data.data?.[0];
                     if (metaData) {

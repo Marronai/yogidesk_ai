@@ -86,11 +86,23 @@ const getDoctorMetaCredentials = async (doctorId) => {
     let lastError = null;
 
     for (const column of lookupColumns) {
-        const result = await supabase
+        let result = await supabase
             .from('doctor_profiles')
-            .select('meta_phone_number_id,meta_waba_id')
+            .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
             .eq(column, doctorId)
             .maybeSingle();
+
+        if (result.error) {
+            const message = String(result.error?.message || result.error?.details || '').toLowerCase();
+            const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+            if (isMissingColumn) {
+                result = await supabase
+                    .from('doctor_profiles')
+                    .select('meta_phone_number_id,meta_waba_id,system_user_token')
+                    .eq(column, doctorId)
+                    .maybeSingle();
+            }
+        }
 
         if (result.data) {
             data = result.data;
@@ -109,9 +121,9 @@ const getDoctorMetaCredentials = async (doctorId) => {
     }
 
     return {
-        phoneNumberId: data.meta_phone_number_id || null,
-        businessAccountId: data.meta_waba_id || null,
-        accessToken: process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null
+        phoneNumberId: data.whatsapp_phone_number_id || data.meta_phone_number_id || null,
+        businessAccountId: data.whatsapp_business_account_id || data.meta_waba_id || null,
+        accessToken: data.whatsapp_access_token || data.system_user_token || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null
     };
 };
 
@@ -290,14 +302,9 @@ exports.syncTemplateStatus = async (req, res) => {
 
         if (dbError) throw dbError;
 
-        // Fetch credentials from doctor profile
-        const { data: profile } = await supabase
-            .from('doctor_profiles')
-            .select('system_user_token, meta_waba_id')
-            .eq('id', doctorId)
-            .maybeSingle();
+        const profile = await getDoctorMetaCredentials(doctorId);
 
-        if (!profile?.meta_waba_id || !profile?.system_user_token) {
+        if (!profile?.businessAccountId || !profile?.accessToken) {
             return res.status(400).json({ success: false, message: "Meta configuration missing." });
         }
 
@@ -305,11 +312,11 @@ exports.syncTemplateStatus = async (req, res) => {
 
         for (const template of templates) {
             try {
-                const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates`;
+                const url = `https://graph.facebook.com/v21.0/${profile.businessAccountId}/message_templates`;
                 const response = await axios.get(url, {
                     params: {
                         name: template.template_name,
-                        access_token: profile.system_user_token
+                        access_token: profile.accessToken
                     }
                 });
 

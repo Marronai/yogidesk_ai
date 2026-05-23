@@ -73,15 +73,15 @@ const Templates = () => {
 
         const { data: profileData } = await supabase
           .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id,system_user_token,meta_phone_number_id,meta_waba_id')
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
           .eq('id', userId)
           .maybeSingle();
 
         setDoctorProfile(profileData || null);
         if (
-          (profileData?.whatsapp_access_token || profileData?.system_user_token) &&
-          (profileData?.whatsapp_phone_number_id || profileData?.meta_phone_number_id) &&
-          (profileData?.whatsapp_business_account_id || profileData?.meta_waba_id)
+          profileData?.whatsapp_access_token &&
+          profileData?.whatsapp_phone_number_id &&
+          profileData?.whatsapp_business_account_id
         ) {
           setError('');
         }
@@ -116,9 +116,9 @@ const Templates = () => {
 
   const metaCredentials = doctorProfile || {};
   const resolveMetaCredentials = (profile = {}) => ({
-    accessToken: profile.whatsapp_access_token || profile.system_user_token || '',
-    phoneNumberId: profile.whatsapp_phone_number_id || profile.meta_phone_number_id || '',
-    businessAccountId: profile.whatsapp_business_account_id || profile.meta_waba_id || ''
+    accessToken: profile.whatsapp_access_token || '',
+    phoneNumberId: profile.whatsapp_phone_number_id || '',
+    businessAccountId: profile.whatsapp_business_account_id || ''
   });
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
 
@@ -366,7 +366,7 @@ const Templates = () => {
       if (!activeCredentials.businessAccountId || !activeCredentials.accessToken || !activeCredentials.phoneNumberId) {
         const { data: profileData } = await supabase
           .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id,system_user_token,meta_phone_number_id,meta_waba_id')
+          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
           .eq('id', userId)
           .maybeSingle();
         activeProfile = profileData || null;

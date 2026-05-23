@@ -186,19 +186,43 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
 
 const getUserMetaCredentials = async (userId) => {
   if (!supabase?.from || !userId) return {};
-  const { data, error } = await supabase
+
+  let result = await supabase
+    .from('doctor_profiles')
+    .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!result.error && result.data) {
+    return {
+      phoneNumberId: result.data.whatsapp_phone_number_id || null,
+      businessAccountId: result.data.whatsapp_business_account_id || null,
+      accessToken: result.data.whatsapp_access_token || null
+    };
+  }
+
+  const message = String(result.error?.message || result.error?.details || '').toLowerCase();
+  const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+  if (result.error && !isMissingColumn) {
+    console.warn('Meta credential lookup failed:', result.error.message);
+    return {};
+  }
+
+  result = await supabase
     .from('doctor_profiles')
     .select('meta_phone_number_id,meta_waba_id,system_user_token')
     .eq('id', userId)
     .maybeSingle();
-  if (error || !data) {
-    if (error) console.warn('Meta credential lookup failed:', error.message);
+
+  if (result.error || !result.data) {
+    if (result.error) console.warn('Meta credential lookup failed:', result.error.message);
     return {};
   }
+
   return {
-    phoneNumberId: data.meta_phone_number_id || null,
-    businessAccountId: data.meta_waba_id || null,
-    accessToken: data.system_user_token || null
+    phoneNumberId: result.data.meta_phone_number_id || null,
+    businessAccountId: result.data.meta_waba_id || null,
+    accessToken: result.data.system_user_token || null
   };
 };
 

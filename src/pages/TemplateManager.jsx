@@ -54,11 +54,7 @@ const TemplateManager = () => {
     try {
       if (!silent) setIsSyncingStatuses(true);
       const userId = localStorage.getItem('user_id');
-      try {
-        await api.get('/templates/sync', { params: { userId } });
-      } catch {
-        await api.post('/whatsapp/templates/sync');
-      }
+      await api.get('/templates/sync', { params: { userId } });
       await fetchTemplates({ silent });
     } catch (err) {
       console.error('Template status sync failed:', err);
