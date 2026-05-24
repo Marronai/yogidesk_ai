@@ -187,6 +187,13 @@ const Inbox = () => {
     loadInbox();
   }, [loadInbox, reloadToken]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setReloadToken((value) => value + 1);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const mapStoredMessage = (item) => ({
     id: item.id || item.created_at || Date.now(),
     text: item.body || item.text || item.message_body || '',
@@ -225,6 +232,14 @@ const Inbox = () => {
       logInboxError(error);
     }
   };
+
+  useEffect(() => {
+    if (!selectedChat?.id) return undefined;
+    const timer = window.setInterval(() => {
+      loadMessages(selectedChat);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [selectedChat]);
 
   const updateConversation = (chatId, patch) => {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...patch } : chat)));

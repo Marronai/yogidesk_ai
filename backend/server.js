@@ -1194,6 +1194,92 @@ const sendCampaignMessageToMeta = async (queueItem) => {
     };
 };
 
+const resolveCampaignMessagePreview = (row = {}) => {
+    const text = row.message_body || row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content;
+    return String(text || `Sent template: ${row.template_name || 'WhatsApp Template'}`).trim();
+};
+
+const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbackDispatch = false }) => {
+    if (!supabase?.from) return;
+
+    const nowIso = new Date().toISOString();
+    const recipientPhone = String(row.recipient_phone || row.phone || '').trim();
+    const recipientName = String(row.recipient_name || row.payload?.recipient?.patientName || row.payload?.recipient?.name || 'Patient').trim();
+    const userId = row.user_id || row.doctor_id || null;
+    const messageBody = resolveCampaignMessagePreview(row);
+    const metadata = {
+        template_id: row.template_id || row.payload?.template?.id || null,
+        template_name: row.template_name || row.payload?.template?.template_name || row.payload?.template?.name || 'WhatsApp Template',
+        template_category: row.template_category || row.payload?.template?.category || 'UTILITY',
+        meta_result: metaResult,
+        fallback_dispatch: fallbackDispatch,
+    };
+
+    let chatId = null;
+    const { data: existingChat } = await supabase
+        .from('inbox_chats')
+        .select('id, metadata')
+        .eq('phone', recipientPhone)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (existingChat?.id) {
+        chatId = existingChat.id;
+        await supabase.from('inbox_chats').update({
+            user_id: userId,
+            doctor_id: userId,
+            name: recipientName || 'Patient',
+            patient_name: recipientName || 'Patient',
+            patient_phone: recipientPhone || 'unknown',
+            status: 'SENT',
+            last_message: messageBody,
+            updated_at: nowIso,
+            metadata: {
+                ...(existingChat.metadata || {}),
+                last_template: metadata,
+            },
+        }).eq('id', chatId);
+    } else {
+        const { data: createdChat } = await supabase.from('inbox_chats').insert([{
+            user_id: userId,
+            doctor_id: userId,
+            name: recipientName || 'Patient',
+            patient_name: recipientName || 'Patient',
+            phone: recipientPhone || 'unknown',
+            patient_phone: recipientPhone || 'unknown',
+            status: 'SENT',
+            last_message: messageBody,
+            unread_count: 0,
+            updated_at: nowIso,
+            metadata: { last_template: metadata },
+        }]).select('id').maybeSingle();
+        chatId = createdChat?.id || null;
+    }
+
+    if (!chatId) return;
+
+    const { error } = await supabase.from('inbox_messages').insert([{
+        chat_id: chatId,
+        workspace_id: userId,
+        sender: 'agent',
+        from_me: true,
+        type: 'template',
+        body: messageBody,
+        text: messageBody,
+        message_body: messageBody,
+        sender_phone: row.phone_number_id || null,
+        receiver_phone: recipientPhone,
+        is_private_note: false,
+        metadata,
+        created_at: nowIso,
+    }]);
+
+    if (error) {
+        console.error('Campaign inbox message insert failed:', error.message || error);
+    }
+};
+
 const processCampaignFallbackRows = async (rows = []) => {
     for (const row of rows) {
         try {
@@ -1207,10 +1293,12 @@ const processCampaignFallbackRows = async (rows = []) => {
                 fallback_dispatch: true,
             };
 
+            await upsertCampaignInboxMessage({ row, metaResult, fallbackDispatch: true });
+
             await Promise.allSettled([
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
-                    last_message: `Sent template: ${row.template_name}`,
+                    last_message: resolveCampaignMessagePreview(row),
                     updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
@@ -1288,12 +1376,14 @@ const processCampaignQueue = async () => {
                 meta_result: metaResult,
             };
 
+            await upsertCampaignInboxMessage({ row, metaResult });
+
             await Promise.allSettled([
                 supabase.from('wallets').update({ balance: nextBalance }).eq('user_id', row.user_id),
                 supabase.from('campaign_queue').update({ status: 'SENT', sent_at: new Date().toISOString(), meta_response: metaResult }).eq('id', row.id),
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
-                    last_message: `Sent template: ${row.template_name}`,
+                    last_message: resolveCampaignMessagePreview(row),
                     updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
