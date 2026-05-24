@@ -560,11 +560,11 @@ const Inbox = () => {
                 </div>
               )}
               {messages.map((msg) => {
-                const isDoctorMessage = msg.sender === 'doctor' || msg.from_me === true;
+                const isSentByMe = msg.from_me === true || msg.sender === 'doctor';
                 
                 return (
-                <div key={msg.id} className={`flex ${isDoctorMessage ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
-                  <div className={`relative z-10 max-w-[70%] rounded-2xl p-3 shadow-sm ${msg.is_private_note || msg.type === 'private' ? 'rounded-br-none border-2 border-yellow-200 bg-yellow-50 text-yellow-900' : isDoctorMessage ? 'rounded-br-none bg-[#D9FDD3] text-slate-800' : 'rounded-bl-none bg-white text-slate-800'}`}>
+                <div key={msg.id} className={`flex ${isSentByMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
+                  <div className={`relative z-10 max-w-[70%] rounded-2xl p-3 shadow-sm ${msg.is_private_note || msg.type === 'private' ? 'rounded-br-none border-2 border-yellow-200 bg-yellow-50 text-yellow-900' : isSentByMe ? 'rounded-br-none bg-[#D9FDD3] text-slate-800' : 'rounded-bl-none bg-white text-slate-800'}`}>
                     {(msg.is_private_note || msg.type === 'private') && (
                       <div className="mb-1 flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-yellow-600">
                         <Lock size={10} /> Private Note
@@ -573,7 +573,7 @@ const Inbox = () => {
                     <p className="text-[13.5px] font-medium leading-relaxed">{msg.text}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
-                      {isDoctorMessage && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
+                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
                     </div>
                   </div>
                 </div>

@@ -546,12 +546,17 @@ exports.sendTestMessage = async (req, res) => {
                 .single();
 
             // 2. Insert the outbound message directly into inbox_messages
-            await supabase.from('inbox_messages').insert({
+            const universalMessagePayload = {
                 chat_id: chatRow?.id,
-                body: req.body.templateText || `Template: ${req.body.templateName || 'hello_world'}`,
+                body: req.body.templateText || 'Template Dispatched',
+                text: req.body.templateText || 'Template Dispatched',
+                message_body: req.body.templateText || 'Template Dispatched',
                 sender: 'doctor',
+                from_me: true,
+                status: 'SENT',
                 created_at: new Date().toISOString()
-            });
+            };
+            await supabase.from('inbox_messages').insert(universalMessagePayload);
         } catch (dbError) {
             console.error("Database Backfill Failed:", dbError);
         }
