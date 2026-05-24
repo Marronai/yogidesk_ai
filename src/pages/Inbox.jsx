@@ -94,13 +94,13 @@ const Inbox = () => {
     try {
       let result = await supabase
         .from('inbox_chats')
-        .select('id, last_message, updated_at, name, patient_name, phone, status, scheduled_at, assigned_agent_id, metadata, unread_count')
+        .select('id, name, last_message, updated_at, phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
         .order('updated_at', { ascending: false });
 
       if (result.error) {
         const safeResult = await supabase
           .from('inbox_chats')
-          .select('id, last_message, updated_at, name, patient_name, status, scheduled_at')
+          .select('id, name, last_message, updated_at, phone, status, unread_count, patient_name, scheduled_at')
           .order('updated_at', { ascending: false });
         result = safeResult;
       }
@@ -123,13 +123,14 @@ const Inbox = () => {
       ? chatData.map((chat) => {
         const displayName = chat.name || chat.patient_name || 'Unknown Patient';
         const currentAgent = chat?.assigned_agent_id || null;
+        const count = Number(chat.unread_count || 0);
         return {
           id: chat.id,
           name: displayName,
           phone: chat?.phone || '',
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          unread: Number(chat?.unread_count || 0),
+          unread: count,
           status: chat.status || 'Offline',
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
