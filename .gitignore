@@ -7,8 +7,11 @@ frontend/node_modules/
 .env
 .env.local
 .env.production
-backend/.env
-frontend/.env
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
 
 # Logs & Bugs
 npm-debug.log*

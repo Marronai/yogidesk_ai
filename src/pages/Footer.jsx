@@ -38,7 +38,7 @@ const Footer = () => {
 
       {/* Trademark Copyright Block */}
       <div className="max-w-7xl mx-auto px-6 py-6 border-t border-slate-900 text-center text-xs text-slate-600 flex flex-col md:flex-row justify-between items-center gap-4">
-        <p>© 2026 Yogi Desk AI. Built and Managed by Vyapar Wallah Media Team.</p>
+        <p>© 2026 Yogi Desk AI. Built and Managed by Vyapar Wallah Media & MaSrketing</p>
         <p className="flex items-center gap-1">
           Made with <Heart size={14} className="text-red-500 fill-red-500"/> in India for better patient care.
         </p>
