@@ -71,7 +71,51 @@ serve(async (req) => {
       }]);
     }
 
+    let chatId = null;
+    const { data: existingChat } = await supabase
+      .from('inbox_chats')
+      .select('id, unread_count')
+      .eq('phone', fromPhone)
+      .maybeSingle();
+
+    if (existingChat?.id) {
+      chatId = existingChat.id;
+      await supabase
+        .from('inbox_chats')
+        .update({
+          user_id: currentAdminId,
+          doctor_id: currentAdminId,
+          name: patientName,
+          patient_name: patientName,
+          patient_phone: fromPhone,
+          last_message: messageText,
+          status: 'Active',
+          unread_count: Number(existingChat.unread_count || 0) + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', chatId);
+    } else {
+      const { data: createdChat } = await supabase
+        .from('inbox_chats')
+        .insert([{
+          user_id: currentAdminId,
+          doctor_id: currentAdminId,
+          name: patientName,
+          patient_name: patientName,
+          phone: fromPhone,
+          patient_phone: fromPhone,
+          last_message: messageText,
+          status: 'Active',
+          unread_count: 1,
+          updated_at: new Date().toISOString(),
+        }])
+        .select('id')
+        .maybeSingle();
+      chatId = createdChat?.id || null;
+    }
+
     await supabase.from('inbox_messages').insert([{
+      chat_id: chatId,
       workspace_id: currentAdminId,
       sender_phone: fromPhone,
       receiver_phone: clinicMetaId,

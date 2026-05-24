@@ -1178,6 +1178,9 @@ const sendCampaignMessageToMeta = async (queueItem) => {
             authError.clientPayload = { success: false, msg: "Meta Authentication Failed. Please check your Permanent Access Token in Settings." };
             throw authError;
         }
+        if (error.response?.data) {
+            console.error('Meta campaign send error:', JSON.stringify(error.response.data));
+        }
         throw error;
     }
 

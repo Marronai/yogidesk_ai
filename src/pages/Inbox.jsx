@@ -187,17 +187,41 @@ const Inbox = () => {
 
   const mapStoredMessage = (item) => ({
     id: item.id || item.created_at || Date.now(),
-    text: item.body || item.text || '',
-    sender: item.sender || 'user',
+    text: item.body || item.text || item.message_body || '',
+    sender: item.sender || (item.sender_phone ? 'user' : 'user'),
     from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
     type: item.type || (item.is_private_note ? 'private' : 'public'),
     is_private_note: Boolean(item.is_private_note),
     time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
   });
 
-  const loadMessages = (chat) => {
+  const loadMessages = async (chat) => {
     const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
     setMessages(storedMessages.map(mapStoredMessage));
+
+    if (!chat?.id) return;
+    try {
+      let result = await supabase
+        .from('inbox_messages')
+        .select('id, body, text, message_body, sender, sender_phone, from_me, type, is_private_note, created_at')
+        .eq('chat_id', chat.id)
+        .order('created_at', { ascending: true });
+
+      if (result.error) {
+        result = await supabase
+          .from('inbox_messages')
+          .select('id, message_body, sender_phone, is_private_note, created_at')
+          .eq('chat_id', chat.id)
+          .order('created_at', { ascending: true });
+      }
+
+      if (result.error) throw result.error;
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        setMessages(result.data.map(mapStoredMessage));
+      }
+    } catch (error) {
+      logInboxError(error);
+    }
   };
 
   const updateConversation = (chatId, patch) => {

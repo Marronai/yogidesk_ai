@@ -165,6 +165,14 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
 const insertQueuedInboxChatRows = async ({ rows = [] }) => {
     if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { inserted: false };
 
+    try {
+        const { error } = await supabase.from('inbox_chats').insert(rows);
+        if (error) throw error;
+        return { inserted: true };
+    } catch (error) {
+        logInboxDatabaseError(error);
+    }
+
     const fallbackRows = rows.map((row) => ({
         name: row.name || row.patient_name || 'Patient',
         phone: row.phone || row.patient_phone || 'unknown',
