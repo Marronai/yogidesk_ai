@@ -122,17 +122,18 @@ const Inbox = () => {
     const mappedChats = Array.isArray(chatData)
       ? chatData.map((chat) => {
         const displayName = chat.name || chat.patient_name || 'Unknown Patient';
+        const currentAgent = chat?.assigned_agent_id || null;
         return {
           id: chat.id,
           name: displayName,
-          phone: chat.phone || '',
+          phone: chat?.phone || '',
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          unread: Number(chat.unread_count || 0),
+          unread: Number(chat?.unread_count || 0),
           status: chat.status || 'Offline',
           scheduled_at: chat.scheduled_at || null,
-          assigned_agent_id: chat.assigned_agent_id,
-          metadata: chat.metadata || {},
+          assigned_agent_id: currentAgent,
+          metadata: chat?.metadata || {},
         };
       })
       : [];
@@ -339,7 +340,7 @@ const Inbox = () => {
     setSelectedChat(chat);
     setShowPhone(false);
     setShowBgMenu(false);
-    const agent = agents.find((item) => String(item.id) === String(chat.assigned_agent_id)) || agents[0];
+    const agent = agents.find((item) => String(item.id) === String(chat?.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
     loadMessages(chat);
