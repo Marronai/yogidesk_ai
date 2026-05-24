@@ -271,14 +271,14 @@ const Inbox = () => {
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, body, text, message_body, sender, sender_phone, from_me, type, is_private_note, created_at')
+        .select('id, chat_id, body, text, message_body, sender, from_me, type, is_private_note, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
       if (result.error) {
         result = await supabase
           .from('inbox_messages')
-          .select('id, message_body, sender_phone, is_private_note, created_at')
+          .select('id, chat_id, body, text, message_body, sender, from_me, created_at')
           .eq('chat_id', chat.id)
           .order('created_at', { ascending: true });
       }
@@ -561,6 +561,7 @@ const Inbox = () => {
               )}
               {messages.map((msg) => {
                 const isSentByMe = msg.from_me === true || msg.sender === 'doctor';
+                const messageText = msg.text || msg.body || msg.message_body || "Template Dispatched";
                 
                 return (
                 <div key={msg.id} className={`flex ${isSentByMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
@@ -570,7 +571,7 @@ const Inbox = () => {
                         <Lock size={10} /> Private Note
                       </div>
                     )}
-                    <p className="text-[13.5px] font-medium leading-relaxed">{msg.text}</p>
+                    <p className="text-[13.5px] font-medium leading-relaxed">{messageText}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
                       {isSentByMe && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
