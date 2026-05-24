@@ -500,6 +500,40 @@ exports.sendTestMessage = async (req, res) => {
         const response = await axios.post(url, data, config);
 
         console.log("Message Sent ID:", response.data.messages[0].id);
+
+        // --- REAL-TIME INBOX LOGGING ---
+        try {
+            const activePhone = String(req.body.patientPhone || req.body.phone || req.body.phoneNumber || '').replace(/\D/g, '');
+            const activeName = req.body.patientName || req.body.name || 'Patient';
+
+            // 1. Upsert into inbox_chats so the row definitely exists
+            const { data: chatRow, error: chatError } = await supabase
+                .from('inbox_chats')
+                .upsert({
+                    doctor_id: req.body.doctorId || req.body.userId || doctorId,
+                    phone: activePhone,
+                    patient_phone: activePhone,
+                    name: activeName,
+                    patient_name: activeName,
+                    last_message: req.body.templateText || 'Template Sent',
+                    status: 'SENT',
+                    unread_count: 0,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'phone' })
+                .select()
+                .single();
+
+            // 2. Insert the outbound message directly into inbox_messages
+            await supabase.from('inbox_messages').insert({
+                chat_id: chatRow?.id,
+                body: req.body.templateText || `Template: ${req.body.templateName || 'hello_world'}`,
+                sender: 'doctor',
+                created_at: new Date().toISOString()
+            });
+        } catch (dbError) {
+            console.error("Database Backfill Failed:", dbError);
+        }
+
         res.status(200).json({ 
             success: true, 
             msg: "Message sent successfully!", 
