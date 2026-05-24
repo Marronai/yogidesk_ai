@@ -164,10 +164,32 @@ const insertCampaignQueueRows = async ({ rows = [], fallbackRows = [] }) => {
 
 const insertQueuedInboxChatRows = async ({ rows = [] }) => {
     if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { inserted: false };
+    const db = supabaseAdmin || supabase;
 
     try {
-        const { error } = await supabase.from('inbox_chats').insert(rows);
-        if (error) throw error;
+        for (const row of rows) {
+            const phone = row.phone || row.patient_phone || 'unknown';
+            const payload = {
+                ...row,
+                phone,
+                patient_phone: row.patient_phone || phone,
+                updated_at: row.updated_at || new Date().toISOString(),
+            };
+
+            const { data: existingChat, error: lookupError } = await db
+                .from('inbox_chats')
+                .select('id')
+                .eq('phone', phone)
+                .order('updated_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (lookupError) throw lookupError;
+
+            const result = existingChat?.id
+                ? await db.from('inbox_chats').update(payload).eq('id', existingChat.id)
+                : await db.from('inbox_chats').insert([payload]);
+            if (result.error) throw result.error;
+        }
         return { inserted: true };
     } catch (error) {
         logInboxDatabaseError(error);
@@ -192,19 +214,19 @@ const insertQueuedInboxChatRows = async ({ rows = [] }) => {
     }));
 
     try {
-        const { error } = await supabase.from('inbox_chats').insert(fallbackRows);
+        const { error } = await db.from('inbox_chats').insert(fallbackRows);
         if (error) throw error;
         return { inserted: true };
     } catch (error) {
         logInboxDatabaseError(error);
         try {
-            const { error: fallbackError } = await supabase.from('inbox_chats').insert(fallbackRows);
+            const { error: fallbackError } = await db.from('inbox_chats').insert(fallbackRows);
             if (fallbackError) throw fallbackError;
             return { inserted: true };
         } catch (fallbackError) {
             logInboxDatabaseError(fallbackError);
             try {
-                const { error: minimalError } = await supabase.from('inbox_chats').insert(minimalRows);
+                const { error: minimalError } = await db.from('inbox_chats').insert(minimalRows);
                 if (minimalError) throw minimalError;
                 return { inserted: true };
             } catch (minimalError) {

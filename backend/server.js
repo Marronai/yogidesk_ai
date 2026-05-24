@@ -1201,6 +1201,7 @@ const resolveCampaignMessagePreview = (row = {}) => {
 
 const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbackDispatch = false }) => {
     if (!supabase?.from) return;
+    const db = supabaseAdmin || supabase;
 
     const nowIso = new Date().toISOString();
     const recipientPhone = String(row.recipient_phone || row.phone || '').trim();
@@ -1216,7 +1217,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
     };
 
     let chatId = null;
-    const { data: existingChat } = await supabase
+    const { data: existingChat } = await db
         .from('inbox_chats')
         .select('id, metadata')
         .eq('phone', recipientPhone)
@@ -1226,7 +1227,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
 
     if (existingChat?.id) {
         chatId = existingChat.id;
-        await supabase.from('inbox_chats').update({
+        await db.from('inbox_chats').update({
             user_id: userId,
             doctor_id: userId,
             name: recipientName || 'Patient',
@@ -1241,7 +1242,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             },
         }).eq('id', chatId);
     } else {
-        const { data: createdChat } = await supabase.from('inbox_chats').insert([{
+        const { data: createdChat } = await db.from('inbox_chats').insert([{
             user_id: userId,
             doctor_id: userId,
             name: recipientName || 'Patient',
@@ -1259,7 +1260,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
 
     if (!chatId) return;
 
-    const { error } = await supabase.from('inbox_messages').insert([{
+    const { error } = await db.from('inbox_messages').insert([{
         chat_id: chatId,
         workspace_id: userId,
         sender: 'agent',

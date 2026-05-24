@@ -107,6 +107,36 @@ const Inbox = () => {
 
       if (result.error) throw result.error;
       chatData = result.data || [];
+
+      if (chatData.length === 0) {
+        const messageResult = await supabase
+          .from('inbox_messages')
+          .select('chat_id, message_body, body, text, sender, from_me, type, receiver_phone, sender_phone, workspace_id, created_at')
+          .eq('workspace_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (!messageResult.error && Array.isArray(messageResult.data)) {
+          const fallbackChats = new Map();
+          messageResult.data.forEach((item) => {
+            const phone = item.receiver_phone || item.sender_phone || '';
+            const key = item.chat_id || phone || item.created_at;
+            if (fallbackChats.has(key)) return;
+            fallbackChats.set(key, {
+              id: item.chat_id || `message-${key}`,
+              name: phone || 'Patient',
+              patient_name: phone || 'Patient',
+              phone,
+              last_message: item.message_body || item.body || item.text || '',
+              updated_at: item.created_at,
+              status: 'SENT',
+              unread_count: 0,
+              metadata: { messages: [item], source_chat_id: item.chat_id || null },
+            });
+          });
+          chatData = Array.from(fallbackChats.values());
+        }
+      }
     } catch (error) {
       logInboxError(error);
     }
@@ -194,6 +224,35 @@ const Inbox = () => {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let channel;
+    let active = true;
+
+    getUser().then((user) => {
+      if (!active || !user?.id) return;
+      channel = supabase
+        .channel(`inbox-live-${user.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_chats' }, () => {
+          setReloadToken((value) => value + 1);
+        })
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'inbox_messages',
+          filter: `workspace_id=eq.${user.id}`,
+        }, () => {
+          setReloadToken((value) => value + 1);
+          if (selectedChat) loadMessages(selectedChat);
+        })
+        .subscribe();
+    });
+
+    return () => {
+      active = false;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [selectedChat]);
+
   const mapStoredMessage = (item) => ({
     id: item.id || item.created_at || Date.now(),
     text: item.body || item.text || item.message_body || '',
@@ -208,7 +267,7 @@ const Inbox = () => {
     const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
     setMessages(storedMessages.map(mapStoredMessage));
 
-    if (!chat?.id) return;
+    if (!chat?.id || String(chat.id).startsWith('message-')) return;
     try {
       let result = await supabase
         .from('inbox_messages')
