@@ -1,27 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, ShieldCheck, KeyRound, Phone } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, ShieldCheck, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
 import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import { API_URL } from '../utils/api';
-import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
   const [pendingUser, setPendingUser] = useState(null);
   
   // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
   const [step, setStep] = useState(1);
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
-  const [formData, setFormData] = useState({ email: '', password: '', phone: '' });
+  const [formData, setFormData] = useState({ email: '', password: '' });
 
   // --- CAROUSEL DATA (Updated to Yogi Desk Branding) ---
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -92,15 +90,21 @@ const Login = () => {
     }).catch(() => {});
   };
 
-  const startLoginPhoneVerification = async (user) => {
-    const phone = formData.phone || user?.user_metadata?.phone;
-    const confirmation = await startFirebasePhoneChallenge({
-      phone,
-      containerId: 'recaptcha-container',
-      verifierKey: 'login',
+  const startLoginEmailVerification = async (user, email) => {
+    const response = await fetch(`${API_URL}/api/auth/request-email-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        name: user?.user_metadata?.full_name || user?.user_metadata?.name || 'Doctor',
+        purpose: 'login'
+      })
     });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.msg || 'Unable to send email OTP.');
+
     setPendingUser(user);
-    setPhoneConfirmation(confirmation);
     setOtp(["", "", "", "", "", ""]);
     setStep(2);
   };
@@ -177,16 +181,23 @@ const Login = () => {
         if (error) throw error;
 
         if (data?.user) {
-          await startLoginPhoneVerification(data.user);
+          await startLoginEmailVerification(data.user, cleanEmail);
         }
       } else {
         const code = otp.join('');
-        if (!phoneConfirmation || code.length !== 6) {
-          alert("Please enter the 6-digit mobile OTP.");
+        if (code.length !== 6) {
+          alert("Please enter the 6-digit email OTP.");
           return;
         }
 
-        await phoneConfirmation.confirm(code);
+        const response = await fetch(`${API_URL}/api/auth/verify-email-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, otp: code, purpose: 'login' })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.msg || 'Email OTP verification failed.');
+
         triggerLoginEmail(pendingUser);
         handleAuthSuccess(pendingUser);
       }
@@ -265,13 +276,12 @@ const Login = () => {
 
           <div className="mb-8">
             <h2 className="text-3xl font-black text-gray-900 mb-2">{step === 1 ? "Welcome Back!" : "Enter Login Code"}</h2>
-            <p className="text-gray-500">{step === 1 ? "Please enter your doctor credentials to access the system dashboard." : "Enter the secure 6-digit access code sent to your mobile device."}</p>
+            <p className="text-gray-500">{step === 1 ? "Please enter your doctor credentials to access the system dashboard." : `Enter the secure 6-digit code sent to ${formData.email || 'your email'}.`}</p>
           </div>
 
           {/* 🔴 STEP 1: EMAIL & PASSWORD FORM */}
           {step === 1 && (
             <>
-              <div id="recaptcha-container"></div>
               {/* Google Button */}
               <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" className="w-5 h-5" alt="Google" />
@@ -302,14 +312,6 @@ const Login = () => {
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">Mobile Number</label>
-                  <div className="relative group">
-                    <Phone className="absolute left-4 top-3.5 text-gray-400 group-focus-within:text-[#FF6B00] transition-colors" size={20} />
-                    <input name="phone" type="tel" onChange={handleChange} placeholder="10-digit mobile number" required maxLength="10" className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-12 p-3.5 outline-none focus:border-[#FF6B00]"/>
-                  </div>
-                </div>
-
                 <div className="flex items-center justify-between mt-2">
                   <label className="flex items-center cursor-pointer">
                     <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-[#FF6B00] focus:ring-[#FF6B00] accent-[#FF6B00]" />
@@ -329,7 +331,6 @@ const Login = () => {
           {/* 🔴 STEP 2: OTP COMPONENT FALLBACK */}
           {step === 2 && (
             <motion.form initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} onSubmit={handleSubmit} className="space-y-6">
-               <div id="recaptcha-container"></div>
                <div className="flex gap-2 justify-center">
                   {otp.map((data, index) => (
                     <input

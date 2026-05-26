@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, KeyRound, Mail, Phone, RefreshCw, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, KeyRound, Mail, RefreshCw, UserPlus, Users, X } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { API_URL } from '../utils/api';
-import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 
 const seatCaps = { starter: 1, growth: 2, hospital: 5 };
 
@@ -14,10 +13,9 @@ const Team = () => {
   const [loading, setLoading] = useState(false);
   const [gateOpen, setGateOpen] = useState(false);
   const [gateLoading, setGateLoading] = useState(false);
-  const [adminPhone, setAdminPhone] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [adminOtp, setAdminOtp] = useState('');
   const [inviteDraft, setInviteDraft] = useState(null);
-  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
 
   const plan = (wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase();
   const maxSeats = seatCaps[plan] || seatCaps.starter;
@@ -91,7 +89,6 @@ const Team = () => {
     setGateOpen(false);
     setInviteDraft(null);
     setAdminOtp('');
-    setPhoneConfirmation(null);
   };
 
   const handleInvite = async (event) => {
@@ -117,24 +114,28 @@ const Team = () => {
     }
 
     setInviteDraft({ user, nameInput, emailInput });
-    setAdminPhone(user?.user_metadata?.phone || localStorage.getItem('user_phone') || '');
+    setAdminEmail(user?.email || localStorage.getItem('user_email') || '');
     setAdminOtp('');
-    setPhoneConfirmation(null);
     setGateOpen(true);
   };
 
   const sendAdminOtp = async () => {
     try {
       setGateLoading(true);
-      const confirmation = await startFirebasePhoneChallenge({
-        phone: adminPhone,
-        containerId: 'team-recaptcha-container',
-        verifierKey: 'team-invite',
+      const response = await fetch(`${API_URL}/api/auth/request-email-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: adminEmail.trim().toLowerCase(),
+          name: inviteDraft?.user?.user_metadata?.full_name || localStorage.getItem('user_name') || 'Admin',
+          purpose: 'team-invite',
+        }),
       });
-      setPhoneConfirmation(confirmation);
-      setAlert('Admin OTP sent. Enter the code to unlock the invite.');
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.msg || 'Unable to send admin OTP.');
+      setAlert('Admin OTP sent to email. Enter the code to unlock the invite.');
     } catch (error) {
-      setAlert(error.message || 'Unable to start phone verification.');
+      setAlert(error.message || 'Unable to send email OTP.');
     } finally {
       setGateLoading(false);
     }
@@ -142,17 +143,27 @@ const Team = () => {
 
   const verifyAndSaveInvite = async () => {
     if (!inviteDraft) return;
-    if (!phoneConfirmation || adminOtp.trim().length !== 6) {
+    if (!adminEmail.trim() || adminOtp.trim().length !== 6) {
       setAlert('Please send and enter the 6-digit admin OTP.');
       return;
     }
 
     try {
       setGateLoading(true);
-      await phoneConfirmation.confirm(adminOtp.trim());
+      const response = await fetch(`${API_URL}/api/auth/verify-email-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: adminEmail.trim().toLowerCase(),
+          otp: adminOtp.trim(),
+          purpose: 'team-invite',
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.msg || 'Admin email verification failed.');
       await saveVerifiedInvite(inviteDraft);
     } catch (error) {
-      setAlert(error.message || 'Admin phone verification failed.');
+      setAlert(error.message || 'Admin email verification failed.');
     } finally {
       setGateLoading(false);
     }
@@ -187,7 +198,7 @@ const Team = () => {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-black text-slate-900">Verify Admin Mobile</h2>
+                <h2 className="text-lg font-black text-slate-900">Verify Admin Email</h2>
                 <p className="mt-1 text-sm font-semibold text-slate-500">Complete OTP validation before sending this team invite.</p>
               </div>
               <button
@@ -200,13 +211,13 @@ const Team = () => {
             </div>
 
             <div className="mt-5 space-y-3">
-              <div id="team-recaptcha-container"></div>
               <div className="relative">
-                <Phone size={18} className="absolute left-3.5 top-3.5 text-slate-400" />
+                <Mail size={18} className="absolute left-3.5 top-3.5 text-slate-400" />
                 <input
-                  value={adminPhone}
-                  onChange={(e) => setAdminPhone(e.target.value)}
-                  placeholder="Admin mobile number"
+                  type="email"
+                  value={adminEmail}
+                  onChange={(e) => setAdminEmail(e.target.value)}
+                  placeholder="Admin email"
                   className="w-full rounded-2xl border border-slate-200 py-3 pl-10 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
                 />
               </div>
@@ -216,7 +227,7 @@ const Team = () => {
                 disabled={gateLoading}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-orange-50 px-5 py-3 text-sm font-black text-orange-700 hover:bg-orange-100 disabled:opacity-60"
               >
-                <Phone size={17} />
+                <Mail size={17} />
                 Send Admin OTP
               </button>
               <input

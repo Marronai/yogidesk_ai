@@ -10,14 +10,12 @@ import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
-import { startFirebasePhoneChallenge } from '../utils/firebasePhoneAuth';
 import { saveWallet } from '../utils/wallet';
 
 const SignUp = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [phoneConfirmation, setPhoneConfirmation] = useState(null);
   const [pendingUser, setPendingUser] = useState(null);
   const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
 
@@ -118,14 +116,13 @@ const SignUp = () => {
     }).catch(() => {});
   };
 
-  const startSignupPhoneVerification = async (user) => {
-    const confirmation = await startFirebasePhoneChallenge({
-      phone: formData.phone,
-      containerId: 'recaptcha-container',
-      verifierKey: 'signup',
+  const startSignupEmailVerification = async (user, email = formData.email) => {
+    await api.post('/auth/request-email-otp', {
+      email: email.trim().toLowerCase(),
+      name: formData.name.trim() || user?.user_metadata?.full_name || 'Doctor',
+      purpose: 'signup',
     });
     setPendingUser(user || null);
-    setPhoneConfirmation(confirmation);
     setSmsOtp(["", "", "", "", "", ""]);
     setStep(3);
   };
@@ -181,32 +178,8 @@ const SignUp = () => {
 
     try {
       if (step === 1) {
-        // --- STEP 1: REGISTER WITH SUPABASE AUTH ---
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password: formData.password,
-          options: {
-            data: {
-              full_name: formData.name.trim(),
-              business_name: formData.businessName.trim(),
-              business_category: formData.businessCategory,
-              phone: cleanPhone
-            }
-          }
-        });
-
-        if (error) throw error;
-
-        if (data?.session?.user) {
-          await startSignupPhoneVerification(data.session.user);
-          return;
-        }
-
-        // Public Profiles table backup logic (Optional profile trigger)
-        if (data?.user) {
-          await startSignupPhoneVerification(data.user);
-          alert(`Yogi Desk account created. Enter the mobile OTP to finish activation for ${cleanEmail}.`);
-        }
+        await startSignupEmailVerification(null, cleanEmail);
+        alert(`OTP sent to ${cleanEmail}. Enter the email OTP to finish activation.`);
       } else if (step === 4) {
         const { data: sessionData } = await supabase.auth.getSession();
         const googleUser = sessionData?.session?.user || pendingUser;
@@ -223,7 +196,7 @@ const SignUp = () => {
             phone: cleanPhone
           }
         });
-        await startSignupPhoneVerification({
+        await startSignupEmailVerification({
           ...googleUser,
           user_metadata: {
             ...(googleUser.user_metadata || {}),
@@ -232,25 +205,63 @@ const SignUp = () => {
             business_category: formData.businessCategory,
             phone: cleanPhone
           }
-        });
+        }, googleUser.email || cleanEmail);
       } else if (step === 3) {
         const code = smsOtp.join('');
-        if (!phoneConfirmation || code.length !== 6) {
-          alert("Please enter the 6-digit mobile OTP.");
+        const otpEmail = (pendingUser?.email || cleanEmail || formData.email).trim().toLowerCase();
+        if (code.length !== 6) {
+          alert("Please enter the 6-digit email OTP.");
           return;
         }
 
-        await phoneConfirmation.confirm(code);
-        await ensureSignupWallet(pendingUser?.id);
-        triggerWelcomeEmail(cleanEmail || pendingUser?.email || formData.email, pendingUser?.id);
+        await api.post('/auth/verify-email-otp', { email: otpEmail, otp: code, purpose: 'signup' });
 
         if (pendingUser?.id) {
+          await ensureSignupWallet(pendingUser.id);
+          triggerWelcomeEmail(otpEmail, pendingUser.id);
           handleAuthSuccess(pendingUser);
           return;
         }
 
-        setStep(2);
-        alert(`Verification complete. Please use the activation email sent to ${cleanEmail}.`);
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.name.trim(),
+              business_name: formData.businessName.trim(),
+              business_category: formData.businessCategory,
+              phone: cleanPhone,
+              email_otp_verified: true
+            }
+          }
+        });
+
+        if (error) throw error;
+
+        const verifiedUser = data?.session?.user || data?.user;
+        if (verifiedUser?.id) {
+          await ensureSignupWallet(verifiedUser.id);
+          triggerWelcomeEmail(cleanEmail, verifiedUser.id);
+        }
+
+        if (data?.session?.user) {
+          handleAuthSuccess(data.session.user);
+          return;
+        }
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: formData.password,
+        });
+
+        if (signInError || !signInData?.user) {
+          setStep(2);
+          alert(`Email OTP verified. Please login with ${cleanEmail}.`);
+          return;
+        }
+
+        handleAuthSuccess(signInData.user);
       } else {
         // --- STEP 2: BYPASS/MANUAL SIGNIN FROM COOLDOWN SCREEN ---
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -316,7 +327,7 @@ const SignUp = () => {
                {step === 1 ? "Create your Yogi Desk account" : "Activate your account"}
              </h2>
              <p className="text-gray-500">
-               {step === 1 ? "Create your clinic workspace and receive Rs. 50 WhatsApp credits." : step === 3 ? "Enter the secure OTP code sent to your WhatsApp number." : "Complete your clinic details to continue."}
+               {step === 1 ? "Create your clinic workspace and receive Rs. 50 WhatsApp credits." : step === 3 ? `Enter the secure OTP code sent to ${(pendingUser?.email || formData.email || 'your email')}.` : "Complete your clinic details to continue."}
              </p>
           </div>
 
@@ -336,13 +347,12 @@ const SignUp = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div id="recaptcha-container"></div>
             {step === 1 || step === 4 ? (
               <>
                 {step === 4 && (
                   <div className="text-center p-4 bg-orange-50 border border-orange-100 rounded-xl">
                     <p className="text-sm text-orange-700 font-medium">
-                      Complete clinic details, then verify your WhatsApp number.
+                      Complete clinic details, then verify your email OTP.
                     </p>
                   </div>
                 )}
@@ -371,7 +381,7 @@ const SignUp = () => {
                       type="tel" 
                       onChange={handleChange} 
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl pl-10 p-3 outline-none focus:border-[#FF6B00]" 
-                      placeholder="WhatsApp Number (10 digits)" 
+                      placeholder="Phone Number (10 digits)" 
                       pattern="[0-9]{10}" 
                       maxLength="10"
                       required
@@ -429,7 +439,7 @@ const SignUp = () => {
               <>
                 <div className="text-center p-6 bg-orange-50 border border-orange-100 rounded-xl mb-4">
                    <p className="text-sm text-orange-700 font-medium">
-                     Enter the secure OTP code sent to your WhatsApp number.
+                     Enter the secure OTP code sent to your email.
                    </p>
                 </div>
 

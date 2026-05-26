@@ -215,6 +215,18 @@ const buildTemplateComponents = ({ bodyText, headerType, headerText, footerText,
 const sendWelcomeEmail = typeof emailConfig.sendWelcomeEmail === 'function' ? emailConfig.sendWelcomeEmail : async () => false;
 const sendLoginAlert = typeof emailConfig.sendLoginAlert === 'function' ? emailConfig.sendLoginAlert : async () => false;
 const sendDirectEmail = typeof emailConfig.sendDirectEmail === 'function' ? emailConfig.sendDirectEmail : async () => false;
+const sendOTP = typeof emailConfig.sendOTP === 'function' ? emailConfig.sendOTP : async () => false;
+const emailOtpStore = new Map();
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const buildOtpKey = (email, purpose = 'auth') => `${normalizeEmail(email)}:${String(purpose || 'auth').trim().toLowerCase()}`;
+const generateEmailOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const clearExpiredEmailOtps = () => {
+    const now = Date.now();
+    for (const [key, record] of emailOtpStore.entries()) {
+        if (!record?.expiresAt || record.expiresAt <= now) emailOtpStore.delete(key);
+    }
+};
 
 // ====== HEALTH CHECK ENDPOINT ======
 app.get('/api/health', (req, res) => {
@@ -273,6 +285,67 @@ app.post('/api/auth/dispatch-login-alert', async (req, res) => {
     } catch (error) {
         console.error('Login email dispatch error:', error.message);
         return res.status(202).json({ success: false });
+    }
+});
+
+app.post('/api/auth/request-email-otp', async (req, res) => {
+    try {
+        clearExpiredEmailOtps();
+        const email = normalizeEmail(req.body?.email);
+        const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
+        const name = String(req.body?.name || 'Doctor').trim() || 'Doctor';
+
+        if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+        const otp = generateEmailOtp();
+        emailOtpStore.set(buildOtpKey(email, purpose), {
+            otp,
+            expiresAt: Date.now() + 10 * 60 * 1000,
+            attempts: 0
+        });
+
+        const sent = await sendOTP(email, name, otp);
+        if (!sent) return res.status(500).json({ success: false, msg: 'Failed to send OTP. Please try again.' });
+
+        return res.status(200).json({ success: true, msg: 'OTP sent to your email.' });
+    } catch (error) {
+        console.error('Email OTP request error:', error.message);
+        return res.status(500).json({ success: false, msg: 'Unable to send OTP.' });
+    }
+});
+
+app.post('/api/auth/verify-email-otp', async (req, res) => {
+    try {
+        clearExpiredEmailOtps();
+        const email = normalizeEmail(req.body?.email);
+        const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
+        const otp = String(req.body?.otp || '').trim();
+
+        if (!email || !otp) return res.status(400).json({ success: false, msg: 'Email and OTP are required' });
+
+        const key = buildOtpKey(email, purpose);
+        const record = emailOtpStore.get(key);
+        if (!record || record.expiresAt <= Date.now()) {
+            emailOtpStore.delete(key);
+            return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
+        }
+
+        record.attempts += 1;
+        if (record.attempts > 5) {
+            emailOtpStore.delete(key);
+            return res.status(429).json({ success: false, msg: 'Too many OTP attempts. Please request a new code.' });
+        }
+
+        if (record.otp !== otp) {
+            emailOtpStore.set(key, record);
+            return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
+        }
+
+        emailOtpStore.delete(key);
+        return res.status(200).json({ success: true, msg: 'OTP verified.' });
+    } catch (error) {
+        console.error('Email OTP verification error:', error.message);
+        return res.status(500).json({ success: false, msg: 'Unable to verify OTP.' });
     }
 });
 
