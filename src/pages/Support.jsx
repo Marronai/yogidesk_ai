@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { HelpCircle, MessageCircle, Mail, BookOpen, PlayCircle, ExternalLink, ArrowLeft } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { useWallet } from '../context/WalletContext';
 
 const Support = () => {
   const [view, setView] = useState('home');

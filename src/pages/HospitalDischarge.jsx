@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Search, Send, CheckCircle, FileSpreadsheet, X } from 'lucide-react';
 import axios from 'axios';
+import { useWallet } from '../context/WalletContext';
 
 const HospitalDischarge = () => {
   const [patients, setPatients] = useState([]);

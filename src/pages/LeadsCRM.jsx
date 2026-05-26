@@ -1,5 +1,6 @@
 import React from 'react';
 import { Megaphone, Sparkles } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 
 const LeadsCRM = () => {
   return (

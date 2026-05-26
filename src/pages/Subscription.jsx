@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
+// This component is for manual UPI proof upload, not directly related to PayU flow
 const Subscription = () => {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState('idle');

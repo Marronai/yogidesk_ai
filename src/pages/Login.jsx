@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 // ⭐ Supabase Client Import
 import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
+import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
 
 const Login = () => {
@@ -17,6 +18,7 @@ const Login = () => {
   
   // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
   const [step, setStep] = useState(1);
+  const { fetchWalletData, fetchTransactions } = useWallet();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -150,6 +152,10 @@ const Login = () => {
         }
         
         // 🚀 Redirect to Main Dashboard
+        // After successful login, trigger a refresh of global wallet data
+        await Promise.all([
+          fetchWalletData(),
+          fetchTransactions()]);
         navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);

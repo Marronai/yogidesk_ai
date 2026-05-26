@@ -10,7 +10,6 @@ import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
-import { saveWallet } from '../utils/wallet';
 
 const SignUp = () => {
   const navigate = useNavigate();
@@ -82,14 +81,6 @@ const SignUp = () => {
 
     if (error) console.warn('Wallet database seed deferred:', error.message);
 
-    saveWallet({
-      balance: 50.00,
-      is_first_recharge: true,
-      welcome_gift_active: true,
-      current_plan: 'starter',
-      plan_tier: 'starter',
-      last_cashback: 0,
-    });
   };
 
   const triggerWelcomeEmail = (email = formData.email, userId = pendingUser?.id) => {
@@ -495,13 +486,4 @@ const SignUp = () => {
             )}
           </form>
 
-          <p className="mt-8 text-center text-sm text-gray-500">
-            Already have an account? <Link to="/login" className="font-bold text-[#FF6B00] hover:underline">Log In</Link>
-          </p>
-        </motion.div>
-      </div>
-    </div>
-  );
-};
-
-export default SignUp;
+          <p className="mt-8

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Check, Hospital, ShieldCheck, Stethoscope, Users2, Wallet } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 
 const plans = [
   {

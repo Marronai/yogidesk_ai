@@ -1,189 +1,88 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Clock, Gift, Send, Wallet } from 'lucide-react';
-import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 import { PRICING_RULES } from '../constants/templateLibrary';
-import { saveWallet } from '../utils/wallet';
+import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 
+// Removed normalizeSupabaseId and isCleanFilterValue as they are now handled by WalletContext
 const quickAmounts = [200, 500, 1000];
-const normalizeSupabaseId = (value) => {
-  if (typeof value === 'string') return value.trim();
-  if (value && typeof value === 'object') return String(value.id || value.user_id || value.sub || '').trim();
-  return String(value || '').trim();
-};
-const isCleanFilterValue = (value) => Boolean(value && value !== 'undefined' && value !== 'null' && value !== '[object Object]');
-
-const loadRazorpayCheckout = () => new Promise((resolve, reject) => {
-  if (window.Razorpay) {
-    resolve(true);
-    return;
-  }
-
-  const existing = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
-  if (existing) {
-    existing.addEventListener('load', () => resolve(true), { once: true });
-    existing.addEventListener('error', reject, { once: true });
-    return;
-  }
-
-  const script = document.createElement('script');
-  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-  script.async = true;
-  script.onload = () => resolve(true);
-  script.onerror = reject;
-  document.body.appendChild(script);
-});
 
 const YogiWallet = () => {
-  const [wallet, setWallet] = useState({ balance: 50, is_first_recharge: true, welcome_gift_active: true });
-  const [transactions, setTransactions] = useState([]);
+  const { wallet, transactions, loading, userId } = useWallet(); // Consume from WalletContext
   const [amount, setAmount] = useState(200);
-  const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
 
-  const userId = normalizeSupabaseId(localStorage.getItem('user_id'));
 
-  const fetchWalletData = useCallback(async () => {
-    if (!isCleanFilterValue(userId)) return;
-
-    const { data, error } = await supabase
-      .from('wallets')
-      .select('balance,is_first_recharge,welcome_gift_active')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (!error && data) {
-      setWallet(data);
-      saveWallet(data);
-      return;
-    }
-
-    const defaultWallet = {
-      user_id: userId,
-      balance: 50.00,
-      is_first_recharge: true,
-      welcome_gift_active: true,
-      current_plan: 'starter',
-      plan_tier: 'starter',
-      lifetime_contacts_count: 0,
-    };
-
-    const { data: createdWallet, error: createError } = await supabase
-      .from('wallets')
-      .upsert(defaultWallet, { onConflict: 'user_id', ignoreDuplicates: true })
-      .select('balance, is_first_recharge, welcome_gift_active')
-      .single();
-
-    if (!createError && createdWallet) {
-      setWallet(createdWallet);
-      saveWallet(createdWallet);
-    }
-  }, [userId]);
-
-  const fetchTransactions = useCallback(async () => {
-    if (!isCleanFilterValue(userId)) return;
-    const { data, error } = await supabase
-      .from('wallet_transactions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    if (!error && data) setTransactions(data);
-    setLoading(false);
-  }, [userId]);
-
-  useEffect(() => {
-    fetchWalletData();
-    fetchTransactions();
-  }, [fetchWalletData, fetchTransactions]);
-
-  const creditWallet = async (rechargeAmount, paymentResponse) => {
-    if (!isCleanFilterValue(userId)) return;
-
-    const { data: currentWallet, error } = await supabase
-      .from('wallets')
-      .select('balance,welcome_gift_active')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    const newBalance = Number((Number(currentWallet?.balance || 0) + rechargeAmount).toFixed(2));
-
-    await supabase.from('wallets').upsert({
-      user_id: userId,
-      balance: newBalance,
-      is_first_recharge: false,
-      welcome_gift_active: currentWallet?.welcome_gift_active ?? false,
-      current_plan: 'starter',
-      plan_tier: 'starter',
-    }, { onConflict: 'user_id' });
-
-    await supabase.from('wallet_transactions').insert([{
-      user_id: userId,
-      amount: rechargeAmount,
-      type: 'recharge',
-      description: 'Recharged via Razorpay Checkout',
-      metadata: {
-        provider: 'razorpay',
-        payment_id: paymentResponse?.razorpay_payment_id || null,
-      },
-      created_at: new Date().toISOString()
-    }]);
-
-    await fetchWalletData();
-    await fetchTransactions();
-  };
-
+  // PayU Integration Logic
   const handleProceedToRecharge = async (event) => {
     event.preventDefault();
     const rechargeAmount = Number(amount);
-    const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
 
     setPaymentError('');
-    if (!isCleanFilterValue(userId) || !Number.isFinite(rechargeAmount)) return;
-    if (rechargeAmount < 100) {
-      setPaymentError('Minimum recharge amount is ₹100.');
-      alert('Minimum recharge amount is ₹100.');
-      return;
-    }
-    if (!razorpayKey) {
-      alert('Razorpay key is missing. Please contact support.');
+    if (!userId || !Number.isFinite(rechargeAmount)) return; // Use userId from context
+    if (rechargeAmount < 10) {
+      setPaymentError('Minimum recharge amount is ₹10.');
+      alert('Minimum recharge amount is ₹10.');
       return;
     }
 
     try {
       setPaying(true);
-      await loadRazorpayCheckout();
 
-      const checkout = new window.Razorpay({
-        key: razorpayKey,
-        amount: Math.round(rechargeAmount * 100),
-        currency: 'INR',
-        name: 'Yogi Desk',
-        description: 'WhatsApp Credits Recharge',
-        prefill: {
-          name: localStorage.getItem('user_name') || 'Yogi Desk User',
-          email: localStorage.getItem('user_email') || '',
-          contact: localStorage.getItem('user_phone') || '',
-        },
-        theme: { color: '#ff6b00' },
-        handler: async (response) => {
-          try {
-            await creditWallet(rechargeAmount, response);
-          } catch (error) {
-            console.error('Wallet credit failed:', error);
-            alert('Payment captured, but wallet sync failed. Please contact support.');
-          } finally {
-            setPaying(false);
-          }
-        },
-        modal: {
-          ondismiss: () => setPaying(false),
-        },
+      const txnid = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      const productinfo = 'Yogi Desk WhatsApp Credits';
+      const firstname = localStorage.getItem('user_name') || 'Yogi Desk User';
+      const email = localStorage.getItem('user_email') || '';
+      const phone = localStorage.getItem('user_phone') || '';
+
+      // 1. Get hash from backend
+      const { data: hashResponse } = await api.post('/payment/payu-hash', {
+        txnid,
+        amount: rechargeAmount,
+        productinfo,
+        firstname,
+        email,
       });
 
-      checkout.open();
+      if (!hashResponse?.hash) {
+        throw new Error('Failed to get payment hash from server.');
+      }
+
+      // 2. Dynamically create and submit form to PayU
+      const form = document.createElement('form');
+      form.method = 'post';
+      form.action = 'https://secure.payu.in/_payment'; // PayU production URL
+      form.target = '_self'; // Open in the same window
+
+      const payuParams = {
+        key: import.meta.env.VITE_PAYU_MERCHANT_KEY, // Ensure this is set in your .env and exposed to Vite
+        txnid: txnid,
+        amount: rechargeAmount,
+        productinfo: productinfo,
+        firstname: firstname,
+        email: email,
+        phone: phone,
+        hash: hashResponse.hash,
+        surl: `${window.location.origin}/payment-success`, // Success URL (you'll need to create this route)
+        furl: `${window.location.origin}/payment-failure`, // Failure URL (you'll need to create this route)
+        // Optional parameters, add as needed
+        // service_provider: 'payu_paisa',
+      };
+
+      for (const key in payuParams) {
+        if (payuParams.hasOwnProperty(key)) {
+          const hiddenField = document.createElement('input');
+          hiddenField.type = 'hidden';
+          hiddenField.name = key;
+          hiddenField.value = payuParams[key];
+          form.appendChild(hiddenField);
+        }
+      }
+
+      document.body.appendChild(form);
+      form.submit();
+      document.body.removeChild(form); // Clean up the form after submission
     } catch (error) {
       setPaying(false);
       console.error('Razorpay initialization failed:', error);
@@ -208,11 +107,12 @@ const YogiWallet = () => {
                 <Wallet size={22} />
                 <span className="text-xs font-black uppercase tracking-widest">Available Balance</span>
               </div>
-              <div className="mt-3 text-4xl font-black sm:text-5xl">Rs. {Number(wallet.balance || 0).toFixed(2)}</div>
+              <div className="mt-3 text-4xl font-black sm:text-5xl">
+                {loading ? <div className="h-10 w-32 animate-pulse rounded-lg bg-white/20" /> : `Rs. ${Number(wallet.balance || 0).toFixed(2)}`}
+              </div>
             </div>
           </div>
-
-          {wallet.welcome_gift_active && (
+          {wallet.welcome_gift_active && !loading && (
             <div className="mt-6 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
               <Gift size={20} className="mt-0.5 shrink-0" />
               <span>Welcome Gift: Rs. 50.00 Free WhatsApp Credits Active</span>
@@ -223,7 +123,7 @@ const YogiWallet = () => {
         <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
           <form onSubmit={handleProceedToRecharge} className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-black text-slate-950">Recharge Wallet</h2>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Pay securely through Razorpay checkout.</p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Pay securely through PayU India.</p>
 
             <div className="mt-6 grid grid-cols-3 gap-3">
               {quickAmounts.map((quickAmount) => (
@@ -246,7 +146,7 @@ const YogiWallet = () => {
             <input
               type="number"
               min={100}
-              value={amount}
+              value={amount < 10 ? 10 : amount} // Ensure minimum of 10 is displayed if user enters less
               onChange={(event) => setAmount(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-4 text-lg font-black text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
             />
@@ -304,32 +204,46 @@ const YogiWallet = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {transactions.map((tx) => {
-                  const isCredit = tx.type === 'CREDIT' || tx.type === 'recharge';
-                  return (
-                    <tr key={tx.id} className="hover:bg-slate-50/30 transition-colors">
-                      <td className="p-4 text-sm font-medium text-slate-600">
-                        {new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          {isCredit ? <ArrowUpCircle size={14} className="text-emerald-500" /> : <ArrowDownCircle size={14} className="text-rose-500" />}
-                          <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${isCredit ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                            {isCredit ? 'Recharge' : 'Debit'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className={`p-4 text-sm font-black ${isCredit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {isCredit ? '+' : '-'} Rs. {Math.abs(tx.amount).toFixed(2)}
-                      </td>
+                {loading ? (
+                  // Skeleton Rows
+                  [1, 2, 3].map((i) => (
+                    <tr key={i}>
+                      <td className="p-4"><div className="h-4 w-24 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-20 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-16 animate-pulse rounded bg-slate-100" /></td>
                     </tr>
-                  );
-                })}
+                  ))
+                ) : (
+                  transactions.map((tx) => {
+                    const isCredit = tx.type === 'CREDIT' || tx.type === 'recharge';
+                    return (
+                      <tr key={tx.id} className="hover:bg-slate-50/30 transition-colors">
+                        <td className="p-4 text-sm font-medium text-slate-600">
+                          {new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-2">
+                            {isCredit ? <ArrowUpCircle size={14} className="text-emerald-500" /> : <ArrowDownCircle size={14} className="text-rose-500" />}
+                            <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase ${isCredit ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                              {isCredit ? 'Recharge' : 'Debit'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className={`p-4 text-sm font-black ${isCredit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {isCredit ? '+' : '-'} Rs. {Math.abs(tx.amount).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
             {transactions.length === 0 && !loading && (
               <div className="p-12 text-center text-xs font-bold uppercase tracking-widest text-slate-400 sm:p-16">
-                No transaction history found
+                <div className="flex flex-col items-center gap-2">
+                  <Clock size={32} className="text-slate-200" />
+                  <span>No transaction history found</span>
+                </div>
               </div>
             )}
             {loading && (

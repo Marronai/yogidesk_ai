@@ -17,6 +17,7 @@ import {
   User,
   UserPlus,
   Image as ImageIcon,
+  Loader,
 } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 
@@ -39,7 +40,7 @@ const Inbox = () => {
   const [activeAgent, setActiveAgent] = useState(fallbackAgent);
   const [agents, setAgents] = useState([fallbackAgent]);
   const [conversations, setConversations] = useState([]);
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([]);  
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
@@ -65,7 +66,7 @@ const Inbox = () => {
   ), [conversations, tagFilter]);
 
   const getUser = async () => {
-    const { data } = await supabase.auth.getUser();
+    const { data } = await supabase.auth.getUser();    
     return data?.user || { id: localStorage.getItem('user_id') };
   };
 
@@ -228,7 +229,7 @@ const Inbox = () => {
     let channel;
     let active = true;
 
-    getUser().then((user) => {
+    getUser().then((user) => {      
       if (!active || !user?.id) return;
       channel = supabase
         .channel(`inbox-live-${user.id}`)
@@ -251,7 +252,7 @@ const Inbox = () => {
       active = false;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [selectedChat]);
+  }, [selectedChat, loadMessages]);
 
   const mapStoredMessage = (item) => ({
     id: item.id || item.created_at || Date.now(),
@@ -298,7 +299,7 @@ const Inbox = () => {
       loadMessages(selectedChat);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [selectedChat]);
+  }, [selectedChat, loadMessages]);
 
   const updateConversation = (chatId, patch) => {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...patch } : chat)));
@@ -440,6 +441,12 @@ const Inbox = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input type="text" placeholder="Search chats..." className="w-full rounded-xl border border-slate-100 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all focus:bg-white" />
           </div>
+          {loading && (
+            <div className="flex items-center justify-center py-4 text-sm font-semibold text-slate-400">
+              <Loader size={16} className="mr-2 animate-spin" />
+              Loading conversations...
+            </div>
+          )}
           <select
             value={tagFilter}
             onChange={(event) => setTagFilter(event.target.value)}

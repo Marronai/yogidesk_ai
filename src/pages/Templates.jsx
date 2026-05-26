@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
+import { useWallet } from '../context/WalletContext';
 import api from '../utils/api';
 import { 
   Upload, Image as ImageIcon, Video, FileText, Type, X, 
@@ -45,6 +46,7 @@ const Templates = () => {
   const [variableSamples, setVariableSamples] = useState({});
   const [customVariables, setCustomVariables] = useState([]);
   const [showCustomVariableInput, setShowCustomVariableInput] = useState(false);
+  const { userId } = useWallet(); // Get userId from global context
   const [customVariableLabel, setCustomVariableLabel] = useState('');
 
   useEffect(() => {
@@ -55,7 +57,6 @@ const Templates = () => {
         if (!supabase?.auth || !supabase?.from) {
           throw new Error('Supabase client is not initialized.');
         }
-
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || localStorage.getItem('user_id');
         if (!userId) return;

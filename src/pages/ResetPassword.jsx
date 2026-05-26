@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, CheckCircle2, XCircle, ShieldCheck, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 import { motion } from 'framer-motion';
 import { supabase } from '../config/supabaseClient';
 import { API_URL } from '../utils/api';

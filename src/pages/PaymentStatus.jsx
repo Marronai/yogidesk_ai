@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { CheckCircle, XCircle, Loader2, ArrowRight } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 
 const PaymentStatus = () => {
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState('verifying'); // States: verifying, success, failed
+  const { fetchWalletData, fetchTransactions } = useWallet();
   const orderId = searchParams.get('order_id');
   const navigate = useNavigate();
 
@@ -22,6 +24,10 @@ const PaymentStatus = () => {
 
         if (res.status === 200) {
           setStatus('success');
+          // After successful payment, trigger a refresh of global wallet data
+          await Promise.all([
+            fetchWalletData(),
+            fetchTransactions()]);
           // 3 second baad auto-redirect to dashboard
           setTimeout(() => navigate('/'), 3000);
         }
@@ -37,7 +43,7 @@ const PaymentStatus = () => {
       // Agar URL mein order_id nahi hai toh seedha failed dikhao
       setStatus('failed');
     }
-  }, [orderId, navigate]);
+  }, [orderId, navigate, fetchWalletData, fetchTransactions]);
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4 font-sans">

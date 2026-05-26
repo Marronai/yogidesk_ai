@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, ChevronDown, Sparkles, Layers, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
-import { getTemplatesBySpecialty, calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from "../constants/templateLibrary";
-import { getWallet } from '../utils/wallet';
+import { getTemplatesBySpecialty, calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
+import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 
 const TemplateManager = () => {
   const navigate = useNavigate();
@@ -17,6 +17,7 @@ const TemplateManager = () => {
   const [planTier, setPlanTier] = useState('Starter Clinic');
   const [activeTab, setActiveTab] = useState('create');
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
+  const { wallet } = useWallet(); // Consume wallet from global context
 
   // Specialization Logic
   const businessCategory = localStorage.getItem('user_business_category') || 'General Physician';
@@ -168,10 +169,9 @@ const TemplateManager = () => {
   ];
 
   // Task 3: Wallet Validation Interceptor
-  const handleExecuteBroadcast = useCallback(async (template, patientCount = 1) => {
-    const wallet = getWallet();
+  const handleExecuteBroadcast = useCallback(async (template, patientCount = 1) => {    
     const totalCost = calculateCampaignCost(patientCount, template.category);
-    
+
     if (wallet.balance < totalCost) {
       alert(`❌ Insufficient Yogi Wallet Balance!\nYour balance: Rs. ${wallet.balance.toFixed(2)}\nRequired: Rs. ${totalCost}\n\nPlease recharge with at least ₹100 to execute this broadcast.`);
       return;

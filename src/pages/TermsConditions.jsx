@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldCheck, FileText, Scale, AlertTriangle } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 
 const TermsConditions = () => {
   return (

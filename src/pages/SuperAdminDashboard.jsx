@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../utils/api';
 import { ShieldAlert, Users, Zap, AlertTriangle } from 'lucide-react';
+import { useWallet } from '../context/WalletContext';
 
 const SuperAdminDashboard = () => {
   const [metrics, setMetrics] = useState([]);

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
+import { useWallet } from '../context/WalletContext';
 import api from '../utils/api';
 
 const emptyForm = {
@@ -25,6 +26,7 @@ const Settings = () => {
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const { userId } = useWallet(); // Get userId from global context
 
   const showToast = (type, text) => {
     setToast({ type, text });
@@ -33,7 +35,7 @@ const Settings = () => {
 
   const getActiveAccount = async () => {
     const { data, error } = await supabase.auth.getUser();
-    const storedAccount = getStoredAccount();
+    const storedAccount = getStoredAccount(); // This is a fallback, userId from context is preferred
     if (error && !storedAccount.userId) throw error;
 
     const authUser = data?.user || null;
@@ -50,7 +52,7 @@ const Settings = () => {
     setLoadingProfile(true);
 
     try {
-      const { authUser, userId } = await getActiveAccount();
+      const { authUser } = await getActiveAccount(); // userId is now from context
       const { data, error } = await supabase
         .from('doctor_profiles')
         .select('name,email')
@@ -100,7 +102,7 @@ const Settings = () => {
   const handleUpdate = async (event) => {
     event.preventDefault();
     setLoading(true);
-
+    
     try {
       const { userId } = await getActiveAccount();
       const { error } = await supabase

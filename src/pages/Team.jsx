@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, KeyRound, Mail, RefreshCw, UserPlus, Users, X } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
+import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
 
 const seatCaps = { starter: 1, growth: 2, hospital: 5 };
 
 const Team = () => {
-  const [members, setMembers] = useState([]);
-  const [wallet, setWallet] = useState({ current_plan: 'starter', plan_tier: 'starter' });
+  const { wallet, userId } = useWallet(); // Get wallet and userId from global context
+  const [members, setMembers] = useState([]);  
   const [form, setForm] = useState({ name: '', email: '' });
   const [alert, setAlert] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,7 +17,7 @@ const Team = () => {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminOtp, setAdminOtp] = useState('');
   const [inviteDraft, setInviteDraft] = useState(null);
-
+  
   const plan = (wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase();
   const maxSeats = seatCaps[plan] || seatCaps.starter;
   const isFull = members.length >= maxSeats;
@@ -28,17 +29,14 @@ const Team = () => {
     return data?.user || { id: localStorage.getItem('user_id') };
   };
 
-  const fetchTeam = async () => {
+  const fetchTeam = async () => {    
     setLoading(true);
-    const user = await getUser();
-    if (!user?.id) {
+    if (!userId) {
       setLoading(false);
       return;
     }
 
-    const [{ data: walletData }, { data: teamData }] = await Promise.all([
-      supabase.from('wallets').select('current_plan, plan_tier').eq('user_id', user.id).maybeSingle(),
-      supabase.from('team_members').select('id, name, email, status, created_at').eq('admin_id', user.id).order('created_at', { ascending: false }),
+    const { data: teamData } = await supabase.from('team_members').select('id, name, email, status, created_at').eq('admin_id', userId).order('created_at', { ascending: false });
     ]);
 
     if (walletData) setWallet(walletData);
