@@ -535,18 +535,24 @@ const processTemplateStatusWebhook = async (payload = {}) => {
             continue;
         }
 
-        let query = db
-            .from('whatsapp_templates')
-            .update({ status: update.status, updated_at: new Date().toISOString() })
-            .eq('user_id', clinic.id);
+        for (const table of ['whatsapp_templates', 'submitted_meta_templates']) {
+            let query = db
+                .from(table)
+                .update({ status: update.status, updated_at: new Date().toISOString() })
+                .eq('user_id', clinic.id);
 
-        query = update.templateId
-            ? query.or(`meta_template_id.eq.${update.templateId},template_name.eq.${update.templateName}`)
-            : query.eq('template_name', update.templateName);
+            if (update.templateId && update.templateName) {
+                query = query.or(`meta_template_id.eq.${update.templateId},template_name.eq.${update.templateName}`);
+            } else if (update.templateId) {
+                query = query.eq('meta_template_id', update.templateId);
+            } else {
+                query = query.eq('template_name', update.templateName);
+            }
 
-        const { error } = await query;
-        if (error) {
-            console.error('Webhook template status update failed:', error.message || error);
+            const { error } = await query;
+            if (error) {
+                console.error(`Webhook template status update failed for ${table}:`, error.message || error);
+            }
         }
     }
 };
@@ -1244,6 +1250,187 @@ const buildBodyExample = (bodyText, variableMapping = {}) => {
     };
 };
 
+const parseMultipartForm = (req, { maxBytes = 3 * 1024 * 1024 } = {}) => new Promise((resolve, reject) => {
+    const contentType = String(req.headers['content-type'] || '');
+    const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    const boundaryValue = boundaryMatch?.[1] || boundaryMatch?.[2];
+    if (!boundaryValue) return reject(new Error('Invalid multipart form payload.'));
+
+    const chunks = [];
+    let totalBytes = 0;
+    req.on('data', (chunk) => {
+        totalBytes += chunk.length;
+        if (totalBytes > maxBytes) {
+            req.destroy(new Error('Media upload must be 3MB or smaller.'));
+            return;
+        }
+        chunks.push(chunk);
+    });
+    req.on('error', reject);
+    req.on('end', () => {
+        try {
+            const buffer = Buffer.concat(chunks);
+            const boundary = Buffer.from(`--${boundaryValue}`);
+            const fields = {};
+            const files = {};
+            let cursor = buffer.indexOf(boundary);
+
+            while (cursor !== -1) {
+                const next = buffer.indexOf(boundary, cursor + boundary.length);
+                if (next === -1) break;
+
+                let part = buffer.slice(cursor + boundary.length, next);
+                if (part.slice(0, 2).toString() === '\r\n') part = part.slice(2);
+                if (part.slice(-2).toString() === '\r\n') part = part.slice(0, -2);
+                if (part.length && part[0] !== 45) {
+                    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+                    if (headerEnd !== -1) {
+                        const rawHeaders = part.slice(0, headerEnd).toString('utf8');
+                        const body = part.slice(headerEnd + 4);
+                        const name = rawHeaders.match(/name="([^"]+)"/i)?.[1];
+                        const filename = rawHeaders.match(/filename="([^"]*)"/i)?.[1];
+                        const mimeType = rawHeaders.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim() || 'application/octet-stream';
+
+                        if (name && filename) {
+                            files[name] = { filename, mimeType, buffer: body };
+                        } else if (name) {
+                            fields[name] = body.toString('utf8');
+                        }
+                    }
+                }
+
+                cursor = next;
+            }
+
+            resolve({ fields, files });
+        } catch (error) {
+            reject(error);
+        }
+    });
+});
+
+const parseMaybeJson = (value, fallback = {}) => {
+    if (!value) return fallback;
+    if (typeof value === 'object') return value;
+    try {
+        return JSON.parse(value);
+    } catch {
+        return fallback;
+    }
+};
+
+const toBoolean = (value) => {
+    if (typeof value === 'boolean') return value;
+    return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+};
+
+const uploadTemplateMedia = async ({ db, userId, file }) => {
+    if (!file?.buffer?.length) return '';
+    if (!db?.storage?.from) throw new Error('Supabase storage client unavailable.');
+    const allowedTypes = ['image/jpeg', 'image/png'];
+    if (!allowedTypes.includes(file.mimeType)) {
+        throw new Error('Only JPEG or PNG media can be attached to a Meta template header.');
+    }
+
+    const extension = file.mimeType === 'image/png' ? 'png' : 'jpg';
+    const bucket = process.env.SUPABASE_TEMPLATE_MEDIA_BUCKET || 'template-media';
+    const storagePath = `${userId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await db.storage
+        .from(bucket)
+        .upload(storagePath, file.buffer, {
+            contentType: file.mimeType,
+            upsert: false
+        });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = db.storage.from(bucket).getPublicUrl(storagePath);
+    return data?.publicUrl || '';
+};
+
+const getTemplateSubmitCredentials = async (userId) => {
+    const config = await getRawMetaCredentialsForUser(userId);
+    const accessToken = config.accessToken || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || '';
+    const businessAccountId = config.whatsapp_business_account_id || process.env.META_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
+    return { accessToken, businessAccountId };
+};
+
+const normalizeTemplateCategory = (category) => {
+    const normalized = String(category || 'MARKETING').trim().toUpperCase();
+    return ['MARKETING', 'UTILITY', 'AUTHENTICATION'].includes(normalized) ? normalized : 'MARKETING';
+};
+
+const normalizeVariablesArray = (value) => {
+    const parsed = parseMaybeJson(value, value);
+    if (Array.isArray(parsed)) return parsed.map((item) => sanitizePlainText(item, 600));
+    if (parsed && typeof parsed === 'object') {
+        return Object.keys(parsed)
+            .sort((a, b) => Number(a) - Number(b))
+            .map((key) => sanitizePlainText(parsed[key], 600));
+    }
+    return [];
+};
+
+const normalizeExamplesPayload = (examples, variables) => {
+    const parsed = parseMaybeJson(examples, {});
+    const bodyTextMatrix = parsed?.body_text;
+    if (Array.isArray(bodyTextMatrix) && Array.isArray(bodyTextMatrix[0])) {
+        return { body_text: [bodyTextMatrix[0].map((item) => sanitizePlainText(item, 600))] };
+    }
+    return { body_text: [variables.map((item) => sanitizePlainText(item, 600))] };
+};
+
+const buildMetaTemplateComponents = ({ bodyText, examples, hasMedia, mediaUrl }) => {
+    const components = [];
+    if (hasMedia) {
+        components.push({
+            type: 'HEADER',
+            format: 'IMAGE',
+            ...(mediaUrl && { example: { header_url: [mediaUrl] } })
+        });
+    }
+
+    const bodyComponent = {
+        type: 'BODY',
+        text: bodyText
+    };
+
+    if (Array.isArray(examples?.body_text?.[0]) && examples.body_text[0].length) {
+        bodyComponent.example = examples;
+    }
+
+    components.push(bodyComponent);
+    return components;
+};
+
+const saveSubmittedMetaTemplate = async ({ db, row, components }) => {
+    const submittedRow = {
+        ...row,
+        components,
+        updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await db
+        .from('submitted_meta_templates')
+        .upsert(submittedRow)
+        .select()
+        .maybeSingle();
+
+    if (error) throw error;
+    return data;
+};
+
+const saveCampaignTemplateMirror = async ({ db, row }) => {
+    const { data, error } = await db
+        .from('whatsapp_templates')
+        .upsert(row)
+        .select()
+        .maybeSingle();
+
+    if (error) throw error;
+    return data;
+};
+
 const buildPremadeTemplateComponents = ({ bodyText, variableMapping, hasMedia, mediaType, mediaUrl }) => {
     const components = [];
     const cleanMediaUrl = sanitizePlainText(mediaUrl, 600);
@@ -1253,7 +1440,7 @@ const buildPremadeTemplateComponents = ({ bodyText, variableMapping, hasMedia, m
         components.push({
             type: 'HEADER',
             format: normalizedMediaType,
-            ...(cleanMediaUrl && { example: { header_handle: [cleanMediaUrl] } })
+            ...(cleanMediaUrl && { example: { header_url: [cleanMediaUrl] } })
         });
     }
 
@@ -1340,19 +1527,150 @@ app.get('/api/profile/context', async (req, res) => {
     }
 });
 
+app.post('/api/templates/submit-to-meta', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const isMultipart = String(req.headers['content-type'] || '').toLowerCase().includes('multipart/form-data');
+        const multipartPayload = isMultipart ? await parseMultipartForm(req) : { fields: req.body || {}, files: {} };
+        const requestBody = multipartPayload.fields || {};
+        const mediaFile = multipartPayload.files?.media || multipartPayload.files?.file || null;
+
+        const userId = requestBody.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        const profile = await getDoctorTemplateProfile(userId);
+        const templateId = sanitizePlainText(requestBody.templateId, 80);
+        let premadeTemplate = null;
+        if (templateId) {
+            const { data, error } = await db
+                .from('pre_made_templates')
+                .select('id,specialization,category,language,template_name,body_text,has_media')
+                .eq('id', templateId)
+                .maybeSingle();
+
+            if (error) throw error;
+            premadeTemplate = data;
+            const profileSpecialization = normalizeSpecializationSlug(profile.specialization);
+            const templateSpecialization = normalizeSpecializationSlug(premadeTemplate?.specialization);
+            if (!premadeTemplate || templateSpecialization !== profileSpecialization) {
+                return res.status(404).json({ success: false, message: 'Template not available for this specialization.' });
+            }
+        }
+
+        const bodyText = toMetaTemplateBody(requestBody.bodyText || premadeTemplate?.body_text || '');
+        if (!bodyText) return res.status(400).json({ success: false, message: 'Template body text is required.' });
+
+        const language = languageToMetaLocale(requestBody.language || premadeTemplate?.language || 'English');
+        const category = normalizeTemplateCategory(requestBody.category || premadeTemplate?.category || 'MARKETING');
+        const variables = normalizeVariablesArray(requestBody.variables);
+        const placeholderIndexes = collectPlaceholderIndexes(bodyText);
+        const examples = normalizeExamplesPayload(requestBody.examples, variables);
+
+        if (placeholderIndexes.length && examples.body_text[0].length !== placeholderIndexes.length) {
+            return res.status(400).json({
+                success: false,
+                message: `Provide ${placeholderIndexes.length} sample value(s) for the detected body placeholders.`
+            });
+        }
+
+        const hasMedia = toBoolean(requestBody.hasMedia) || Boolean(mediaFile);
+        const uploadedMediaUrl = hasMedia && mediaFile ? await uploadTemplateMedia({ db, userId, file: mediaFile }) : '';
+        const mediaUrl = sanitizePlainText(uploadedMediaUrl || requestBody.mediaUrl || '', 600);
+        if (hasMedia && !mediaUrl) {
+            return res.status(400).json({ success: false, message: 'Attach a JPEG or PNG image before submitting this media template.' });
+        }
+
+        const baseName = requestBody.name || premadeTemplate?.template_name || `template_${Date.now()}`;
+        const formattedName = formatTemplateName(`${baseName}_${language}_${Date.now()}`);
+        const components = buildMetaTemplateComponents({
+            bodyText,
+            examples,
+            hasMedia,
+            mediaUrl
+        });
+
+        const { accessToken, businessAccountId } = await getTemplateSubmitCredentials(userId);
+        if (!businessAccountId || !accessToken) {
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
+        }
+
+        const graphUrl = `https://graph.facebook.com/v20.0/${businessAccountId}/message_templates`;
+        const metaPayload = {
+            name: formattedName,
+            language,
+            category,
+            components
+        };
+
+        const response = await axios.post(graphUrl, metaPayload, {
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
+        const now = new Date().toISOString();
+        const row = {
+            user_id: userId,
+            template_name: formattedName,
+            category,
+            language,
+            body_content: bodyText,
+            status: 'PENDING_APPROVAL',
+            header_type: hasMedia ? 'IMAGE' : 'NONE',
+            header_url: mediaUrl || null,
+            buttons: [],
+            meta_template_id: metaTemplateId,
+            created_at: now,
+            updated_at: now
+        };
+
+        const [submittedTemplate, campaignTemplate] = await Promise.all([
+            saveSubmittedMetaTemplate({ db, row, components }),
+            saveCampaignTemplateMirror({ db, row })
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Template submitted to Meta for approval.',
+            status: 'PENDING_APPROVAL',
+            metaPayload,
+            meta: response.data,
+            submittedTemplate,
+            template: campaignTemplate
+        });
+    } catch (error) {
+        console.error('Submit-to-Meta error:', error.response?.data || error.message || error);
+        return res.status(400).json({
+            success: false,
+            message: error.response?.data?.error?.message || error.message || 'Unable to submit template to Meta.'
+        });
+    }
+});
+
 app.post('/api/templates/create-and-submit', async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
         if (!db?.from) throw new Error('Database connection unavailable.');
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.body?.userId || sessionUser?.id;
+        const isMultipart = String(req.headers['content-type'] || '').toLowerCase().includes('multipart/form-data');
+        const multipartPayload = isMultipart ? await parseMultipartForm(req) : { fields: req.body || {}, files: {} };
+        const requestBody = multipartPayload.fields || {};
+        const mediaFile = multipartPayload.files?.media || multipartPayload.files?.file || null;
+
+        const userId = requestBody?.userId || sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const profile = await getDoctorTemplateProfile(userId);
         const specializationQuery = normalizeSpecializationSlug(profile.specialization);
-        const templateId = sanitizePlainText(req.body?.templateId, 80);
+        const templateId = sanitizePlainText(requestBody?.templateId, 80);
         if (!templateId) return res.status(400).json({ success: false, message: 'Template selection is required.' });
 
         const { data: premadeTemplate, error: templateError } = await db
@@ -1393,16 +1711,21 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
-        const bodyText = toMetaTemplateBody(req.body?.bodyText || premadeTemplate.body_text);
-        const language = sanitizePlainText(req.body?.language || premadeTemplate.language, 20);
+        const bodyText = toMetaTemplateBody(requestBody?.bodyText || premadeTemplate.body_text);
+        const language = sanitizePlainText(requestBody?.language || premadeTemplate.language, 20);
+        const incomingVariableMapping = parseMaybeJson(requestBody?.variableMapping, requestBody?.variableMapping || {});
         const variableMapping = {
-            1: sanitizePlainText(req.body?.variableMapping?.[1] || req.body?.variableMapping?.patient_name || 'Sample Patient', 120),
-            2: sanitizePlainText(req.body?.variableMapping?.[2] || req.body?.variableMapping?.booking_link || profile.bookingLink, 600),
-            3: sanitizePlainText(req.body?.variableMapping?.[3] || req.body?.variableMapping?.booking_link || profile.bookingLink, 600)
+            1: sanitizePlainText(incomingVariableMapping?.[1] || incomingVariableMapping?.patient_name || 'Sample Patient', 120),
+            2: sanitizePlainText(incomingVariableMapping?.[2] || incomingVariableMapping?.booking_link || profile.bookingLink, 600),
+            3: sanitizePlainText(incomingVariableMapping?.[3] || incomingVariableMapping?.booking_link || profile.bookingLink, 600)
         };
-        const hasMedia = Boolean(req.body?.hasMedia ?? premadeTemplate.has_media);
-        const mediaType = sanitizePlainText(req.body?.mediaType || premadeTemplate.media_type || 'IMAGE', 20);
-        const mediaUrl = sanitizePlainText(req.body?.mediaUrl || '', 600);
+        const hasMedia = toBoolean(requestBody?.hasMedia) || Boolean(mediaFile);
+        const mediaType = 'IMAGE';
+        const uploadedMediaUrl = hasMedia && mediaFile ? await uploadTemplateMedia({ db, userId, file: mediaFile }) : '';
+        const mediaUrl = sanitizePlainText(uploadedMediaUrl || requestBody?.mediaUrl || '', 600);
+        if (hasMedia && !mediaUrl) {
+            return res.status(400).json({ success: false, message: 'Attach a JPEG or PNG image before submitting this media template.' });
+        }
         const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.template_name}_${language}_${Date.now()}`);
 
         const components = buildPremadeTemplateComponents({
@@ -1437,6 +1760,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             body_content: bodyText,
             status: 'PENDING_APPROVAL',
             header_type: hasMedia ? mediaType : 'NONE',
+            header_url: mediaUrl || null,
             buttons: [],
             meta_template_id: metaTemplateId,
             created_at: new Date().toISOString()
@@ -1450,9 +1774,9 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
 
         if (saveError) throw saveError;
 
-        return res.status(201).json({
+        return res.status(200).json({
             success: true,
-            message: 'Template submitted to Meta.',
+            message: 'Template submitted to Meta for approval.',
             status: 'PENDING_APPROVAL',
             meta: response.data,
             template: savedTemplate

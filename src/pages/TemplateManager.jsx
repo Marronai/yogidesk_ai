@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, Image as ImageIcon, X, Upload, CheckCircle2 } from 'lucide-react';
+import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, X, Upload, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
 import { calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
@@ -25,8 +25,12 @@ const TemplateManager = () => {
   const [activeLang, setActiveLang] = useState('All');
   const [libraryPage, setLibraryPage] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [customBodyText, setCustomBodyText] = useState('');
+  const [variableSamples, setVariableSamples] = useState({});
   const [useMedia, setUseMedia] = useState(false);
   const [mediaUrl, setMediaUrl] = useState('');
+  const [mediaFile, setMediaFile] = useState(null);
+  const [isDraggingMedia, setIsDraggingMedia] = useState(false);
   const [mediaType, setMediaType] = useState('IMAGE');
   const [submittingTemplate, setSubmittingTemplate] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -251,36 +255,90 @@ const TemplateManager = () => {
     () => libraryTemplates.slice(libraryPage * 6, libraryPage * 6 + 6),
     [libraryTemplates, libraryPage]
   );
-  const patientSample = 'Sample Patient';
-  const smartVariableMapping = useMemo(() => ({
-    1: patientSample,
-    2: bookingLink || 'https://yogidesk-ai.com/book',
-    3: bookingLink || 'https://yogidesk-ai.com/book',
-    patient_name: patientSample,
-    booking_link: bookingLink || 'https://yogidesk-ai.com/book'
-  }), [bookingLink]);
+  const collectBodyPlaceholders = useCallback((text) => (
+    [...String(text || '').matchAll(/\{\{\s*(\d+)\s*\}\}/g)]
+      .map((match) => Number(match[1]))
+      .filter(Number.isFinite)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .sort((a, b) => a - b)
+  ), []);
+
+  const defaultSampleForPlaceholder = useCallback((index) => {
+    if (index === 1) return 'Sample Patient';
+    if (index === 2) return bookingLink || 'https://yogidesk-ai.com/book';
+    return index === 3 ? '20' : `Sample ${index}`;
+  }, [bookingLink]);
+
+  const bodyPlaceholders = useMemo(
+    () => collectBodyPlaceholders(customBodyText),
+    [collectBodyPlaceholders, customBodyText]
+  );
+
+  const bodyExampleValues = useMemo(
+    () => bodyPlaceholders.map((index) => variableSamples[index] || defaultSampleForPlaceholder(index)),
+    [bodyPlaceholders, defaultSampleForPlaceholder, variableSamples]
+  );
+
+  const examplesPayload = useMemo(
+    () => ({ body_text: bodyExampleValues.length ? [bodyExampleValues] : [[]] }),
+    [bodyExampleValues]
+  );
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    setVariableSamples((current) => {
+      const next = {};
+      bodyPlaceholders.forEach((index) => {
+        next[index] = current[index] || defaultSampleForPlaceholder(index);
+      });
+      return next;
+    });
+  }, [bodyPlaceholders, defaultSampleForPlaceholder, selectedTemplate]);
 
   const openTemplatePreview = (template) => {
     setSelectedTemplate(template);
-    setUseMedia(Boolean(template?.has_media));
-    setMediaType(template?.media_type || 'IMAGE');
+    setCustomBodyText(template?.body_text || '');
+    const placeholders = collectBodyPlaceholders(template?.body_text || '');
+    setVariableSamples(Object.fromEntries(placeholders.map((index) => [index, defaultSampleForPlaceholder(index)])));
+    setUseMedia(false);
+    setMediaType('IMAGE');
     setMediaUrl('');
+    setMediaFile(null);
+    setIsDraggingMedia(false);
   };
 
-  const handleMediaUpload = (event) => {
-    const file = event.target.files?.[0];
+  const closeTemplatePreview = () => {
+    setSelectedTemplate(null);
+    setCustomBodyText('');
+    setVariableSamples({});
+    setUseMedia(false);
+    setMediaUrl('');
+    setMediaFile(null);
+    setIsDraggingMedia(false);
+  };
+
+  const handleMediaFile = (file) => {
     if (!file) return;
 
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Media must be below 2MB for template preview.');
-      event.target.value = '';
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      setError('Attach a JPEG or PNG image for the Meta template header.');
       return;
     }
 
-    setMediaType(file.type === 'application/pdf' ? 'DOCUMENT' : 'IMAGE');
+    if (file.size > 3 * 1024 * 1024) {
+      setError('Media must be below 3MB for template submission.');
+      return;
+    }
+
+    setMediaType('IMAGE');
+    setMediaFile(file);
     const reader = new FileReader();
     reader.onloadend = () => setMediaUrl(String(reader.result || ''));
     reader.readAsDataURL(file);
+  };
+
+  const handleMediaUpload = (event) => {
+    handleMediaFile(event.target.files?.[0]);
     event.target.value = '';
   };
 
@@ -290,22 +348,26 @@ const TemplateManager = () => {
     try {
       setSubmittingTemplate(true);
       const userId = localStorage.getItem('user_id');
-      const response = await api.post('/templates/create-and-submit', {
-        userId,
-        templateId: selectedTemplate.id,
-        bodyText: selectedTemplate.body_text,
-        language: selectedTemplate.language,
-        variableMapping: smartVariableMapping,
-        hasMedia: useMedia,
-        mediaType,
-        mediaUrl
+      const payload = new FormData();
+      payload.append('userId', userId || '');
+      payload.append('templateId', selectedTemplate.id);
+      payload.append('bodyText', customBodyText || selectedTemplate.body_text || '');
+      payload.append('language', selectedTemplate.language || 'English');
+      payload.append('category', selectedTemplate.category || 'MARKETING');
+      payload.append('variables', JSON.stringify(bodyExampleValues));
+      payload.append('examples', JSON.stringify(examplesPayload));
+      payload.append('hasMedia', String(Boolean(useMedia && mediaFile)));
+      payload.append('mediaType', mediaType);
+      if (useMedia && mediaFile) payload.append('media', mediaFile);
+
+      const response = await api.post('/templates/submit-to-meta', payload, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
 
       setTemplates((current) => [response.data?.template, ...(Array.isArray(current) ? current : [])].filter(Boolean));
-      setNotice({ type: 'success', text: 'Template submitted to Meta for approval.' });
-      setSelectedTemplate(null);
-      setUseMedia(false);
-      setMediaUrl('');
+      setNotice({ type: 'success', text: response.data?.message || 'Template submitted to Meta for approval.' });
+      closeTemplatePreview();
+      setActiveTab('submitted');
     } catch (err) {
       console.error('Premade template submission failed:', err);
       setError(err?.response?.data?.message || 'Unable to submit this template to Meta.');
@@ -485,7 +547,7 @@ const TemplateManager = () => {
                         {libTemp.category}
                       </span>
                       <span className="rounded-md bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-tight text-slate-500">{libTemp.language}</span>
-                      {libTemp.has_media && <span className="rounded-md bg-orange-50 px-2 py-1 text-[9px] font-black uppercase tracking-tight text-orange-600">{libTemp.media_type || 'MEDIA'}</span>}
+                      {libTemp.has_media && <span className="rounded-md bg-orange-50 px-2 py-1 text-[9px] font-black uppercase tracking-tight text-orange-600">MEDIA</span>}
                     </div>
                     <button
                       onClick={() => navigator.clipboard?.writeText(libTemp.body_text || '')}
@@ -496,7 +558,7 @@ const TemplateManager = () => {
                     </button>
                   </div>
 
-                  <h4 className="text-sm font-black text-slate-800">{libTemp.title}</h4>
+                  <h4 className="text-sm font-black text-slate-800">{libTemp.template_name}</h4>
                   <p className="mt-3 line-clamp-4 flex-1 text-sm font-medium leading-relaxed text-slate-500">{libTemp.body_text}</p>
 
                   <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
@@ -588,7 +650,7 @@ const TemplateManager = () => {
                   <Copy size={14} />
                 </button>
               </div>
-              <h4 className="font-bold text-slate-800 text-sm mb-2">{libTemp.title}</h4>
+              <h4 className="font-bold text-slate-800 text-sm mb-2">{libTemp.template_name}</h4>
               <p className="text-xs text-slate-500 leading-relaxed min-h-[40px] mb-4">
                 {activeLang === 'EN' ? libTemp.english : 
                  activeLang === 'HI' ? libTemp.hindi : 
@@ -718,59 +780,103 @@ const TemplateManager = () => {
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Meta submission preview</p>
-                <h3 className="mt-1 text-xl font-black text-slate-900">{selectedTemplate.title}</h3>
-                <p className="mt-1 text-xs font-bold text-slate-400">{selectedTemplate.category} · {selectedTemplate.language}</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900">{selectedTemplate.template_name}</h3>
+                <p className="mt-1 text-xs font-bold text-slate-400">{selectedTemplate.category} - {selectedTemplate.language}</p>
               </div>
-              <button onClick={() => setSelectedTemplate(null)} className="min-h-11 min-w-11 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
+              <button onClick={closeTemplatePreview} className="min-h-11 min-w-11 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
                 <X size={18} className="mx-auto" />
               </button>
             </div>
 
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Template body</p>
-                <p className="whitespace-pre-wrap text-sm font-semibold leading-relaxed text-slate-700">{selectedTemplate.body_text}</p>
+                <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Editable template body</label>
+                <textarea
+                  value={customBodyText}
+                  onChange={(event) => setCustomBodyText(event.target.value)}
+                  rows={8}
+                  className="min-h-[180px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold leading-relaxed text-slate-700 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-50"
+                />
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Smart variable filler</p>
-                  <p className="mt-2 text-xs font-bold text-emerald-900">{"{{1}}"} Patient Name: {smartVariableMapping[1]}</p>
-                  <p className="mt-1 break-all text-xs font-bold text-emerald-900">{"{{2}}"} Booking Link: {smartVariableMapping[2]}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Dynamic placeholder mapping</p>
+                  {bodyPlaceholders.length === 0 ? (
+                    <p className="mt-2 text-xs font-bold text-emerald-900">No variable placeholders found in this body.</p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {bodyPlaceholders.map((index) => (
+                        <label key={index} className="block">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">{`{{${index}}}`} sample value</span>
+                          <input
+                            type="text"
+                            value={variableSamples[index] || ''}
+                            onChange={(event) => setVariableSamples((current) => ({ ...current, [index]: event.target.value }))}
+                            className="mt-1 min-h-11 w-full rounded-xl border border-emerald-200 bg-white px-3 text-xs font-bold text-slate-800 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                            placeholder={defaultSampleForPlaceholder(index)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {bodyPlaceholders.length > 0 && (
+                    <div className="mt-3 rounded-xl bg-white/70 p-3 text-[10px] font-bold leading-relaxed text-emerald-900">
+                      Meta sample matrix: {JSON.stringify(examplesPayload)}
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
-                    <span className="text-sm font-black text-slate-800">Add Image/Media</span>
-                    <input
-                      type="checkbox"
-                      checked={useMedia}
-                      onChange={(event) => setUseMedia(event.target.checked)}
-                      className="h-5 w-5 accent-orange-600"
-                    />
+                    <span className="text-sm font-black text-slate-800">Attach Image/Media</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !useMedia;
+                        setUseMedia(next);
+                        if (!next) {
+                          setMediaFile(null);
+                          setMediaUrl('');
+                          setIsDraggingMedia(false);
+                        }
+                      }}
+                      className={`relative h-7 w-12 rounded-full transition ${useMedia ? 'bg-orange-600' : 'bg-slate-200'}`}
+                      aria-pressed={useMedia}
+                    >
+                      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${useMedia ? 'left-6' : 'left-1'}`} />
+                    </button>
                   </label>
 
                   {useMedia && (
                     <div className="mt-4 space-y-3">
-                      <div className="flex gap-2">
-                        {['IMAGE', 'DOCUMENT'].map((type) => (
-                          <button
-                            key={type}
-                            onClick={() => setMediaType(type)}
-                            className={`min-h-10 flex-1 rounded-xl border text-xs font-black ${mediaType === type ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'}`}
-                          >
-                            {type}
-                          </button>
-                        ))}
-                      </div>
-                      <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 text-xs font-black uppercase text-slate-500 hover:border-orange-300 hover:text-orange-600">
-                        {mediaType === 'IMAGE' ? <ImageIcon size={16} /> : <Upload size={16} />}
-                        Upload preview asset
-                        <input type="file" accept={mediaType === 'DOCUMENT' ? 'application/pdf' : 'image/*'} className="hidden" onChange={handleMediaUpload} />
+                      <label
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setIsDraggingMedia(true);
+                        }}
+                        onDragLeave={() => setIsDraggingMedia(false)}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          setIsDraggingMedia(false);
+                          handleMediaFile(event.dataTransfer.files?.[0]);
+                        }}
+                        className={`flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 text-center text-xs font-black uppercase transition ${isDraggingMedia ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-300 text-slate-500 hover:border-orange-300 hover:text-orange-600'}`}
+                      >
+                        <Upload size={18} />
+                        Drag JPEG/PNG here or tap to upload
+                        <span className="text-[10px] font-bold normal-case text-slate-400">Clinic branding image or healthcare banner</span>
+                        <input type="file" accept="image/jpeg,image/png" className="hidden" onChange={handleMediaUpload} />
                       </label>
                       {mediaUrl && (
-                        <div className="rounded-xl bg-slate-100 p-3 text-xs font-semibold text-slate-500">
-                          Media selected for Meta header mapping.
+                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                          <img src={mediaUrl} alt="Selected media preview" className="max-h-40 w-full object-cover" />
+                          <div className="flex items-center justify-between gap-3 p-3 text-xs font-semibold text-slate-500">
+                            <span className="truncate">{mediaFile?.name || 'Media selected'}</span>
+                            <button type="button" onClick={() => { setMediaFile(null); setMediaUrl(''); }} className="rounded-lg p-1 text-slate-400 hover:bg-white hover:text-rose-600">
+                              <X size={14} />
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -781,14 +887,14 @@ const TemplateManager = () => {
 
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
-                onClick={() => setSelectedTemplate(null)}
+                onClick={closeTemplatePreview}
                 className="min-h-12 rounded-xl border border-slate-200 px-5 text-xs font-black uppercase text-slate-600 hover:bg-slate-50"
               >
                 Cancel
               </button>
               <button
                 onClick={submitPremadeTemplate}
-                disabled={submittingTemplate}
+                disabled={submittingTemplate || !customBodyText.trim() || bodyExampleValues.some((value) => !String(value || '').trim()) || (useMedia && !mediaFile)}
                 className="min-h-12 rounded-xl bg-orange-600 px-5 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submittingTemplate ? 'Submitting...' : 'Submit to Meta'}
