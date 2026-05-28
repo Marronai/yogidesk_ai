@@ -15,6 +15,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
+  const [pendingCredentials, setPendingCredentials] = useState(null);
   
   // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
   const [step, setStep] = useState(1);
@@ -182,6 +183,8 @@ const Login = () => {
 
         if (data?.user) {
           await startLoginEmailVerification(data.user, cleanEmail);
+          setPendingCredentials({ email: cleanEmail, password: formData.password });
+          await supabase.auth.signOut({ scope: 'local' });
         }
       } else {
         const code = otp.join('');
@@ -190,13 +193,23 @@ const Login = () => {
           return;
         }
 
-        await api.post('/auth/verify-email-otp', { email: cleanEmail, otp: code, purpose: 'login' });
+        const otpEmail = pendingCredentials?.email || cleanEmail;
+        await api.post('/auth/verify-email-otp', { email: otpEmail, otp: code, purpose: 'login' });
 
-        triggerLoginEmail(pendingUser);
-        handleAuthSuccess(pendingUser);
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: otpEmail,
+          password: pendingCredentials?.password || formData.password,
+        });
+
+        if (signInError) throw signInError;
+        const verifiedUser = data?.user || pendingUser;
+
+        triggerLoginEmail(verifiedUser);
+        await handleAuthSuccess(verifiedUser);
       }
     } catch (error) {
       console.error(error);
+      if (step === 1 || step === 2) await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
       alert(error.message || "Invalid Email or Password");
     } finally {
       setLoading(false);

@@ -2,7 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CalendarClock, Eye, RefreshCw, Send, Sparkles, User, Users, Wallet } from 'lucide-react';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
-import { calculateMessageCost, getWallet } from '../utils/wallet';
+import { calculateMessageCost } from '../utils/wallet';
+
+const toMoneyNumber = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
 
 const Campaigns = () => {
   const userId = localStorage.getItem('user_id');
@@ -82,7 +87,7 @@ const Campaigns = () => {
     try {
       const response = await api.get('/api/wallet/balance', { params: { userId } });
       if (response.data.success) {
-        setWalletBalance(response.data.balance);
+        setWalletBalance(toMoneyNumber(response.data.balance));
       }
     } catch (err) {
       console.error("Wallet sync error:", err);

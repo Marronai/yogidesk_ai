@@ -9,6 +9,14 @@ const normalizeSupabaseId = (value) => {
   return String(value || '').trim();
 };
 const isCleanFilterValue = (value) => Boolean(value && value !== 'undefined' && value !== 'null' && value !== '[object Object]');
+const normalizeWallet = (walletData = {}) => ({
+  ...walletData,
+  balance: Number(walletData.balance ?? 0),
+  is_first_recharge: walletData.is_first_recharge ?? true,
+  welcome_gift_active: walletData.welcome_gift_active ?? false,
+  current_plan: walletData.current_plan || 'starter',
+  plan_tier: walletData.plan_tier || 'starter',
+});
 
 const WalletContext = createContext(null);
 
@@ -45,8 +53,9 @@ export const WalletProvider = ({ children }) => {
         .maybeSingle();
 
       if (!error && data) {
-        saveWallet(data); // Update localStorage for initial hydration/fallback
-        return data;
+        const safeWallet = normalizeWallet(data);
+        saveWallet(safeWallet); // Update localStorage for initial hydration/fallback
+        return safeWallet;
       }
 
       if (!data && !error) {
@@ -67,8 +76,9 @@ export const WalletProvider = ({ children }) => {
           .single();
 
         if (!createError && createdWallet) {
-          saveWallet(createdWallet);
-          return createdWallet;
+          const safeWallet = normalizeWallet(createdWallet);
+          saveWallet(safeWallet);
+          return safeWallet;
         }
       }
     } catch (error) {
@@ -143,7 +153,7 @@ export const WalletProvider = ({ children }) => {
           table: 'wallets',
           filter: `user_id=eq.${userId}`
         }, (payload) => {
-          if (payload.new && isMounted) setWallet(payload.new);
+          if (payload.new && isMounted) setWallet(normalizeWallet(payload.new));
         })
         .on('postgres_changes', {
           event: 'INSERT',

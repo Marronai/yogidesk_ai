@@ -27,6 +27,10 @@ const toFilterIsoString = (date) => {
   const value = date instanceof Date ? date : new Date(date);
   return Number.isNaN(value.getTime()) ? null : value.toISOString();
 };
+const toMoneyNumber = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : 0;
+};
 const formatDoctorName = (name = 'Doctor') => {
   const cleanName = String(name || 'Doctor').trim();
   return /^dr\.?\s/i.test(cleanName) ? cleanName : `Dr. ${cleanName}`;
@@ -73,7 +77,7 @@ const DashboardHome = () => {
         try {
           const response = await api.get('/api/wallet/balance', { params: { userId } });
           if (active && response.data.success) {
-            setWalletBalance(response.data.balance);
+            setWalletBalance(toMoneyNumber(response.data.balance));
           }
         } catch (err) {
           console.error("Wallet sync error:", err);
