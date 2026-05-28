@@ -15,6 +15,7 @@ const {
     insertQueuedInboxChatRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api/payments', paymentRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
@@ -279,8 +281,20 @@ app.post('/api/auth/dispatch-login-alert', async (req, res) => {
         const { email, name } = req.body || {};
         if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
 
-        const ipAddress = (req.headers['x-forwarded-for'] || req.ip || 'Unknown IP').split(',')[0].trim();
-        const deviceInfo = req.headers['user-agent'] || 'Verified browser login';
+        // ACCURATE DEVICE & IP PARSING
+        const ipAddress = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'Unknown IP').split(',')[0].trim();
+        const ua = req.headers['user-agent'] || '';
+        let deviceInfo = 'Verified browser login';
+        if (ua.includes('Windows')) deviceInfo = 'Windows PC';
+        else if (ua.includes('Mac OS')) deviceInfo = 'Apple Mac';
+        else if (ua.includes('Android')) deviceInfo = 'Android Device';
+        else if (ua.includes('iPhone') || ua.includes('iPad')) deviceInfo = 'Apple iOS Device';
+        
+        if (ua.includes('Chrome')) deviceInfo += ' (Chrome)';
+        else if (ua.includes('Safari') && !ua.includes('Chrome')) deviceInfo += ' (Safari)';
+        else if (ua.includes('Firefox')) deviceInfo += ' (Firefox)';
+        else if (ua.includes('Edge')) deviceInfo += ' (Edge)';
+
         const sent = await sendLoginAlert(email, name || 'Doctor', deviceInfo, ipAddress);
         return res.status(sent ? 200 : 202).json({ success: sent });
     } catch (error) {
@@ -356,12 +370,28 @@ app.post('/api/team/dispatch-invite-email', async (req, res) => {
         if (!email || !inviteLink) return res.status(400).json({ success: false, msg: 'Email and invite link are required' });
         const sent = await sendDirectEmail(
             email,
-            'You have been invited to Yogi Desk',
+            'Welcome! You have been invited to YogiDesk AI',
             `
-              <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:14px">
-                <h2 style="margin:0 0 12px;color:#111827">Yogi Desk team invite</h2>
-                <p style="color:#4b5563;line-height:1.6">Hi ${name || 'there'}, your clinic admin has invited you to join their Yogi Desk workspace.</p>
-                <p><a href="${inviteLink}" style="display:inline-block;background:#ff6b00;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700">Accept Invite</a></p>
+              <div style="font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+                    <div style="background-color: #ff6b00; padding: 20px; text-align: center;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; letter-spacing: 1px;">YogiDesk AI</h1>
+                    </div>
+                    <div style="padding: 30px; text-align: center;">
+                        <h2 style="color: #111827; margin-top: 0;">You've Been Invited!</h2>
+                        <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Hi ${name || 'there'},</p>
+                        <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Your clinic administrator has invited you to join their secure workspace on <strong>YogiDesk AI</strong>.</p>
+                        <div style="margin: 40px 0;">
+                            <a href="${inviteLink}" style="display: inline-block; background-color: #ff6b00; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(255,107,0,0.3);">Accept Invite & Create Password</a>
+                        </div>
+                        <p style="color: #4b5563; font-size: 14px; line-height: 1.6; text-align: left;">If the button doesn't work, copy and paste this link into your browser:<br>
+                        <a href="${inviteLink}" style="color: #ff6b00; word-break: break-all;">${inviteLink}</a></p>
+                    </div>
+                    <div style="background-color: #f1f1f1; padding: 15px; text-align: center; border-top: 1px solid #e0e0e0;">
+                        <p style="margin: 0; font-size: 12px; color: #666;">&copy; ${new Date().getFullYear()} YogiDesk AI. All rights reserved.</p>
+                        <p style="margin: 5px 0 0 0; font-size: 10px; color: #999;">A product by Vyapar Wallah</p>
+                    </div>
+                </div>
               </div>
             `,
             'system'

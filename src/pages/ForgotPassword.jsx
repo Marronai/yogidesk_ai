@@ -33,7 +33,7 @@ const ForgotPassword = () => {
     setLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
-        redirectTo: 'https://yogidesk-ai.vercel.app/reset-password',
+        redirectTo: 'https://yogidesk-ai.com/reset-password',
       });
 
       if (error) throw error;

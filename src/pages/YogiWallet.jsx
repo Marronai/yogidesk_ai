@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowDownCircle, ArrowUpCircle, Clock, Gift, Send, Wallet } from 'lucide-react';
 import api from '../utils/api';
 import { PRICING_RULES } from '../constants/templateLibrary';
@@ -8,10 +9,34 @@ import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 const quickAmounts = [200, 500, 1000];
 
 const YogiWallet = () => {
-  const { wallet, transactions, loading, userId } = useWallet(); // Consume from WalletContext
+  const { wallet, transactions, loading, userId, refreshWalletData } = useWallet(); // Consume from WalletContext
   const [amount, setAmount] = useState(200);
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const profile = useMemo(() => ({
+    firstname: localStorage.getItem('user_name') || 'Yogi Desk User',
+    email: localStorage.getItem('user_email') || '',
+    phone: localStorage.getItem('user_phone') || '',
+  }), []);
+
+  useEffect(() => {
+    const status = searchParams.get('payment');
+    const paidAmount = searchParams.get('amt');
+    if (!status) return;
+
+    if (status === 'success') {
+      setPaymentStatus(`Payment successful${paidAmount ? `: Rs. ${paidAmount}` : ''}. Wallet balance synced.`);
+      refreshWalletData(userId);
+    } else if (status === 'failed') {
+      setPaymentError('Payment failed or was cancelled. No amount was added.');
+      refreshWalletData(userId);
+    }
+
+    setSearchParams({}, { replace: true });
+  }, [refreshWalletData, searchParams, setSearchParams, userId]);
 
 
   // PayU Integration Logic
@@ -90,6 +115,78 @@ const YogiWallet = () => {
     }
   };
 
+  const handlePayuRecharge = async (event) => {
+    event.preventDefault();
+    const rechargeAmount = Number(amount);
+
+    setPaymentError('');
+    setPaymentStatus('');
+    if (!userId) {
+      setPaymentError('Unable to identify your account. Please login again.');
+      return;
+    }
+    if (!Number.isFinite(rechargeAmount) || rechargeAmount < 10) {
+      setPaymentError('Minimum recharge amount is Rs. 10.');
+      alert('Minimum recharge amount is Rs. 10.');
+      return;
+    }
+    if (!profile.email) {
+      setPaymentError('Email is required before opening PayU checkout.');
+      return;
+    }
+
+    try {
+      setPaying(true);
+
+      const { data } = await api.post('https://api.yogidesk-ai.com/api/payments/initiate-payu', {
+        userId,
+        amount: rechargeAmount,
+        firstname: profile.firstname,
+        email: profile.email,
+        phone: profile.phone,
+      });
+
+      const payuPayload = data?.payload;
+      if (!data?.success || !payuPayload?.hash) {
+        throw new Error(data?.msg || 'Failed to initialize PayU checkout.');
+      }
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = data.checkoutUrl || 'https://secure.payu.in/_payment';
+      form.target = '_self';
+      form.style.display = 'none';
+
+      [
+        'key',
+        'txnid',
+        'amount',
+        'productinfo',
+        'firstname',
+        'email',
+        'phone',
+        'surl',
+        'furl',
+        'hash',
+      ].forEach((key) => {
+        if (payuPayload[key] !== undefined && payuPayload[key] !== null) {
+          const hiddenField = document.createElement('input');
+          hiddenField.type = 'hidden';
+          hiddenField.name = key;
+          hiddenField.value = String(payuPayload[key]);
+          form.appendChild(hiddenField);
+        }
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (error) {
+      setPaying(false);
+      console.error('PayU initialization failed:', error);
+      setPaymentError(error.message || 'Payment gateway failed to initialize. Please try again.');
+    }
+  };
+
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f8fafc] p-4 font-sans sm:p-6 lg:p-10">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -121,7 +218,7 @@ const YogiWallet = () => {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
-          <form onSubmit={handleProceedToRecharge} className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+          <form onSubmit={handlePayuRecharge} className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-black text-slate-950">Recharge Wallet</h2>
             <p className="mt-2 text-sm font-semibold text-slate-500">Pay securely through PayU India.</p>
 
@@ -145,11 +242,16 @@ const YogiWallet = () => {
             <label className="mt-6 block text-xs font-black uppercase tracking-widest text-slate-400">Recharge Amount</label>
             <input
               type="number"
-              min={100}
-              value={amount < 10 ? 10 : amount} // Ensure minimum of 10 is displayed if user enters less
+              min={10}
+              value={amount}
               onChange={(event) => setAmount(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-4 text-lg font-black text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
             />
+            {paymentStatus && (
+              <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                {paymentStatus}
+              </div>
+            )}
             {paymentError && (
               <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
                 {paymentError}
