@@ -985,6 +985,53 @@ const normalizeSpecialization = (value) => {
     return sanitizePlainText(value, 80);
 };
 
+const normalizeSpecializationSlug = (value) => {
+    const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (normalized.includes('dent')) return 'dentist';
+    if (normalized.includes('gyn') || normalized.includes('obst')) return 'gynecologist';
+    if (normalized.includes('ortho') || normalized.includes('bone') || normalized.includes('joint')) return 'orthopedic';
+    if (normalized.includes('general') || normalized.includes('physician') || normalized.includes('clinic')) return 'general_physician';
+    return 'general_physician';
+};
+
+const specializationSlugToSearchValue = (slug) => ({
+    dentist: 'dentist',
+    gynecologist: 'gynecologist',
+    orthopedic: 'orthopedic',
+    general_physician: 'general physician'
+}[slug] || 'general physician');
+
+const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, language }) => {
+    const selectColumns = 'id,slug,title,category,specialization,language,body_text,has_media,media_type,variable_schema';
+    const runQuery = async (specializationPattern) => {
+        let query = db
+            .from('pre_made_templates')
+            .select(selectColumns)
+            .ilike('specialization', specializationPattern)
+            .order('language', { ascending: true })
+            .order('title', { ascending: true })
+            .limit(50);
+
+        if (language && language.toLowerCase() !== 'all') {
+            query = query.ilike('language', language);
+        }
+
+        return query;
+    };
+
+    const humanPattern = specializationSlugToSearchValue(specializationQuery);
+    let { data, error } = await runQuery(humanPattern);
+    if (error) throw error;
+
+    if (!Array.isArray(data) || data.length === 0) {
+        const fallbackResult = await runQuery(specializationQuery);
+        if (fallbackResult.error) throw fallbackResult.error;
+        data = fallbackResult.data;
+    }
+
+    return Array.isArray(data) ? data : [];
+};
+
 const readSingleRowSafely = async ({ table, select, column = 'id', value }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !table || !select || !value) return { data: null, error: null };
@@ -1214,32 +1261,24 @@ app.get('/api/templates/dashboard', async (req, res) => {
         if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const profile = await getDoctorTemplateProfile(userId);
-        const specialization = normalizeSpecialization(profile.specialization);
-        if (!specialization) {
-            return res.status(400).json({ success: false, message: 'Doctor specialization is not configured for this profile.' });
-        }
+        const specializationQuery = normalizeSpecializationSlug(profile.specialization);
         const language = sanitizePlainText(req.query.language || '', 20);
-
-        let query = db
-            .from('pre_made_templates')
-            .select('id,slug,title,category,specialization,language,body_text,has_media,media_type,variable_schema')
-            .eq('specialization', specialization)
-            .order('language', { ascending: true })
-            .order('title', { ascending: true })
-            .limit(50);
-
-        if (language && language.toLowerCase() !== 'all') {
-            query = query.eq('language', language);
-        }
-
-        const { data, error } = await query;
-        if (error) throw error;
+        const templates = await fetchPremadeTemplatesBySpecialization({
+            db,
+            specializationQuery,
+            language
+        });
 
         return res.status(200).json({
             success: true,
-            specialization,
+            specialization: specializationQuery,
+            metadata: {
+                specializationQuery,
+                sourceSpecialization: profile.specialization || null,
+                fallbackApplied: !profile.specialization || specializationQuery === 'general_physician'
+            },
             bookingLink: profile.bookingLink,
-            templates: Array.isArray(data) ? data : []
+            templates
         });
     } catch (error) {
         console.error('Template dashboard error:', error.message || error);
@@ -1295,10 +1334,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
         if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const profile = await getDoctorTemplateProfile(userId);
-        const specialization = normalizeSpecialization(profile.specialization);
-        if (!specialization) {
-            return res.status(400).json({ success: false, message: 'Doctor specialization is not configured for this profile.' });
-        }
+        const specializationQuery = normalizeSpecializationSlug(profile.specialization);
         const templateId = sanitizePlainText(req.body?.templateId, 80);
         if (!templateId) return res.status(400).json({ success: false, message: 'Template selection is required.' });
 
@@ -1306,11 +1342,13 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             .from('pre_made_templates')
             .select('*')
             .eq('id', templateId)
-            .eq('specialization', specialization)
             .maybeSingle();
 
         if (templateError) throw templateError;
-        if (!premadeTemplate) return res.status(404).json({ success: false, message: 'Template not available for this specialization.' });
+        const templateSpecializationQuery = normalizeSpecializationSlug(premadeTemplate?.specialization);
+        if (!premadeTemplate || templateSpecializationQuery !== specializationQuery) {
+            return res.status(404).json({ success: false, message: 'Template not available for this specialization.' });
+        }
 
         let { data: userMeta, error: credentialError } = await db
             .from('doctor_profiles')
@@ -1348,7 +1386,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
         const hasMedia = Boolean(req.body?.hasMedia ?? premadeTemplate.has_media);
         const mediaType = sanitizePlainText(req.body?.mediaType || premadeTemplate.media_type || 'IMAGE', 20);
         const mediaUrl = sanitizePlainText(req.body?.mediaUrl || '', 600);
-        const formattedName = formatTemplateName(`${specialization}_${premadeTemplate.slug || premadeTemplate.title}_${language}_${Date.now()}`);
+        const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.slug || premadeTemplate.title}_${language}_${Date.now()}`);
 
         const components = buildPremadeTemplateComponents({
             bodyText,

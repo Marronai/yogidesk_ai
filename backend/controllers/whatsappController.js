@@ -407,11 +407,36 @@ const isMissingColumnError = (error) => {
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
 
+const cleanStoredCredential = (value) => {
+    const normalized = String(value || '').trim();
+    return normalized && normalized !== 'CONFIGURED' ? normalized : '';
+};
+
 const hasCompleteMetaCredentials = (row = {}) => Boolean(
-    String(row.meta_phone_number_id || row.whatsapp_phone_number_id || '').trim() &&
-    String(row.meta_waba_id || row.whatsapp_business_account_id || '').trim() &&
-    String(row.system_user_token || row.whatsapp_access_token || '').trim()
+    cleanStoredCredential(row.meta_phone_number_id || row.whatsapp_phone_number_id) &&
+    cleanStoredCredential(row.meta_waba_id || row.whatsapp_business_account_id) &&
+    cleanStoredCredential(row.system_user_token || row.whatsapp_access_token)
 );
+
+const getExistingMetaCredentialState = async (client, userId) => {
+    const lookups = [
+        'meta_phone_number_id,meta_waba_id,system_user_token',
+        'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token'
+    ];
+
+    for (const selectColumns of lookups) {
+        const result = await client
+            .from('doctor_profiles')
+            .select(selectColumns)
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (!result.error) return result.data || {};
+        if (!isMissingColumnError(result.error)) throw result.error;
+    }
+
+    return {};
+};
 
 /**
  * Dedicated handler for saving Meta Connection credentials.
@@ -442,22 +467,8 @@ exports.saveMetaConnection = async (req, res) => {
         }
 
         const client = supabaseAdmin || supabase;
-        let existingResult = await client
-            .from('doctor_profiles')
-            .select('meta_phone_number_id,meta_waba_id,system_user_token')
-            .eq('id', sessionUser.id)
-            .maybeSingle();
-
-        if (existingResult.error && isMissingColumnError(existingResult.error)) {
-            existingResult = await client
-                .from('doctor_profiles')
-                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-                .eq('id', sessionUser.id)
-                .maybeSingle();
-        }
-
-        if (existingResult.error && !isMissingColumnError(existingResult.error)) throw existingResult.error;
-        if (hasCompleteMetaCredentials(existingResult.data)) {
+        const existingMetaState = await getExistingMetaCredentialState(client, sessionUser.id);
+        if (hasCompleteMetaCredentials(existingMetaState)) {
             return res.status(403).json({ success: false, message: META_CONFIGURATION_LOCKED_MESSAGE });
         }
 

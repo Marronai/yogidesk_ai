@@ -143,15 +143,20 @@ const Settings = () => {
         throw new Error(result.message || 'Failed to update connection settings. Please try again.');
       }
 
-      setConnectionStatus(
-        payload.whatsappPhoneNumberId && payload.whatsappBusinessAccountId && payload.whatsappAccessToken
-          ? 'connected'
-          : 'disconnected'
-      );
-      setHasExistingConnection(Boolean(payload.whatsappPhoneNumberId && payload.whatsappBusinessAccountId && payload.whatsappAccessToken));
       const { userId: activeUserId } = await getActiveAccount();
-      await loadUserProfile(activeUserId, { force: true });
-      showToast('success', 'Connection settings saved successfully.');
+      const refreshedProfile = await loadUserProfile(activeUserId, { force: true });
+      const confirmedActive = Boolean(refreshedProfile?.meta_configured);
+      setConnectionStatus(confirmedActive ? 'connected' : 'disconnected');
+      setHasExistingConnection(confirmedActive);
+      if (confirmedActive) {
+        setFormData((current) => ({
+          ...current,
+          whatsappPhoneNumberId: refreshedProfile?.whatsapp_phone_number_id || payload.whatsappPhoneNumberId,
+          whatsappBusinessAccountId: refreshedProfile?.whatsapp_business_account_id || payload.whatsappBusinessAccountId,
+          whatsappAccessToken: 'CONFIGURED',
+        }));
+      }
+      showToast(confirmedActive ? 'success' : 'error', confirmedActive ? 'Connection settings saved successfully.' : 'Server did not confirm the Meta connection. Please try again.');
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
       showToast('error', error.message || 'Failed to update connection settings. Please try again.');
