@@ -24,6 +24,17 @@ import { supabase } from '../config/supabaseClient';
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
+const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
+const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
+const mapStoredMessage = (item = {}) => ({
+  id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
+  text: item.body || item.text || item.message_body || '',
+  sender: item.sender || (item.sender_phone ? 'user' : 'user'),
+  from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
+  type: item.type || (item.is_private_note ? 'private' : 'public'),
+  is_private_note: Boolean(item.is_private_note),
+  time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
+});
 const logInboxError = (error) => {
   const message = error?.message || error?.details || String(error || '');
   if (error?.code === 'PGRST205' || String(message).toLowerCase().includes('schema cache')) {
@@ -33,7 +44,48 @@ const logInboxError = (error) => {
   console.error('Supabase Inbox Logging Error:', message);
 };
 
-const Inbox = () => {
+class InboxRenderBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorMessage: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorMessage: error?.message || 'Inbox render failed.' };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Inbox render failed:', {
+      message: error?.message,
+      stack: error?.stack,
+      componentStack: errorInfo?.componentStack,
+    });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center bg-slate-50 p-6">
+          <div className="w-full max-w-md rounded-2xl border border-rose-100 bg-white p-6 text-center shadow-sm">
+            <h2 className="text-lg font-black text-slate-900">Inbox could not render</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">{this.state.errorMessage}</p>
+            <button
+              type="button"
+              onClick={() => this.setState({ hasError: false, errorMessage: '' })}
+              className="mt-5 rounded-xl bg-orange-600 px-5 py-2 text-sm font-bold text-white hover:bg-orange-700"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+const InboxContent = () => {
   const [isGhostMode, setIsGhostMode] = useState(false);
   const [isPrivateNote, setIsPrivateNote] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
@@ -51,24 +103,24 @@ const Inbox = () => {
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
 
-  const selectedTags = useMemo(() => selectedChat?.metadata?.tags || [], [selectedChat]);
+  const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
   const allTags = useMemo(() => {
     const tags = new Set(tagOptions);
-    conversations.forEach((chat) => {
-      (chat.metadata?.tags || []).forEach((tag) => tags.add(tag));
+    (Array.isArray(conversations) ? conversations : []).forEach((chat) => {
+      safeTags(chat).forEach((tag) => tags.add(tag));
     });
     return Array.from(tags);
   }, [conversations]);
   const visibleConversations = useMemo(() => (
     tagFilter === 'ALL'
-      ? conversations
-      : conversations.filter((chat) => (chat.metadata?.tags || []).includes(tagFilter))
+      ? (Array.isArray(conversations) ? conversations : [])
+      : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
   ), [conversations, tagFilter]);
 
-  const getUser = async () => {
+  const getUser = useCallback(async () => {
     const { data } = await supabase.auth.getUser();    
     return data?.user || { id: localStorage.getItem('user_id') };
-  };
+  }, []);
 
   const loadInbox = useCallback(async () => {
     const user = await getUser();
@@ -174,6 +226,35 @@ const Inbox = () => {
     setActiveAgent(mappedAgents[0]);
     setConversations(mappedChats);
     setLoading(false);
+  }, [getUser]);
+
+  const loadMessages = useCallback(async (chat) => {
+    const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
+    setMessages(storedMessages.map(mapStoredMessage));
+
+    if (!chat?.id || String(chat.id).startsWith('message-')) return;
+    try {
+      let result = await supabase
+        .from('inbox_messages')
+        .select('id, chat_id, body, text, message_body, sender, from_me, type, is_private_note, created_at')
+        .eq('chat_id', chat.id)
+        .order('created_at', { ascending: true });
+
+      if (result.error) {
+        result = await supabase
+          .from('inbox_messages')
+          .select('id, chat_id, body, text, message_body, sender, from_me, created_at')
+          .eq('chat_id', chat.id)
+          .order('created_at', { ascending: true });
+      }
+
+      if (result.error) throw result.error;
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        setMessages(result.data.map(mapStoredMessage));
+      }
+    } catch (error) {
+      logInboxError(error);
+    }
   }, []);
 
   useEffect(() => {
@@ -253,45 +334,6 @@ const Inbox = () => {
       if (channel) supabase.removeChannel(channel);
     };
   }, [selectedChat, loadMessages]);
-
-  const mapStoredMessage = (item) => ({
-    id: item.id || item.created_at || Date.now(),
-    text: item.body || item.text || item.message_body || '',
-    sender: item.sender || (item.sender_phone ? 'user' : 'user'),
-    from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
-    type: item.type || (item.is_private_note ? 'private' : 'public'),
-    is_private_note: Boolean(item.is_private_note),
-    time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
-  });
-
-  const loadMessages = async (chat) => {
-    const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
-    setMessages(storedMessages.map(mapStoredMessage));
-
-    if (!chat?.id || String(chat.id).startsWith('message-')) return;
-    try {
-      let result = await supabase
-        .from('inbox_messages')
-        .select('id, chat_id, body, text, message_body, sender, from_me, type, is_private_note, created_at')
-        .eq('chat_id', chat.id)
-        .order('created_at', { ascending: true });
-
-      if (result.error) {
-        result = await supabase
-          .from('inbox_messages')
-          .select('id, chat_id, body, text, message_body, sender, from_me, created_at')
-          .eq('chat_id', chat.id)
-          .order('created_at', { ascending: true });
-      }
-
-      if (result.error) throw result.error;
-      if (Array.isArray(result.data) && result.data.length > 0) {
-        setMessages(result.data.map(mapStoredMessage));
-      }
-    } catch (error) {
-      logInboxError(error);
-    }
-  };
 
   useEffect(() => {
     if (!selectedChat?.id) return undefined;
@@ -502,9 +544,9 @@ const Inbox = () => {
           <>
             <div className="z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-600">{selectedChat.name.charAt(0)}</div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-600">{safeInitial(selectedChat?.name)}</div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-800">{selectedChat.name}</h2>
+                  <h2 className="text-sm font-bold text-slate-800">{selectedChat?.name || 'Patient'}</h2>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-green-600">Official Business</p>
                 </div>
               </div>
@@ -566,7 +608,7 @@ const Inbox = () => {
                   No messages in this chat yet.
                 </div>
               )}
-              {messages.map((msg) => {
+              {(Array.isArray(messages) ? messages : []).map((msg) => {
                 const isSentByMe = msg.from_me === true || msg.sender === 'doctor';
                 const messageText = msg.text || msg.body || msg.message_body || "Template Dispatched";
                 
@@ -675,8 +717,8 @@ const Inbox = () => {
           </div>
 
           <div className="flex flex-col items-center">
-            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-100 text-2xl font-black text-blue-600 shadow-sm">{selectedChat.name.charAt(0)}</div>
-            <h2 className="font-bold text-slate-800">{selectedChat.name}</h2>
+            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-3xl bg-blue-100 text-2xl font-black text-blue-600 shadow-sm">{safeInitial(selectedChat?.name)}</div>
+            <h2 className="font-bold text-slate-800">{selectedChat?.name || 'Patient'}</h2>
             <button
               onClick={() => setShowPhone((value) => !value)}
               className="mt-2 inline-flex items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-xs font-bold uppercase tracking-widest text-slate-400"
@@ -727,5 +769,11 @@ const Inbox = () => {
     </div>
   );
 };
+
+const Inbox = () => (
+  <InboxRenderBoundary>
+    <InboxContent />
+  </InboxRenderBoundary>
+);
 
 export default Inbox;
