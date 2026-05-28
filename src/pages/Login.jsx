@@ -10,6 +10,9 @@ import { useWallet } from '../context/WalletContext';
 import { useAuth } from '../context/AuthContext';
 import api, { API_URL } from '../utils/api';
 
+const MotionDiv = motion.div;
+const MotionForm = motion.form;
+
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -18,8 +21,8 @@ const Login = () => {
   const [pendingUser, setPendingUser] = useState(null);
   const [pendingCredentials, setPendingCredentials] = useState(null);
   
-  // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
-  const [step, setStep] = useState(1);
+  // Login flow is intentionally two-step: password check first, dashboard routing only after OTP.
+  const [step, setStep] = useState('login');
   const { fetchWalletData, fetchTransactions } = useWallet();
   const { isAuthenticated, loading: authLoading, restoreSession } = useAuth();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
@@ -35,9 +38,14 @@ const Login = () => {
   ];
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated && step === 1) {
+    if (!authLoading && !loading && isAuthenticated && step === 'login' && !pendingCredentials) {
       navigate('/dashboard', { replace: true });
       return undefined;
+    }
+
+    if (step !== 'login' || loading) {
+      const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % slides.length), 4000);
+      return () => clearInterval(timer);
     }
 
     // 🛡️ DEVICE FINGERPRINT SECURITY CHECK
@@ -58,7 +66,7 @@ const Login = () => {
     verifyFingerprint();
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % slides.length), 4000);
     return () => clearInterval(timer);
-  }, [authLoading, isAuthenticated, navigate, step, slides.length]);
+  }, [authLoading, isAuthenticated, loading, navigate, pendingCredentials, step, slides.length]);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -109,7 +117,7 @@ const Login = () => {
 
     setPendingUser(user);
     setOtp(["", "", "", "", "", ""]);
-    setStep(2);
+    setStep('otp');
   };
 
   // 🌍 GOOGLE LOGIN HANDLER (Supabase Native Auth)
@@ -126,8 +134,18 @@ const Login = () => {
   };
 
   // ✅ ENHANCED SUCCESS HANDLER (Saves session with fingerprint and persistence config)
-  const handleAuthSuccess = async (supabaseUser) => {
+  const handleAuthSuccess = async (supabaseUser, authSession = null) => {
     try {
+        if (!supabaseUser?.id) {
+          throw new Error('Unable to complete login session.');
+        }
+
+        if (authSession?.access_token && authSession?.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: authSession.access_token,
+            refresh_token: authSession.refresh_token,
+          });
+        }
         // 🔐 Update device fingerprint in metadata for future session validation
         await supabase.auth.updateUser({
           data: { last_fingerprint: navigator.userAgent }
@@ -158,7 +176,10 @@ const Login = () => {
           fetchWalletData(supabaseUser.id),
           fetchTransactions(supabaseUser.id)
         ]);
-        await restoreSession();
+        const restoredUser = await restoreSession();
+        if (!restoredUser?.id) {
+          throw new Error('Auth session could not be restored after OTP verification.');
+        }
         navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
@@ -174,9 +195,10 @@ const Login = () => {
     const cleanEmail = formData.email.trim().toLowerCase();
 
     try {
-      if (step === 1) {
+      if (step === 'login') {
         // Clear any lingering session keys
         clearStoredAuthSession();
+        setPendingCredentials(null);
 
         // --- SUPABASE PASSWORD SIGN IN ---
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -187,8 +209,8 @@ const Login = () => {
         if (error) throw error;
 
         if (data?.user) {
-          await startLoginEmailVerification(data.user, cleanEmail);
           setPendingCredentials({ email: cleanEmail, password: formData.password });
+          await startLoginEmailVerification(data.user, cleanEmail);
           clearStoredAuthSession();
           await supabase.auth.signOut({ scope: 'local' });
           clearStoredAuthSession();
@@ -212,11 +234,11 @@ const Login = () => {
         const verifiedUser = data?.user || pendingUser;
 
         triggerLoginEmail(verifiedUser);
-        await handleAuthSuccess(verifiedUser);
+        await handleAuthSuccess(verifiedUser, data?.session);
       }
     } catch (error) {
       console.error(error);
-      if (step === 1 || step === 2) await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      if (step === 'login' || step === 'otp') await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
       alert(error.message || "Invalid Email or Password");
     } finally {
       setLoading(false);
@@ -244,7 +266,7 @@ const Login = () => {
 
           <div className="h-48 relative">
             <AnimatePresence mode='wait'>
-              <motion.div 
+              <MotionDiv 
                 key={currentSlide}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -267,7 +289,7 @@ const Login = () => {
                       <p className="text-xl font-bold text-white leading-relaxed">{slides[currentSlide].text}</p>
                    </div>
                  )}
-              </motion.div>
+              </MotionDiv>
             </AnimatePresence>
           </div>
           <div className="flex gap-2 mt-8 justify-center">
@@ -280,7 +302,7 @@ const Login = () => {
       <div className="w-full md:w-1/2 md:order-2 flex flex-col justify-center items-center p-8 relative bg-white">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 rounded-full blur-[120px] lg:hidden"></div>
 
-        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
+        <MotionDiv initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
           
           {/* Logo & Header */}
           <div className="flex items-center gap-2 mb-8">
@@ -289,12 +311,12 @@ const Login = () => {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-3xl font-black text-gray-900 mb-2">{step === 1 ? "Welcome Back!" : "Enter Login Code"}</h2>
-            <p className="text-gray-500">{step === 1 ? "Please enter your doctor credentials to access the system dashboard." : `Enter the secure 6-digit code sent to ${formData.email || 'your email'}.`}</p>
+            <h2 className="text-3xl font-black text-gray-900 mb-2">{step === 'login' ? "Welcome Back!" : "Enter Login Code"}</h2>
+            <p className="text-gray-500">{step === 'login' ? "Please enter your doctor credentials to access the system dashboard." : `Enter the secure 6-digit code sent to ${pendingCredentials?.email || formData.email || 'your email'}.`}</p>
           </div>
 
           {/* 🔴 STEP 1: EMAIL & PASSWORD FORM */}
-          {step === 1 && (
+          {step === 'login' && (
             <>
               {/* Google Button */}
               <button type="button" onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-200 text-gray-700 font-bold py-3.5 rounded-xl hover:bg-gray-50 transition-all mb-6">
@@ -343,8 +365,8 @@ const Login = () => {
           )}
 
           {/* 🔴 STEP 2: OTP COMPONENT FALLBACK */}
-          {step === 2 && (
-            <motion.form initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} onSubmit={handleSubmit} className="space-y-6">
+          {step === 'otp' && (
+            <MotionForm initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} onSubmit={handleSubmit} className="space-y-6">
                <div className="flex gap-2 justify-center">
                   {otp.map((data, index) => (
                     <input
@@ -361,27 +383,27 @@ const Login = () => {
                </div>
                
                <button disabled={loading} className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white py-4 rounded-xl font-bold transition-all shadow-xl flex justify-center items-center gap-2">
-                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Enter Login Code"} 
+                  {loading ? <Loader2 size={20} className="animate-spin" /> : "Verify & Login"} 
                   {!loading && <KeyRound size={20}/>}
                </button>
 
-               <button type="button" onClick={() => setStep(1)} className="w-full text-sm text-gray-500 hover:text-gray-800 font-bold">
+               <button type="button" onClick={() => { setStep('login'); setPendingCredentials(null); setPendingUser(null); setOtp(["", "", "", "", "", ""]); }} className="w-full text-sm text-gray-500 hover:text-gray-800 font-bold">
                  Return to Login Screen
                </button>
-            </motion.form>
+            </MotionForm>
           )}
 
           <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center gap-2 text-gray-400 text-xs font-medium">
              <ShieldCheck size={14}/> Secure SSL Encryption
           </div>
 
-          {step === 1 && (
+          {step === 'login' && (
             <p className="mt-4 text-center text-sm text-gray-500">
               Don't have an account yet?{' '}
               <Link to="/signup" className="font-bold text-[#FF6B00] hover:underline">Start with ₹50 Credits</Link>
             </p>
           )}
-        </motion.div>
+        </MotionDiv>
       </div>
 
     </div>
