@@ -1,5 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { supabaseAdmin, supabase } = require('../config/supabase');
 
 const router = express.Router();

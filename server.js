@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, 'backend', '.env') });
+const paymentRoutes = require('./backend/routes/paymentRoutes');
 
 // Port automatic Hostinger decide karega, local par 5000
 const PORT = process.env.PORT || 5000;
@@ -19,6 +21,7 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api/payments', paymentRoutes);
 
 console.log("🚀 Yogi Desk Root Engine Initializing...");
 
