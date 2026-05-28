@@ -1,7 +1,8 @@
+const ws = require('ws');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
-const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
@@ -10,7 +11,10 @@ if (!supabaseUrl || !supabaseServiceKey) {
 
 const createSupabaseClient = (key) => (
   supabaseUrl && key
-    ? createClient(supabaseUrl, key)
+    ? createClient(supabaseUrl, key, {
+      auth: { persistSession: false },
+      realtime: { transport: ws }
+    })
     : null
 );
 
