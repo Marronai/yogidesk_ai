@@ -825,11 +825,6 @@ const TemplateManager = () => {
                       ))}
                     </div>
                   )}
-                  {parsedVariables.length > 0 && (
-                    <div className="mt-3 rounded-xl bg-white/70 p-3 text-[10px] font-bold leading-relaxed text-emerald-900">
-                      Meta sample matrix: {JSON.stringify(metaExamples)}
-                    </div>
-                  )}
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">

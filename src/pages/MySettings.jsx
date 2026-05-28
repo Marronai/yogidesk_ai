@@ -137,26 +137,23 @@ const Settings = () => {
         whatsappAccessToken: formData.whatsappAccessToken,
       };
 
-      const { data: result } = await api.post('/settings/meta-connection', payload);
+      const res = await api.post('/settings/meta-connection', payload);
 
-      if (!result?.success) {
-        throw new Error(result.message || 'Failed to update connection settings. Please try again.');
-      }
-
-      const { userId: activeUserId } = await getActiveAccount();
-      const refreshedProfile = await loadUserProfile(activeUserId, { force: true });
-      const confirmedActive = Boolean(refreshedProfile?.meta_configured);
-      setConnectionStatus(confirmedActive ? 'connected' : 'disconnected');
-      setHasExistingConnection(confirmedActive);
-      if (confirmedActive) {
+      if (res.data && res.data.success === true) {
+        showToast('success', res.data.message || 'Meta settings stored successfully!');
+        setConnectionStatus('connected');
+        setHasExistingConnection(true);
         setFormData((current) => ({
           ...current,
-          whatsappPhoneNumberId: refreshedProfile?.whatsapp_phone_number_id || payload.whatsappPhoneNumberId,
-          whatsappBusinessAccountId: refreshedProfile?.whatsapp_business_account_id || payload.whatsappBusinessAccountId,
+          whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
+          whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
           whatsappAccessToken: 'CONFIGURED',
         }));
+        const { userId: activeUserId } = await getActiveAccount();
+        await loadUserProfile(activeUserId, { force: true }).catch(() => null);
+      } else {
+        showToast('error', 'Server did not confirm the Meta connection. Please try again.');
       }
-      showToast(confirmedActive ? 'success' : 'error', confirmedActive ? 'Connection settings saved successfully.' : 'Server did not confirm the Meta connection. Please try again.');
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
       showToast('error', error.message || 'Failed to update connection settings. Please try again.');
