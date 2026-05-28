@@ -73,7 +73,11 @@ const TemplateManager = () => {
     try {
       setLibraryLoading(true);
       const userId = localStorage.getItem('user_id');
-      const response = await api.get('/templates/dashboard', { params: { userId } });
+      const params = {
+        userId,
+        ...(activeLang.toLowerCase() !== 'all' && { language: activeLang })
+      };
+      const response = await api.get('/templates/dashboard', { params });
       setDashboardTemplates(Array.isArray(response.data?.templates) ? response.data.templates : []);
       setDashboardSpecialization(response.data?.specialization || 'General Physician');
       setBookingLink(response.data?.bookingLink || '');
@@ -85,7 +89,7 @@ const TemplateManager = () => {
     } finally {
       setLibraryLoading(false);
     }
-  }, []);
+  }, [activeLang]);
 
   useEffect(() => {
     const fetchPlanData = async () => {
@@ -103,12 +107,12 @@ const TemplateManager = () => {
     fetchPlanData();
     fetchTemplates();
     syncAndRefreshTemplates({ silent: true });
-    fetchDashboardTemplates();
-  }, [fetchTemplates, syncAndRefreshTemplates, fetchDashboardTemplates]);
+  }, [fetchTemplates, syncAndRefreshTemplates]);
 
   useEffect(() => {
     setLibraryPage(0);
-  }, [activeLang]);
+    fetchDashboardTemplates();
+  }, [activeLang, fetchDashboardTemplates]);
 
   useEffect(() => {
     const userId = localStorage.getItem('user_id');
@@ -244,10 +248,8 @@ const TemplateManager = () => {
 
   const languageTabs = ['All', 'Hinglish', 'Hindi', 'English'];
   const libraryTemplates = useMemo(() => {
-    const rows = Array.isArray(dashboardTemplates) ? dashboardTemplates : [];
-    if (activeLang === 'All') return rows;
-    return rows.filter((template) => String(template.language || '').toLowerCase() === activeLang.toLowerCase());
-  }, [dashboardTemplates, activeLang]);
+    return Array.isArray(dashboardTemplates) ? dashboardTemplates : [];
+  }, [dashboardTemplates]);
   const totalLibraryPages = Math.max(1, Math.ceil(libraryTemplates.length / 6));
   const visibleLibraryTemplates = useMemo(
     () => libraryTemplates.slice(libraryPage * 6, libraryPage * 6 + 6),

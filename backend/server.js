@@ -998,46 +998,49 @@ app.get('/api/templates/sync', async (req, res) => {
 
 const normalizeSpecialization = (value) => {
     const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return '';
     if (normalized.includes('dent')) return 'Dentist';
     if (normalized.includes('gyn') || normalized.includes('obst')) return 'Gynecologist';
     if (normalized.includes('ortho') || normalized.includes('bone') || normalized.includes('joint')) return 'Orthopedic';
     if (normalized.includes('general') || normalized.includes('physician') || normalized.includes('clinic')) return 'General Physician';
-    return 'General Physician';
+    return sanitizePlainText(value, 80);
 };
 
 const getDoctorTemplateProfile = async (userId) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !userId) return {};
 
-    const profileSelects = [
-        'id,name,business_name,businessName,business_category,specialization,industry,clinic_booking_link,booking_link,website',
-        'id,name,business_category,specialization,industry,booking_link',
-        'id,name'
+    const profileLookups = [
+        { table: 'doctor_profiles', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
+        { table: 'doctor_profiles', select: 'id,name,specialization,business_category,industry,booking_link' },
+        { table: 'users', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
+        { table: 'clinics', select: 'id,name,specialization,clinic_booking_link,booking_link,website' }
     ];
 
-    for (const selectColumns of profileSelects) {
+    for (const lookup of profileLookups) {
         const { data, error } = await db
-            .from('doctor_profiles')
-            .select(selectColumns)
+            .from(lookup.table)
+            .select(lookup.select)
             .eq('id', userId)
             .maybeSingle();
 
         if (!error && data) {
+            const rawSpecialization = data.specialization || data.business_category || data.industry || '';
+            const specialization = normalizeSpecialization(rawSpecialization);
             return {
                 ...data,
-                specialization: normalizeSpecialization(data.specialization || data.business_category || data.industry),
+                specialization,
                 bookingLink: data.clinic_booking_link || data.booking_link || data.website || `https://yogidesk-ai.com/book/${userId}`
             };
         }
 
-        if (error && !isMissingColumnError(error)) {
+        if (error && !isMissingColumnError(error) && error.code !== 'PGRST205') {
             console.warn('Template dashboard profile lookup failed:', error.message || error);
-            break;
         }
     }
 
     return {
-        specialization: 'General Physician',
+        specialization: '',
         bookingLink: `https://yogidesk-ai.com/book/${userId}`
     };
 };
@@ -1114,6 +1117,9 @@ app.get('/api/templates/dashboard', async (req, res) => {
 
         const profile = await getDoctorTemplateProfile(userId);
         const specialization = normalizeSpecialization(profile.specialization);
+        if (!specialization) {
+            return res.status(400).json({ success: false, message: 'Doctor specialization is not configured for this profile.' });
+        }
         const language = sanitizePlainText(req.query.language || '', 20);
 
         let query = db
@@ -1155,6 +1161,9 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
 
         const profile = await getDoctorTemplateProfile(userId);
         const specialization = normalizeSpecialization(profile.specialization);
+        if (!specialization) {
+            return res.status(400).json({ success: false, message: 'Doctor specialization is not configured for this profile.' });
+        }
         const templateId = sanitizePlainText(req.body?.templateId, 80);
         if (!templateId) return res.status(400).json({ success: false, message: 'Template selection is required.' });
 
