@@ -22,13 +22,17 @@ const app = express();
 const corsOptions = {
     origin: ['https://yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://localhost:5173'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Hub-Signature-256'],
     credentials: true
 };
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json());
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = Buffer.from(buf || '');
+    }
+}));
 app.use(express.urlencoded({ extended: true }));
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
 app.use(express.static(path.join(__dirname, 'public')));
@@ -79,6 +83,7 @@ const invalidMetaConfigurationResponse = {
     success: false,
     message: "Invalid Meta configuration or access token permissions. Please check your developer credentials."
 };
+const META_CONFIGURATION_LOCKED_MESSAGE = "Configuration locked. Contact Customer Support to modify your Meta integrations.";
 const getBearerToken = (req) => {
     const header = req.headers.authorization || '';
     return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -106,6 +111,11 @@ const getSupabaseSessionUser = async (req) => {
 
     return data.user;
 };
+const hasCompleteMetaCredentials = (row = {}) => Boolean(
+    String(row.meta_phone_number_id || row.whatsapp_phone_number_id || '').trim() &&
+    String(row.meta_waba_id || row.whatsapp_business_account_id || '').trim() &&
+    String(row.system_user_token || row.whatsapp_access_token || '').trim()
+);
 const isMissingColumnError = (error) => {
     const message = String(error?.message || error?.details || '').toLowerCase();
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
@@ -406,6 +416,161 @@ app.post('/api/team/dispatch-invite-email', async (req, res) => {
 
 // ====== META WEBHOOK ENDPOINTS ======
 
+const getMetaWebhookVerifyToken = () => (
+    process.env.META_WEBHOOK_VERIFY_TOKEN ||
+    process.env.META_VERIFY_TOKEN ||
+    process.env.WHATSAPP_VERIFY_TOKEN ||
+    'YogiDesk_Doctor_Secure_2026'
+);
+
+const getMetaWebhookAppSecret = () => (
+    process.env.META_WEBHOOK_APP_SECRET ||
+    process.env.META_APP_SECRET ||
+    process.env.WHATSAPP_APP_SECRET ||
+    ''
+);
+
+const verifyMetaWebhookSignature = (req) => {
+    const appSecret = getMetaWebhookAppSecret();
+    const signature = String(req.get('x-hub-signature-256') || '').trim();
+
+    if (!appSecret || !signature || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
+
+    const expected = `sha256=${crypto
+        .createHmac('sha256', appSecret)
+        .update(req.rawBody || Buffer.from(JSON.stringify(req.body || {})))
+        .digest('hex')}`;
+
+    const signatureBuffer = Buffer.from(signature, 'utf8');
+    const expectedBuffer = Buffer.from(expected, 'utf8');
+    return signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+};
+
+const normalizeWebhookTemplateStatus = (status) => {
+    const normalized = String(status || '').trim().toUpperCase();
+    if (normalized === 'PENDING_REVIEW' || normalized === 'IN_REVIEW') return 'PENDING';
+    return normalized;
+};
+
+const extractTemplateStatusUpdates = (payload = {}) => {
+    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+    const updates = [];
+    for (const entry of payload.entry) {
+        if (!Array.isArray(entry.changes)) continue;
+        const wabaId = String(entry.id || '').trim();
+
+        for (const change of entry.changes) {
+            if (change.field !== 'message_template_status_update' && change.field !== 'message_template') continue;
+
+            const value = change.value || {};
+            const template = value.message_template_status_update || value.message_template_status || value.message_template || value;
+            const status = normalizeWebhookTemplateStatus(template.status || template.event || value.event);
+            if (!['APPROVED', 'REJECTED', 'PENDING', 'PAUSED', 'DISABLED'].includes(status)) continue;
+
+            const templateId = String(template.id || template.message_template_id || value.message_template_id || '').trim();
+            const templateName = String(template.name || template.message_template_name || value.message_template_name || value.template_name || '').trim();
+            const businessAccountId = String(
+                template.whatsapp_business_account_id ||
+                value.whatsapp_business_account_id ||
+                value.waba_id ||
+                wabaId
+            ).trim();
+
+            if (!businessAccountId || (!templateId && !templateName)) continue;
+            updates.push({ businessAccountId, templateId, templateName, status });
+        }
+    }
+
+    return updates;
+};
+
+const findClinicByWabaId = async (businessAccountId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !businessAccountId) return null;
+
+    let result = await db
+        .from('doctor_profiles')
+        .select('id')
+        .eq('meta_waba_id', businessAccountId)
+        .maybeSingle();
+
+    if (result.error && isMissingColumnError(result.error)) {
+        result = await db
+            .from('doctor_profiles')
+            .select('id')
+            .eq('whatsapp_business_account_id', businessAccountId)
+            .maybeSingle();
+    }
+
+    if (result.error) {
+        console.error('Webhook clinic lookup failed:', result.error.message || result.error);
+        return null;
+    }
+
+    return result.data || null;
+};
+
+const processTemplateStatusWebhook = async (payload = {}) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) throw new Error('Database connection unavailable.');
+
+    const updates = extractTemplateStatusUpdates(payload);
+    for (const update of updates) {
+        const clinic = await findClinicByWabaId(update.businessAccountId);
+        if (!clinic?.id) {
+            console.warn(`Template webhook skipped: no clinic mapped to WABA ${update.businessAccountId}.`);
+            continue;
+        }
+
+        let query = db
+            .from('whatsapp_templates')
+            .update({ status: update.status, updated_at: new Date().toISOString() })
+            .eq('user_id', clinic.id);
+
+        query = update.templateId
+            ? query.or(`meta_template_id.eq.${update.templateId},template_name.eq.${update.templateName}`)
+            : query.eq('template_name', update.templateName);
+
+        const { error } = await query;
+        if (error) {
+            console.error('Webhook template status update failed:', error.message || error);
+        }
+    }
+};
+
+const verifyWhatsAppWebhook = (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    if (mode === 'subscribe' && token === getMetaWebhookVerifyToken()) {
+        return res.status(200).send(challenge);
+    }
+
+    return res.sendStatus(403);
+};
+
+const handleWhatsAppWebhook = (req, res) => {
+    if (!verifyMetaWebhookSignature(req)) {
+        return res.status(403).send('Invalid signature');
+    }
+
+    res.status(200).send('EVENT_RECEIVED');
+    Promise.resolve()
+        .then(() => processTemplateStatusWebhook(req.body))
+        .catch((error) => {
+            console.error('WhatsApp webhook background processing error:', error.message || error);
+        });
+};
+
+app.get('/api/webhooks/whatsapp', verifyWhatsAppWebhook);
+app.post('/api/webhooks/whatsapp', handleWhatsAppWebhook);
+app.get('/api/whatsapp-webhook', verifyWhatsAppWebhook);
+app.post('/api/whatsapp-webhook', handleWhatsAppWebhook);
+app.get('/api/webhook/meta', verifyWhatsAppWebhook);
+app.post('/api/webhook/meta', handleWhatsAppWebhook);
+
 // GET Method: Meta WhatsApp webhook verification
 app.get('/api/whatsapp-webhook', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -681,9 +846,13 @@ app.get('/api/templates', async (req, res) => {
             throw new Error('Database connection unavailable.');
         }
 
-        const userId = req.query.userId || req.body?.userId;
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
         if (!userId) {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
+        }
+        if (!sessionUser?.id || sessionUser.id !== userId) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
         }
 
         const { data: templates, error } = await supabase
@@ -716,25 +885,45 @@ app.get('/api/templates/sync', async (req, res) => {
             throw new Error('Database connection unavailable.');
         }
 
-        const userId = req.query.userId || req.body?.userId;
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
         if (!userId) {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
+        if (!sessionUser?.id || sessionUser.id !== userId) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
 
-        const { data: userMeta, error: credentialError } = await supabase
+        const db = supabaseAdmin || supabase;
+        let { data: userMeta, error: credentialError } = await db
             .from('doctor_profiles')
             .select('system_user_token,meta_waba_id')
             .eq('id', userId)
             .maybeSingle();
+
+        if (credentialError && isMissingColumnError(credentialError)) {
+            const fallbackResult = await db
+                .from('doctor_profiles')
+                .select('whatsapp_access_token,whatsapp_business_account_id')
+                .eq('id', userId)
+                .maybeSingle();
+            userMeta = fallbackResult.data
+                ? {
+                    system_user_token: fallbackResult.data.whatsapp_access_token,
+                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id
+                }
+                : null;
+            credentialError = fallbackResult.error;
+        }
 
         if (credentialError) throw credentialError;
         if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
-        const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.meta_waba_id}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
         const response = await axios.get(graphUrl, {
-            params: { access_token: userMeta.system_user_token }
+            headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
         });
 
         const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -748,20 +937,45 @@ app.get('/api/templates/sync', async (req, res) => {
 
             if (!templateName && !metaTemplateId) continue;
 
-            let updateQuery = supabase
+            const components = Array.isArray(metaTemplate.components) ? metaTemplate.components : [];
+            const body = components.find((component) => component.type === 'BODY');
+            const header = components.find((component) => component.type === 'HEADER');
+            const footer = components.find((component) => component.type === 'FOOTER');
+            const buttons = components.find((component) => component.type === 'BUTTONS');
+            const rowPayload = {
+                user_id: userId,
+                template_name: templateName,
+                category: metaTemplate.category || 'MARKETING',
+                language: metaTemplate.language || 'en_US',
+                body_content: body?.text || '',
+                status,
+                header_type: header?.format || 'NONE',
+                header_text: header?.format === 'TEXT' ? header?.text || null : null,
+                footer_text: footer?.text || null,
+                buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
+                meta_template_id: metaTemplateId
+            };
+
+            let updateQuery = db
                 .from('whatsapp_templates')
-                .update({
-                    status,
-                    meta_template_id: metaTemplateId
-                })
+                .update(rowPayload)
                 .eq('user_id', userId);
 
             updateQuery = metaTemplateId
                 ? updateQuery.or(`meta_template_id.eq.${metaTemplateId},template_name.eq.${templateName}`)
                 : updateQuery.eq('template_name', templateName);
 
-            const { error: updateError } = await updateQuery;
-            if (!updateError) updates.push({ name: templateName, id: metaTemplateId, status });
+            const { data: updatedRows, error: updateError } = await updateQuery.select('id');
+            if (updateError) throw updateError;
+
+            if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+                const { error: insertError } = await db
+                    .from('whatsapp_templates')
+                    .insert([{ ...rowPayload, created_at: new Date().toISOString() }]);
+                if (insertError) throw insertError;
+            }
+
+            updates.push({ name: templateName, id: metaTemplateId, status });
         }
 
         return res.status(200).json({ success: true, templates: updates });
@@ -789,8 +1003,7 @@ app.post('/api/templates', async (req, res) => {
             buttons = [],
             components = [],
             messaging_product: messagingProduct = 'whatsapp',
-            whatsapp_business_account_id: requestBusinessAccountId,
-            whatsapp_access_token: requestAccessToken
+            whatsapp_business_account_id: requestBusinessAccountId
         } = req.body;
 
         if (!userId) {
@@ -817,8 +1030,8 @@ app.post('/api/templates', async (req, res) => {
             console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
         }
 
-        const businessAccountId = requestBusinessAccountId || userMeta?.meta_waba_id || null;
-        const accessToken = requestAccessToken || userMeta?.system_user_token || null;
+        const businessAccountId = userMeta?.meta_waba_id || requestBusinessAccountId || null;
+        const accessToken = userMeta?.system_user_token || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -874,6 +1087,101 @@ app.post('/api/templates', async (req, res) => {
     }
 });
 
+app.delete('/api/templates/:id', async (req, res) => {
+    try {
+        if (!supabase?.from) {
+            throw new Error('Database connection unavailable.');
+        }
+
+        const db = supabaseAdmin || supabase;
+        const templateId = req.params.id;
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
+
+        if (!templateId || !userId) {
+            return res.status(400).json({ success: false, message: 'Template ID and user ID are required.' });
+        }
+        if (!sessionUser?.id || sessionUser.id !== userId) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
+
+        const { data: template, error: templateError } = await db
+            .from('whatsapp_templates')
+            .select('id,user_id,template_name')
+            .eq('id', templateId)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (templateError) throw templateError;
+        if (!template) {
+            return res.status(404).json({ success: false, message: 'Template not found.' });
+        }
+
+        let { data: userMeta, error: credentialError } = await db
+            .from('doctor_profiles')
+            .select('system_user_token,meta_waba_id')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (credentialError && isMissingColumnError(credentialError)) {
+            const fallbackResult = await db
+                .from('doctor_profiles')
+                .select('whatsapp_access_token,whatsapp_business_account_id')
+                .eq('id', userId)
+                .maybeSingle();
+            userMeta = fallbackResult.data
+                ? {
+                    system_user_token: fallbackResult.data.whatsapp_access_token,
+                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id
+                }
+                : null;
+            credentialError = fallbackResult.error;
+        }
+
+        if (credentialError) throw credentialError;
+        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
+        }
+
+        let metaResponse;
+        try {
+            metaResponse = await axios.delete(`https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`, {
+                params: { name: template.template_name },
+                headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
+            });
+        } catch (error) {
+            const providerMessage = error.response?.data?.error?.message || error.message || 'Meta template deletion failed.';
+            return res.status(error.response?.status || 400).json({
+                success: false,
+                message: providerMessage,
+                provider: error.response?.data || null
+            });
+        }
+
+        const metaDeleteSucceeded = metaResponse?.data?.success === true || metaResponse?.status === 200;
+        if (!metaDeleteSucceeded) {
+            return res.status(400).json({
+                success: false,
+                message: 'Meta did not confirm template deletion.',
+                provider: metaResponse?.data || null
+            });
+        }
+
+        const { error: deleteError } = await db
+            .from('whatsapp_templates')
+            .delete()
+            .eq('id', templateId)
+            .eq('user_id', userId);
+
+        if (deleteError) throw deleteError;
+
+        return res.status(200).json({ success: true, message: 'Template deleted from Meta and Yogi Desk.' });
+    } catch (error) {
+        console.error('Template delete error:', error.response?.data || error.message || error);
+        return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template deletion failed.' });
+    }
+});
+
 /**
  * REFACTORED: Dedicated route for Meta Connection Configuration.
  * Now strictly uses session-level profile updates via the controller.
@@ -916,7 +1224,8 @@ app.get('/api/settings/meta-connection', async (req, res) => {
             data: {
                 meta_phone_number_id: data?.meta_phone_number_id || '',
                 meta_waba_id: data?.meta_waba_id || '',
-                system_user_token: data?.system_user_token || ''
+                system_user_token: data?.system_user_token ? 'CONFIGURED' : '',
+                is_locked: hasCompleteMetaCredentials(data || {})
             }
         });
     } catch (error) {
@@ -1509,55 +1818,6 @@ const processCampaignQueue = async () => {
 };
 
 setInterval(processCampaignQueue, 10000);
-
-// ====== AUTOMATIC META STATUS SYNC POLLING (1 MINUTE) ======
-setInterval(async () => {
-    if (!supabase) return;
-    try {
-        // Fetch all templates currently in PENDING state
-        const { data: pendingTemplates } = await supabase
-            .from('whatsapp_templates')
-            .select('user_id, template_name, id, status')
-            .or('status.eq.PENDING,status.eq.PENDING_REVIEW');
-
-        if (!pendingTemplates?.length) return;
-
-        // Group by user to batch credential lookups
-        const userGroups = pendingTemplates.reduce((acc, t) => {
-            acc[t.user_id] = acc[t.user_id] || [];
-            acc[t.user_id].push(t);
-            return acc;
-        }, {});
-
-        for (const userId in userGroups) {
-            const { data: profile } = await supabase
-                .from('doctor_profiles')
-                .select('system_user_token, meta_waba_id')
-                .eq('id', userId)
-                .maybeSingle();
-
-            if (!profile?.system_user_token || !profile?.meta_waba_id) continue;
-
-            for (const t of userGroups[userId]) {
-                try {
-                    const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates?name=${t.template_name}`;
-                    const res = await axios.get(url, {
-                        headers: { Authorization: `Bearer ${profile.system_user_token}` }
-                    });
-                    const metaData = res.data.data?.[0];
-                    if (metaData) {
-                        const trueStatus = metaData.status.toUpperCase() === 'PENDING_REVIEW' ? 'PENDING' : metaData.status.toUpperCase();
-                        if (trueStatus !== t.status) {
-                            await supabase.from('whatsapp_templates').update({ status: trueStatus }).eq('id', t.id);
-                        }
-                    }
-                } catch (e) {}
-            }
-        }
-    } catch (err) {
-        console.error('Background Sync Polling Error:', err.message);
-    }
-}, 60000);
 
 // Agar koi aaisa rasta khole jo API ka nahi hai (jaise /login, /dashboard), toh React ka frontend khule
 app.get('*', (req, res) => {

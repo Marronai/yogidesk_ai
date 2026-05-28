@@ -72,11 +72,13 @@ const Templates = () => {
           setTemplates([]);
         }
 
-        const { data: profileData } = await supabase
-          .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
-          .eq('id', userId)
-          .maybeSingle();
+        const { data: connectionResult } = await api.get('/settings/meta-connection');
+        const connectionData = connectionResult?.data || {};
+        const profileData = {
+          whatsapp_access_token: connectionData.system_user_token || '',
+          whatsapp_phone_number_id: connectionData.meta_phone_number_id || '',
+          whatsapp_business_account_id: connectionData.meta_waba_id || ''
+        };
 
         setDoctorProfile(profileData || null);
         if (
@@ -117,9 +119,9 @@ const Templates = () => {
 
   const metaCredentials = doctorProfile || {};
   const resolveMetaCredentials = (profile = {}) => ({
-    accessToken: profile.whatsapp_access_token || '',
-    phoneNumberId: profile.whatsapp_phone_number_id || '',
-    businessAccountId: profile.whatsapp_business_account_id || ''
+    accessToken: profile.whatsapp_access_token || profile.system_user_token || '',
+    phoneNumberId: profile.whatsapp_phone_number_id || profile.meta_phone_number_id || '',
+    businessAccountId: profile.whatsapp_business_account_id || profile.meta_waba_id || ''
   });
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
 
@@ -365,12 +367,13 @@ const Templates = () => {
       let activeProfile = doctorProfile;
       let activeCredentials = resolveMetaCredentials(activeProfile || {});
       if (!activeCredentials.businessAccountId || !activeCredentials.accessToken || !activeCredentials.phoneNumberId) {
-        const { data: profileData } = await supabase
-          .from('doctor_profiles')
-          .select('whatsapp_access_token,whatsapp_phone_number_id,whatsapp_business_account_id')
-          .eq('id', userId)
-          .maybeSingle();
-        activeProfile = profileData || null;
+        const { data: connectionResult } = await api.get('/settings/meta-connection');
+        const connectionData = connectionResult?.data || {};
+        activeProfile = {
+          whatsapp_access_token: connectionData.system_user_token || '',
+          whatsapp_phone_number_id: connectionData.meta_phone_number_id || '',
+          whatsapp_business_account_id: connectionData.meta_waba_id || ''
+        };
         setDoctorProfile(activeProfile);
         const refreshedCredentials = resolveMetaCredentials(activeProfile || {});
         if (refreshedCredentials.accessToken && refreshedCredentials.phoneNumberId && refreshedCredentials.businessAccountId) {
@@ -402,7 +405,6 @@ const Templates = () => {
         userId,
         messaging_product: 'whatsapp',
         whatsapp_business_account_id: credentials.businessAccountId,
-        whatsapp_access_token: credentials.accessToken,
         whatsapp_phone_number_id: credentials.phoneNumberId || null,
         name: formattedTemplateName,
         bodyText: bodyToSubmit,

@@ -14,6 +14,7 @@ const TemplateManager = () => {
   const [isSyncingStatuses, setIsSyncingStatuses] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
+  const [metaBusinessManagerId, setMetaBusinessManagerId] = useState('');
   const [planTier, setPlanTier] = useState('Starter Clinic');
   const [activeTab, setActiveTab] = useState('create');
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
@@ -81,12 +82,29 @@ const TemplateManager = () => {
     fetchPlanData();
     fetchTemplates();
     syncAndRefreshTemplates({ silent: true });
-    const intervalId = window.setInterval(() => {
-      syncAndRefreshTemplates({ silent: true });
-    }, 5 * 60 * 1000);
-
-    return () => window.clearInterval(intervalId);
   }, [fetchTemplates, syncAndRefreshTemplates]);
+
+  useEffect(() => {
+    const fetchMetaBusinessId = async () => {
+      const userId = localStorage.getItem('user_id');
+      if (!userId) return;
+
+      const { data } = await supabase
+        .from('doctor_profiles')
+        .select('meta_business_manager_id,meta_business_id,business_manager_id')
+        .eq('id', userId)
+        .maybeSingle();
+
+      setMetaBusinessManagerId(
+        data?.meta_business_manager_id ||
+        data?.meta_business_id ||
+        data?.business_manager_id ||
+        ''
+      );
+    };
+
+    fetchMetaBusinessId();
+  }, []);
 
   const planLimits = {
     'Starter Clinic': 20,
@@ -129,13 +147,29 @@ const TemplateManager = () => {
     }
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("Are you sure? This will delete the template from your records and Meta.")) {
+  const openMetaTemplateManager = () => {
+    const url = metaBusinessManagerId
+      ? `https://business.facebook.com/wa/manage/templates/?business_id=${encodeURIComponent(metaBusinessManagerId)}`
+      : 'https://business.facebook.com/wa/manage/templates/';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleDelete = async (id) => {
+    if (!id || !window.confirm("Are you sure? This will delete the template from your records and Meta.")) return;
+
+    try {
+      const userId = localStorage.getItem('user_id');
+      await api.delete(`${templateApiPath}/${id}`, { params: { userId } });
       setTemplates((currentTemplates) => (
         Array.isArray(currentTemplates)
           ? currentTemplates.filter((template) => template?.id !== id)
           : []
       ));
+      setError('');
+    } catch (err) {
+      console.error('Template delete failed:', err);
+      setError(err?.response?.data?.message || 'Unable to delete this template from Meta.');
+      await fetchTemplates({ silent: true });
     }
   };
 
@@ -397,7 +431,10 @@ const TemplateManager = () => {
                   </td>
                   <td className="p-5 text-right flex justify-end gap-2">
                     {/* View Details/Edit Action */}
-                    <button className="text-slate-400 hover:text-orange-600 p-2 hover:bg-orange-50 rounded-xl transition-all">
+                    <button
+                      onClick={openMetaTemplateManager}
+                      className="text-slate-400 hover:text-orange-600 p-2 hover:bg-orange-50 rounded-xl transition-all"
+                    >
                       <ExternalLink size={18} />
                     </button>
                     {/* Delete Action */}

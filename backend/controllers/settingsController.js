@@ -1,5 +1,11 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
+const META_CONFIGURATION_LOCKED_MESSAGE = "Configuration locked. Contact Customer Support to modify your Meta integrations.";
+const hasLockedMetaConfig = (config = {}) => Boolean(
+  String(config.phoneNumberId || '').trim() &&
+  String(config.wabaId || '').trim() &&
+  String(config.accessToken || '').trim()
+);
 const { encrypt } = require('../utils/cryptoUtils'); // ✅ Encryption import kiya
 
 exports.updateProfile = async (req, res) => {
@@ -14,6 +20,11 @@ exports.updateProfile = async (req, res) => {
     } = req.body;
 
     const user = await User.findById(req.user.id);
+    const incomingMetaUpdate = Boolean(whatsappPhoneNumberId || whatsappWabaId || whatsappAccessToken);
+
+    if (incomingMetaUpdate && hasLockedMetaConfig(user.whatsappConfig || {})) {
+      return res.status(403).json({ msg: META_CONFIGURATION_LOCKED_MESSAGE, message: META_CONFIGURATION_LOCKED_MESSAGE });
+    }
 
     // 1. Basic Details
     if (name) user.name = name;

@@ -66,14 +66,14 @@ const Settings = () => {
       const metaPhoneNumberId = connectionData.meta_phone_number_id || '';
       const metaWabaId = connectionData.meta_waba_id || '';
       const systemUserToken = connectionData.system_user_token || '';
-      const connectionExists = Boolean(metaPhoneNumberId && metaWabaId && systemUserToken);
+      const connectionExists = Boolean(connectionData.is_locked || (metaPhoneNumberId && metaWabaId && systemUserToken));
 
       const nextForm = {
         name: data?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
         email: data?.email || authUser?.email || localStorage.getItem('user_email') || '',
         whatsappPhoneNumberId: metaPhoneNumberId,
         whatsappBusinessAccountId: metaWabaId,
-        whatsappAccessToken: systemUserToken,
+        whatsappAccessToken: connectionExists ? 'CONFIGURED' : systemUserToken,
       };
 
       setFormData(nextForm);
@@ -312,7 +312,11 @@ const Settings = () => {
                 Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
               </div>
 
-              {!hasExistingConnection && (
+              {hasExistingConnection ? (
+                <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800 sm:w-auto">
+                  Integration Active. Contact support for modifications.
+                </div>
+              ) : (
                 <button
                   type="button"
                   onClick={handleSaveConnection}

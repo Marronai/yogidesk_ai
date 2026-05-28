@@ -2,6 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const ws = require('ws');
 const { createClient } = require('@supabase/supabase-js');
+const { supabase: serviceSupabase, supabaseAdmin } = require('../config/supabase');
 let Template = null;
 try {
   Template = require('../models/Template');
@@ -17,6 +18,7 @@ const supabase = supabaseUrl && supabaseAnonKey
     realtime: { transport: ws }
   })
   : null;
+const getDb = () => supabaseAdmin || serviceSupabase || supabase;
 
 const formatTemplateName = (value) => (
   String(value || '')
@@ -485,5 +487,76 @@ exports.getTemplates = async (req, res) => {
   } catch (err) {
     console.error('Get templates error:', err.message);
     return res.status(400).json({ success: false, message: err.message || 'Server Error' });
+  }
+};
+
+exports.syncTemplates = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.query?.userId || req.body?.userId;
+    if (!userId) return res.status(400).json({ success: false, message: 'userId is required.' });
+
+    await syncTemplatesFromMeta(userId);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('Template sync error:', err.response?.data || err.message || err);
+    return res.status(400).json({ success: false, message: err.response?.data?.error?.message || err.message || 'Template sync failed.' });
+  }
+};
+
+exports.deleteTemplate = async (req, res) => {
+  try {
+    const db = getDb();
+    if (!db?.from) throw new Error('Database connection unavailable.');
+
+    const userId = req.user?.id || req.query?.userId || req.body?.userId;
+    const templateId = req.params.id;
+    if (!userId || !templateId) {
+      return res.status(400).json({ success: false, message: 'Template ID and userId are required.' });
+    }
+
+    const { data: template, error: templateError } = await db
+      .from('whatsapp_templates')
+      .select('id,user_id,template_name')
+      .eq('id', templateId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (templateError) throw templateError;
+    if (!template) return res.status(404).json({ success: false, message: 'Template not found.' });
+
+    const credentials = await getUserMetaCredentials(userId);
+    if (!credentials.businessAccountId || !credentials.accessToken) {
+      return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
+    }
+
+    let metaResponse;
+    try {
+      metaResponse = await axios.delete(`https://graph.facebook.com/v20.0/${credentials.businessAccountId}/message_templates`, {
+        params: { name: template.template_name },
+        headers: { Authorization: `Bearer ${credentials.accessToken}` }
+      });
+    } catch (error) {
+      return res.status(error.response?.status || 400).json({
+        success: false,
+        message: error.response?.data?.error?.message || error.message || 'Meta template deletion failed.',
+        provider: error.response?.data || null
+      });
+    }
+
+    if (metaResponse?.data?.success !== true && metaResponse?.status !== 200) {
+      return res.status(400).json({ success: false, message: 'Meta did not confirm template deletion.', provider: metaResponse?.data || null });
+    }
+
+    const { error: deleteError } = await db
+      .from('whatsapp_templates')
+      .delete()
+      .eq('id', templateId)
+      .eq('user_id', userId);
+
+    if (deleteError) throw deleteError;
+    return res.status(200).json({ success: true, message: 'Template deleted from Meta and Yogi Desk.' });
+  } catch (err) {
+    console.error('Template delete error:', err.response?.data || err.message || err);
+    return res.status(400).json({ success: false, message: err.response?.data?.error?.message || err.message || 'Template deletion failed.' });
   }
 };

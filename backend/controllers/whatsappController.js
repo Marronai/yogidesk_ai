@@ -6,6 +6,7 @@ const missingSubAccountConfigResponse = {
     success: false,
     message: "WhatsApp API profile configuration missing for this sub-account."
 };
+const META_CONFIGURATION_LOCKED_MESSAGE = "Configuration locked. Contact Customer Support to modify your Meta integrations.";
 
 const shouldBypassCampaignWalletCheck = () => (
     process.env.NODE_ENV === 'development' ||
@@ -406,6 +407,12 @@ const isMissingColumnError = (error) => {
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
 
+const hasCompleteMetaCredentials = (row = {}) => Boolean(
+    String(row.meta_phone_number_id || row.whatsapp_phone_number_id || '').trim() &&
+    String(row.meta_waba_id || row.whatsapp_business_account_id || '').trim() &&
+    String(row.system_user_token || row.whatsapp_access_token || '').trim()
+);
+
 /**
  * Dedicated handler for saving Meta Connection credentials.
  * Strictly avoids supabase.auth.updateUser() to prevent session resets.
@@ -434,6 +441,26 @@ exports.saveMetaConnection = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid Meta configuration. All credentials are required." });
         }
 
+        const client = supabaseAdmin || supabase;
+        let existingResult = await client
+            .from('doctor_profiles')
+            .select('meta_phone_number_id,meta_waba_id,system_user_token')
+            .eq('id', sessionUser.id)
+            .maybeSingle();
+
+        if (existingResult.error && isMissingColumnError(existingResult.error)) {
+            existingResult = await client
+                .from('doctor_profiles')
+                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
+                .eq('id', sessionUser.id)
+                .maybeSingle();
+        }
+
+        if (existingResult.error && !isMissingColumnError(existingResult.error)) throw existingResult.error;
+        if (hasCompleteMetaCredentials(existingResult.data)) {
+            return res.status(403).json({ success: false, message: META_CONFIGURATION_LOCKED_MESSAGE });
+        }
+
         const isValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
         if (!isValid) {
             return res.status(400).json({ success: false, message: "Invalid Meta configuration or access token permissions." });
@@ -454,7 +481,6 @@ exports.saveMetaConnection = async (req, res) => {
             ...(email && { email: String(email).trim() })
         };
 
-        const client = supabaseAdmin || supabase;
         let { error } = await client
             .from('doctor_profiles')
             .upsert({ id: sessionUser.id, ...profilePayload }, { onConflict: 'id' });
