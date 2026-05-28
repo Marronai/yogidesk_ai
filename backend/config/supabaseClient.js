@@ -1,23 +1,15 @@
-// src/config/supabaseClient.js
-import { createClient } from '@supabase/supabase-js';
+const ws = require('ws');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Supabase client initialize kiya
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false },
+    realtime: { transport: ws }
+  })
+  : null;
 
-// Google Sign-In Trigger Function
-export const handleGoogleSignIn = async () => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      // Login hone ke baad user ko is page par bhejega jahan hum uska specialization fill karwayenge
-      redirectTo: `${window.location.origin}/signup`, 
-    },
-  });
-
-  if (error) {
-    console.error("Google Auth Error:", error.message);
-  }
-};
+module.exports = { supabase };
