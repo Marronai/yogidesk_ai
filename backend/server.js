@@ -573,7 +573,7 @@ const syncTemplatesFromMetaInBackground = async (userId) => {
     }
 
     const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
-    const response = await require('axios').get(graphUrl, {
+    const response = await axios.get(graphUrl, {
         headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
     });
 
@@ -695,7 +695,7 @@ app.get('/api/templates/sync', async (req, res) => {
         }
 
         const graphUrl = `https://graph.facebook.com/v21.0/${userMeta.meta_waba_id}/message_templates`;
-        const response = await require('axios').get(graphUrl, {
+        const response = await axios.get(graphUrl, {
             params: { access_token: userMeta.system_user_token }
         });
 
@@ -791,7 +791,7 @@ app.post('/api/templates', async (req, res) => {
         const metaLanguage = normalizeTemplateLanguage(language);
 
         const graphUrl = `https://graph.facebook.com/v21.0/${businessAccountId}/message_templates`;
-        const response = await require('axios').post(graphUrl, {
+        const response = await axios.post(graphUrl, {
             messaging_product: messagingProduct || 'whatsapp',
             name: formattedName,
             language: metaLanguage,
@@ -1231,7 +1231,7 @@ const sendCampaignMessageToMeta = async (queueItem) => {
 
     let response;
     try {
-        response = await require('axios').post(url, payload, {
+        response = await axios.post(url, payload, {
             headers: {
                 'Authorization': `Bearer ${finalToken}`,
                 'Content-Type': 'application/json'
@@ -1503,7 +1503,7 @@ setInterval(async () => {
             for (const t of userGroups[userId]) {
                 try {
                     const url = `https://graph.facebook.com/v21.0/${profile.meta_waba_id}/message_templates?name=${t.template_name}`;
-                    const res = await require('axios').get(url, {
+                    const res = await axios.get(url, {
                         headers: { Authorization: `Bearer ${profile.system_user_token}` }
                     });
                     const metaData = res.data.data?.[0];
