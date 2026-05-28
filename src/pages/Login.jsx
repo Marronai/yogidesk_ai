@@ -24,7 +24,7 @@ const Login = () => {
   // Login flow is intentionally two-step: password check first, dashboard routing only after OTP.
   const [step, setStep] = useState('login');
   const { fetchWalletData, fetchTransactions } = useWallet();
-  const { isAuthenticated, loading: authLoading, restoreSession } = useAuth();
+  const { isAuthenticated, loading: authLoading, restoreSession, loadUserProfile } = useAuth();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -180,6 +180,7 @@ const Login = () => {
         if (!restoredUser?.id) {
           throw new Error('Auth session could not be restored after OTP verification.');
         }
+        await loadUserProfile(restoredUser.id, { force: true });
         navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);

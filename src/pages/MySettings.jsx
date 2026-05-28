@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
-import { useWallet } from '../context/WalletContext';
+import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 
 const emptyForm = {
@@ -26,7 +26,9 @@ const Settings = () => {
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
-  const { userId } = useWallet(); // Get userId from global context
+  const { userProfile, loadUserProfile } = useAuth();
+  const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
+  const metaInputsLocked = isMetaActive || hasExistingConnection;
 
   const showToast = (type, text) => {
     setToast({ type, text });
@@ -52,25 +54,18 @@ const Settings = () => {
     setLoadingProfile(true);
 
     try {
-      const { authUser } = await getActiveAccount(); // userId is now from context
-      const { data, error } = await supabase
-        .from('doctor_profiles')
-        .select('name,email')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      const { data: connectionResult } = await api.get('/settings/meta-connection');
-      const connectionData = connectionResult?.data || {};
-      const metaPhoneNumberId = connectionData.meta_phone_number_id || '';
-      const metaWabaId = connectionData.meta_waba_id || '';
-      const systemUserToken = connectionData.system_user_token || '';
-      const connectionExists = Boolean(connectionData.is_locked || (metaPhoneNumberId && metaWabaId && systemUserToken));
+      const { authUser, userId: activeUserId } = await getActiveAccount();
+      const profile = userProfile?.id
+        ? userProfile
+        : await loadUserProfile(activeUserId, { force: false });
+      const metaPhoneNumberId = profile?.whatsapp_phone_number_id || '';
+      const metaWabaId = profile?.whatsapp_business_account_id || '';
+      const systemUserToken = profile?.system_user_token || '';
+      const connectionExists = Boolean(profile?.meta_configured || (metaPhoneNumberId && metaWabaId && systemUserToken));
 
       const nextForm = {
-        name: data?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
-        email: data?.email || authUser?.email || localStorage.getItem('user_email') || '',
+        name: profile?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
+        email: profile?.email || authUser?.email || localStorage.getItem('user_email') || '',
         whatsappPhoneNumberId: metaPhoneNumberId,
         whatsappBusinessAccountId: metaWabaId,
         whatsappAccessToken: connectionExists ? 'CONFIGURED' : systemUserToken,
@@ -90,7 +85,8 @@ const Settings = () => {
 
   useEffect(() => {
     hydrateProfile();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile]);
 
   const updateField = (field, value) => {
     setFormData((current) => ({
@@ -123,6 +119,10 @@ const Settings = () => {
 
   const handleSaveConnection = async (event) => {
     event.preventDefault();
+    if (isMetaActive) {
+      showToast('error', 'Integration Active. Contact support for modifications.');
+      return;
+    }
     setSavingConnection(true);
 
     try {
@@ -149,6 +149,8 @@ const Settings = () => {
           : 'disconnected'
       );
       setHasExistingConnection(Boolean(payload.whatsappPhoneNumberId && payload.whatsappBusinessAccountId && payload.whatsappAccessToken));
+      const { userId: activeUserId } = await getActiveAccount();
+      await loadUserProfile(activeUserId, { force: true });
       showToast('success', 'Connection settings saved successfully.');
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
@@ -275,7 +277,7 @@ const Settings = () => {
                     type="text"
                     value={formData.whatsappPhoneNumberId}
                     onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
-                    disabled={hasExistingConnection}
+                    disabled={metaInputsLocked}
                     placeholder="Enter your WhatsApp Phone Number ID"
                     className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   />
@@ -288,7 +290,7 @@ const Settings = () => {
                   type="text"
                   value={formData.whatsappBusinessAccountId}
                   onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
-                  disabled={hasExistingConnection}
+                  disabled={metaInputsLocked}
                   placeholder="Enter your WABA ID"
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 />
@@ -300,7 +302,7 @@ const Settings = () => {
                   type="password"
                   value={formData.whatsappAccessToken}
                   onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
-                  disabled={hasExistingConnection}
+                  disabled={metaInputsLocked}
                   placeholder="EAAMz..."
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                 />
@@ -312,7 +314,7 @@ const Settings = () => {
                 Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
               </div>
 
-              {hasExistingConnection ? (
+              {metaInputsLocked ? (
                 <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800 sm:w-auto">
                   Integration Active. Contact support for modifications.
                 </div>
@@ -329,7 +331,7 @@ const Settings = () => {
               )}
             </div>
 
-            {hasExistingConnection && (
+            {metaInputsLocked && (
               <p className="text-xs text-slate-400 mt-2">Your API connection is locked securely. To modify or transfer credentials, please submit an official request to Yogi Desk Admin Support.</p>
             )}
           </section>

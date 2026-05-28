@@ -5,6 +5,7 @@ import { supabase } from '../supabaseClient';
 import api from '../utils/api';
 import { calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext'; // Import useWallet hook
+import { useAuth } from '../context/AuthContext';
 
 const TemplateManager = () => {
   const navigate = useNavigate();
@@ -31,6 +32,7 @@ const TemplateManager = () => {
   const [notice, setNotice] = useState(null);
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
   const { wallet } = useWallet(); // Consume wallet from global context
+  const { userProfile } = useAuth();
   const [selectedSpecialty, setSelectedSpecialty] = useState('General Physician');
 
   const fetchTemplates = useCallback(async ({ silent = false } = {}) => {
@@ -59,6 +61,10 @@ const TemplateManager = () => {
     try {
       if (!silent) setIsSyncingStatuses(true);
       const userId = localStorage.getItem('user_id');
+      if (!userProfile?.meta_configured) {
+        await fetchTemplates({ silent: true });
+        return;
+      }
       await api.get('/templates/sync', { params: { userId } });
       await fetchTemplates({ silent });
     } catch (err) {
@@ -67,7 +73,7 @@ const TemplateManager = () => {
     } finally {
       if (!silent) setIsSyncingStatuses(false);
     }
-  }, [fetchTemplates]);
+  }, [fetchTemplates, userProfile]);
 
   const fetchDashboardTemplates = useCallback(async () => {
     try {
@@ -79,8 +85,8 @@ const TemplateManager = () => {
       };
       const response = await api.get('/templates/dashboard', { params });
       setDashboardTemplates(Array.isArray(response.data?.templates) ? response.data.templates : []);
-      setDashboardSpecialization(response.data?.specialization || 'General Physician');
-      setBookingLink(response.data?.bookingLink || '');
+      setDashboardSpecialization(response.data?.specialization || userProfile?.specialization || '');
+      setBookingLink(response.data?.bookingLink || userProfile?.booking_link || '');
       setError('');
     } catch (err) {
       console.error('Dashboard template library failed:', err);
@@ -89,7 +95,7 @@ const TemplateManager = () => {
     } finally {
       setLibraryLoading(false);
     }
-  }, [activeLang]);
+  }, [activeLang, userProfile]);
 
   useEffect(() => {
     const fetchPlanData = async () => {
@@ -154,25 +160,15 @@ const TemplateManager = () => {
 
   useEffect(() => {
     const fetchMetaBusinessId = async () => {
-      const userId = localStorage.getItem('user_id');
-      if (!userId) return;
-
-      const { data } = await supabase
-        .from('doctor_profiles')
-        .select('meta_business_manager_id,meta_business_id,business_manager_id')
-        .eq('id', userId)
-        .maybeSingle();
-
       setMetaBusinessManagerId(
-        data?.meta_business_manager_id ||
-        data?.meta_business_id ||
-        data?.business_manager_id ||
+        userProfile?.meta_business_manager_id ||
+        userProfile?.whatsapp_business_id ||
         ''
       );
     };
 
     fetchMetaBusinessId();
-  }, []);
+  }, [userProfile]);
 
   const planLimits = {
     'Starter Clinic': 20,

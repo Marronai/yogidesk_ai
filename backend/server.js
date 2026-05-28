@@ -906,35 +906,14 @@ app.get('/api/templates/sync', async (req, res) => {
         }
 
         const db = supabaseAdmin || supabase;
-        let { data: userMeta, error: credentialError } = await db
-            .from('doctor_profiles')
-            .select('system_user_token,meta_waba_id')
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (credentialError && isMissingColumnError(credentialError)) {
-            const fallbackResult = await db
-                .from('doctor_profiles')
-                .select('whatsapp_access_token,whatsapp_business_account_id')
-                .eq('id', userId)
-                .maybeSingle();
-            userMeta = fallbackResult.data
-                ? {
-                    system_user_token: fallbackResult.data.whatsapp_access_token,
-                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id
-                }
-                : null;
-            credentialError = fallbackResult.error;
+        const metaConfig = await getRawMetaCredentialsForUser(userId);
+        if (!metaConfig.meta_configured || !metaConfig.accessToken) {
+            return res.status(200).json({ success: false, meta_configured: false, templates: [], message: 'WhatsApp Business Account credentials are not configured.' });
         }
 
-        if (credentialError) throw credentialError;
-        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
-            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
-        }
-
-        const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v20.0/${metaConfig.whatsapp_business_account_id}/message_templates`;
         const response = await axios.get(graphUrl, {
-            headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
+            headers: { Authorization: `Bearer ${metaConfig.accessToken}` }
         });
 
         const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -1006,6 +985,28 @@ const normalizeSpecialization = (value) => {
     return sanitizePlainText(value, 80);
 };
 
+const readSingleRowSafely = async ({ table, select, column = 'id', value }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !table || !select || !value) return { data: null, error: null };
+
+    try {
+        const result = await db
+            .from(table)
+            .select(select)
+            .eq(column, value)
+            .maybeSingle();
+
+        if (result.error && (isMissingColumnError(result.error) || result.error.code === 'PGRST205')) {
+            return { data: null, error: null };
+        }
+
+        return result;
+    } catch (error) {
+        console.warn(`Safe profile lookup failed for ${table}:`, error.message || error);
+        return { data: null, error };
+    }
+};
+
 const getDoctorTemplateProfile = async (userId) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !userId) return {};
@@ -1018,11 +1019,11 @@ const getDoctorTemplateProfile = async (userId) => {
     ];
 
     for (const lookup of profileLookups) {
-        const { data, error } = await db
-            .from(lookup.table)
-            .select(lookup.select)
-            .eq('id', userId)
-            .maybeSingle();
+        const { data, error } = await readSingleRowSafely({
+            table: lookup.table,
+            select: lookup.select,
+            value: userId
+        });
 
         if (!error && data) {
             const rawSpecialization = data.specialization || data.business_category || data.industry || '';
@@ -1043,6 +1044,103 @@ const getDoctorTemplateProfile = async (userId) => {
         specialization: '',
         bookingLink: `https://yogidesk-ai.com/book/${userId}`
     };
+};
+
+const getMetaConfigForUser = async (userId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !userId) {
+        return {
+            meta_configured: false,
+            whatsapp_phone_number_id: '',
+            whatsapp_business_account_id: '',
+            meta_business_manager_id: '',
+            system_user_token: ''
+        };
+    }
+
+    const lookups = [
+        {
+            table: 'doctor_profiles',
+            select: 'meta_phone_number_id,meta_waba_id,system_user_token,meta_business_manager_id,meta_business_id,business_id'
+        },
+        {
+            table: 'doctor_profiles',
+            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_id,business_id'
+        },
+        {
+            table: 'users',
+            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_manager_id,meta_business_id,business_id'
+        },
+        {
+            table: 'clinics',
+            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_manager_id,meta_business_id,business_id'
+        }
+    ];
+
+    for (const lookup of lookups) {
+        const { data, error } = await readSingleRowSafely({
+            table: lookup.table,
+            select: lookup.select,
+            value: userId
+        });
+
+        if (error && !isMissingColumnError(error) && error.code !== 'PGRST205') {
+            console.warn('Meta config lookup failed:', error.message || error);
+        }
+
+        if (!data) continue;
+
+        const phoneNumberId = data.meta_phone_number_id || data.whatsapp_phone_number_id || '';
+        const businessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || '';
+        const accessToken = data.system_user_token || data.whatsapp_access_token || '';
+        const businessManagerId = data.meta_business_manager_id || data.meta_business_id || data.business_id || '';
+
+        return {
+            meta_configured: Boolean(phoneNumberId && businessAccountId && accessToken),
+            whatsapp_phone_number_id: phoneNumberId,
+            whatsapp_business_account_id: businessAccountId,
+            whatsapp_business_id: businessManagerId,
+            meta_business_manager_id: businessManagerId,
+            system_user_token: accessToken ? 'CONFIGURED' : ''
+        };
+    }
+
+    return {
+        meta_configured: false,
+        whatsapp_phone_number_id: '',
+        whatsapp_business_account_id: '',
+        whatsapp_business_id: '',
+        meta_business_manager_id: '',
+        system_user_token: ''
+    };
+};
+
+const getRawMetaCredentialsForUser = async (userId) => {
+    const config = await getMetaConfigForUser(userId);
+    if (!config.meta_configured) {
+        return { ...config, accessToken: '' };
+    }
+
+    const tokenLookups = [
+        { table: 'doctor_profiles', select: 'system_user_token' },
+        { table: 'doctor_profiles', select: 'whatsapp_access_token' },
+        { table: 'users', select: 'system_user_token' },
+        { table: 'users', select: 'whatsapp_access_token' },
+        { table: 'clinics', select: 'system_user_token' },
+        { table: 'clinics', select: 'whatsapp_access_token' }
+    ];
+
+    for (const lookup of tokenLookups) {
+        const { data } = await readSingleRowSafely({
+            table: lookup.table,
+            select: lookup.select,
+            value: userId
+        });
+        const token = data?.system_user_token || data?.whatsapp_access_token || '';
+        if (token) return { ...config, accessToken: token };
+    }
+
+    return { ...config, meta_configured: false, accessToken: '' };
 };
 
 const languageToMetaLocale = (language) => {
@@ -1146,6 +1244,43 @@ app.get('/api/templates/dashboard', async (req, res) => {
     } catch (error) {
         console.error('Template dashboard error:', error.message || error);
         return res.status(400).json({ success: false, message: error.message || 'Unable to load template dashboard.' });
+    }
+});
+
+app.get('/api/profile/context', async (req, res) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        const profile = await getDoctorTemplateProfile(userId);
+        const metaConfig = await getMetaConfigForUser(userId);
+        const specialization = normalizeSpecialization(profile.specialization);
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                id: userId,
+                name: profile.name || sessionUser.user_metadata?.full_name || sessionUser.email || 'Doctor',
+                email: sessionUser.email || '',
+                specialization,
+                booking_link: profile.bookingLink || `https://yogidesk-ai.com/book/${userId}`,
+                ...metaConfig
+            }
+        });
+    } catch (error) {
+        console.error('Profile context error:', error.message || error);
+        return res.status(200).json({
+            success: false,
+            profile: {
+                meta_configured: false,
+                specialization: '',
+                whatsapp_phone_number_id: '',
+                whatsapp_business_account_id: '',
+                whatsapp_business_id: ''
+            }
+        });
     }
 });
 
@@ -1484,39 +1619,18 @@ app.get('/api/settings/meta-connection', async (req, res) => {
             return res.status(401).json({ success: false, message: "Unauthorized" });
         }
 
-        const client = supabaseAdmin || supabase;
-        let { data, error } = await client
-            .from('doctor_profiles')
-            .select('meta_phone_number_id,meta_waba_id,system_user_token')
-            .eq('id', sessionUser.id)
-            .maybeSingle();
-
-        if (error && isMissingColumnError(error)) {
-            const fallbackResult = await client
-                .from('doctor_profiles')
-                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-                .eq('id', sessionUser.id)
-                .maybeSingle();
-
-            data = fallbackResult.data
-                ? {
-                    meta_phone_number_id: fallbackResult.data.whatsapp_phone_number_id || '',
-                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id || '',
-                    system_user_token: fallbackResult.data.whatsapp_access_token || ''
-                }
-                : null;
-            error = fallbackResult.error;
-        }
-
-        if (error) throw error;
+        const metaConfig = await getMetaConfigForUser(sessionUser.id);
 
         return res.status(200).json({
             success: true,
             data: {
-                meta_phone_number_id: data?.meta_phone_number_id || '',
-                meta_waba_id: data?.meta_waba_id || '',
-                system_user_token: data?.system_user_token ? 'CONFIGURED' : '',
-                is_locked: hasCompleteMetaCredentials(data || {})
+                meta_phone_number_id: metaConfig.whatsapp_phone_number_id || '',
+                meta_waba_id: metaConfig.whatsapp_business_account_id || '',
+                whatsapp_business_id: metaConfig.whatsapp_business_id || '',
+                meta_business_manager_id: metaConfig.meta_business_manager_id || '',
+                system_user_token: metaConfig.system_user_token || '',
+                meta_configured: metaConfig.meta_configured,
+                is_locked: metaConfig.meta_configured
             }
         });
     } catch (error) {

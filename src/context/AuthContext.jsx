@@ -7,8 +7,31 @@ import {
   getStoredUserId,
   persistSupabaseSession,
 } from '../utils/authSession';
+import api from '../utils/api';
 
 const AuthContext = createContext(null);
+const PROFILE_SNAPSHOT_KEY = 'yogidesk_user_profile_snapshot';
+
+const readProfileSnapshot = () => {
+  try {
+    const raw = localStorage.getItem(PROFILE_SNAPSHOT_KEY) || sessionStorage.getItem(PROFILE_SNAPSHOT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeProfileSnapshot = (profile) => {
+  if (!profile || typeof profile !== 'object') return;
+  const serialized = JSON.stringify(profile);
+  localStorage.setItem(PROFILE_SNAPSHOT_KEY, serialized);
+  sessionStorage.setItem(PROFILE_SNAPSHOT_KEY, serialized);
+};
+
+const clearProfileSnapshot = () => {
+  localStorage.removeItem(PROFILE_SNAPSHOT_KEY);
+  sessionStorage.removeItem(PROFILE_SNAPSHOT_KEY);
+};
 
 const userFromStoredSession = () => {
   const token = getStoredAuthToken();
@@ -33,7 +56,32 @@ const userFromStoredSession = () => {
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(() => readProfileSnapshot());
   const [loading, setLoading] = useState(true);
+
+  const loadUserProfile = useCallback(async (userId, { force = false } = {}) => {
+    if (!userId) return null;
+
+    const existing = readProfileSnapshot();
+    if (existing?.id === userId && !force) {
+      setUserProfile(existing);
+      return existing;
+    }
+
+    try {
+      const { data } = await api.get('/profile/context', { params: { userId } });
+      const profile = data?.profile || { id: userId, meta_configured: false };
+      writeProfileSnapshot(profile);
+      setUserProfile(profile);
+      return profile;
+    } catch (error) {
+      console.warn('Unable to load profile context.', error?.response?.data?.message || error?.message || error);
+      const fallbackProfile = existing?.id === userId ? existing : { id: userId, meta_configured: false, specialization: '' };
+      writeProfileSnapshot(fallbackProfile);
+      setUserProfile(fallbackProfile);
+      return fallbackProfile;
+    }
+  }, []);
 
   const restoreSession = useCallback(async () => {
     setLoading(true);
@@ -44,25 +92,30 @@ export const AuthProvider = ({ children }) => {
       if (supabaseUser?.id) {
         persistSupabaseSession(supabaseUser);
         setUser(supabaseUser);
+        await loadUserProfile(supabaseUser.id);
         return supabaseUser;
       }
 
       const storedUser = userFromStoredSession();
       setUser(storedUser);
+      if (storedUser?.id) await loadUserProfile(storedUser.id);
       return storedUser;
     } catch (error) {
       console.warn('Unable to restore auth session.', error?.message || error);
       const storedUser = userFromStoredSession();
       setUser(storedUser);
+      if (storedUser?.id) await loadUserProfile(storedUser.id);
       return storedUser;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadUserProfile]);
 
   const logout = useCallback(async () => {
     clearStoredAuthSession();
+    clearProfileSnapshot();
     setUser(null);
+    setUserProfile(null);
     await supabase.auth.signOut().catch(() => {});
   }, []);
 
@@ -83,6 +136,7 @@ export const AuthProvider = ({ children }) => {
         if (session?.user?.id) {
           persistSupabaseSession(session.user);
           setUser(session.user);
+          loadUserProfile(session.user.id);
         }
         setLoading(false);
       }
@@ -90,6 +144,7 @@ export const AuthProvider = ({ children }) => {
       if (event === 'SIGNED_OUT') {
         const storedUser = userFromStoredSession();
         setUser(storedUser);
+        if (storedUser?.id) loadUserProfile(storedUser.id);
         setLoading(false);
       }
     });
@@ -98,15 +153,17 @@ export const AuthProvider = ({ children }) => {
       active = false;
       authListener?.subscription?.unsubscribe();
     };
-  }, [restoreSession]);
+  }, [loadUserProfile, restoreSession]);
 
   const value = useMemo(() => ({
     user,
+    userProfile,
     loading,
     isAuthenticated: Boolean(user?.id || getStoredAuthToken()),
     restoreSession,
+    loadUserProfile,
     logout,
-  }), [loading, logout, restoreSession, user]);
+  }), [loadUserProfile, loading, logout, restoreSession, user, userProfile]);
 
   return (
     <AuthContext.Provider value={value}>
@@ -115,6 +172,7 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
