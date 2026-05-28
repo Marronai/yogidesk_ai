@@ -1,14 +1,38 @@
-const nodemailer = require('nodemailer');
+const axios = require('axios');
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_PORT || 587,
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
+const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || 'no-reply@yogidesk-ai.com';
+const ONBOARDING_FROM_EMAIL = process.env.BREVO_ONBOARDING_FROM_EMAIL || 'support@yogidesk-ai.com';
+
+const sendBrevoEmail = async ({ to, subject, htmlContent, senderType = 'system' }) => {
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+        console.error('Brevo email skipped: BREVO_API_KEY is not configured.');
+        return false;
+    }
+
+    const fromEmail = senderType === 'onboarding' ? ONBOARDING_FROM_EMAIL : DEFAULT_FROM_EMAIL;
+
+    try {
+        await axios.post(BREVO_EMAIL_API_URL, {
+            sender: { name: 'YogiDesk AI', email: fromEmail },
+            to: [{ email: to }],
+            subject,
+            htmlContent,
+        }, {
+            headers: {
+                'api-key': apiKey,
+                'Content-Type': 'application/json',
+            },
+            timeout: 10000,
+        });
+        console.log(`Brevo mail successfully sent to ${to} via ${fromEmail}`);
+        return true;
+    } catch (error) {
+        console.error('Brevo Email Error:', error.response?.data || error.message || error);
+        return false;
+    }
+};
 
 const getBaseTemplate = (content) => `
 <div style="font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; color: #333;">
@@ -44,18 +68,12 @@ exports.sendWelcomeEmail = async (email, name, businessName) => {
         </div>
         <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">If you need any assistance, our dedicated enterprise support team is always here for you.</p>
     `;
-    try {
-        await transporter.sendMail({
-            from: `"YogiDesk AI" <${process.env.SMTP_USER}>`,
-            to: email,
-            subject: "Welcome to our Family - YogiDesk AI",
-            html: getBaseTemplate(content)
-        });
-        return true;
-    } catch (error) {
-        console.error("Email Error:", error);
-        return false;
-    }
+    return sendBrevoEmail({
+        to: email,
+        subject: "Welcome to our Family - YogiDesk AI",
+        htmlContent: getBaseTemplate(content),
+        senderType: 'onboarding',
+    });
 };
 
 exports.sendLoginAlert = async (email, name, deviceInfo, ipAddress) => {
@@ -71,18 +89,11 @@ exports.sendLoginAlert = async (email, name, deviceInfo, ipAddress) => {
         </div>
         <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">If this was you, no further action is required. If you do not recognize this activity, please secure your account immediately or contact support.</p>
     `;
-    try {
-        await transporter.sendMail({
-            from: `"YogiDesk AI Security" <${process.env.SMTP_USER}>`,
-            to: email,
-            subject: "Security Alert: New Login - YogiDesk AI",
-            html: getBaseTemplate(content)
-        });
-        return true;
-    } catch (error) {
-        console.error("Email Error:", error);
-        return false;
-    }
+    return sendBrevoEmail({
+        to: email,
+        subject: "Security Alert: New Login - YogiDesk AI",
+        htmlContent: getBaseTemplate(content),
+    });
 };
 
 exports.sendOTP = async (email, name, otp) => {
@@ -95,23 +106,15 @@ exports.sendOTP = async (email, name, otp) => {
         </div>
         <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">This code will expire in 10 minutes. Please do not share it with anyone.</p>
     `;
-    try {
-        await transporter.sendMail({
-            from: `"YogiDesk AI Security" <${process.env.SMTP_USER}>`,
-            to: email,
-            subject: "Your OTP Code - YogiDesk AI",
-            html: getBaseTemplate(content)
-        });
-        return true;
-    } catch (error) {
-        console.error("Email Error:", error);
-        return false;
-    }
+    return sendBrevoEmail({
+        to: email,
+        subject: "Your OTP Code - YogiDesk AI",
+        htmlContent: getBaseTemplate(content),
+    });
 };
 
 exports.sendDirectEmail = async (email, subject, htmlContent) => {
-    try {
-        await transporter.sendMail({ from: `"YogiDesk AI" <${process.env.SMTP_USER}>`, to: email, subject, html: htmlContent });
-        return true;
-    } catch (error) { return false; }
+    return sendBrevoEmail({ to: email, subject, htmlContent });
 };
+
+exports.verifyConnection = async () => Boolean(process.env.BREVO_API_KEY);
