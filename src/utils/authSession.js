@@ -1,5 +1,20 @@
 import { ensureWallet } from './wallet';
 
+export const getStoredAuthToken = () => localStorage.getItem('token') || sessionStorage.getItem('token');
+
+export const getStoredUserId = () => localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
+
+export const getStoredUserEmail = () => localStorage.getItem('user_email') || sessionStorage.getItem('user_email') || '';
+
+export const clearStoredAuthSession = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_id');
+  localStorage.removeItem('user_email');
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('user_id');
+  sessionStorage.removeItem('user_email');
+};
+
 export const persistSupabaseSession = (user, overrides = {}) => {
   if (!user?.id) return;
 

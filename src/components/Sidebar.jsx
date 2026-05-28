@@ -16,6 +16,7 @@ import {
 import { getWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
@@ -23,6 +24,7 @@ const fallbackClinicName = () => localStorage.getItem('clinic_name') || localSto
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
   const [lifetimeCount, setLifetimeCount] = useState(0);
@@ -140,7 +142,7 @@ const Sidebar = () => {
         <Link to="/dashboard/support" className={menuClass('/dashboard/support')}><LifeBuoy size={20} /><span>Support</span></Link>
         <Link to="/dashboard/settings" className={menuClass('/dashboard/settings')}><Settings size={20} /><span>Settings</span></Link>
         <button
-          onClick={() => { localStorage.clear(); navigate('/login'); }}
+          onClick={async () => { await logout(); navigate('/login'); }}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 hover:text-red-600 transition-all font-medium mt-2"
         >
           <LogOut size={20} /><span>Logout</span>

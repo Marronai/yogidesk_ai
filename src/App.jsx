@@ -40,6 +40,7 @@ import Footer from './components/Footer';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import SuperAdminRoute from './components/SuperAdminRoute';
 import { WalletProvider } from './context/WalletContext';
+import { AuthProvider } from './context/AuthContext';
  // Agar navbar bhi global hai
 
 
@@ -139,9 +140,11 @@ const AppContent = () => {
 const App = () => {
   return (
     <BrowserRouter>
-      <WalletProvider>
-        <AppContent />
-      </WalletProvider>
+      <AuthProvider>
+        <WalletProvider>
+          <AppContent />
+        </WalletProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 };

@@ -1,12 +1,18 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const ProtectedRoute = () => {
-  // Check karein ki user ke paas token hai ya nahi
-  // (Yeh wahi key honi chahiye jo Login.jsx/sessionStorage me set ki thi)
-  const isAuthenticated = localStorage.getItem('token') || sessionStorage.getItem('token');
+  const { isAuthenticated, loading } = useAuth();
 
-  // Agar token hai to Dashboard dikhao (Outlet), nahi to Login par bhejo
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="h-10 w-10 rounded-full border-4 border-orange-100 border-t-orange-600 animate-spin" />
+      </div>
+    );
+  }
+
   return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
 };
 

@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
 import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
-import { persistSupabaseSession } from '../utils/authSession';
+import { clearStoredAuthSession, persistSupabaseSession } from '../utils/authSession';
 import { useWallet } from '../context/WalletContext';
+import { useAuth } from '../context/AuthContext';
 import api, { API_URL } from '../utils/api';
 
 const Login = () => {
@@ -20,6 +21,7 @@ const Login = () => {
   // Login Steps State (1 = Credentials, 2 = Fallback Link verification state)
   const [step, setStep] = useState(1);
   const { fetchWalletData, fetchTransactions } = useWallet();
+  const { isAuthenticated, loading: authLoading, restoreSession } = useAuth();
   const [otp, setOtp] = useState(["", "", "", "", "", ""]); 
 
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -33,6 +35,11 @@ const Login = () => {
   ];
 
   useEffect(() => {
+    if (!authLoading && isAuthenticated && step === 1) {
+      navigate('/dashboard', { replace: true });
+      return undefined;
+    }
+
     // 🛡️ DEVICE FINGERPRINT SECURITY CHECK
     const verifyFingerprint = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -51,7 +58,7 @@ const Login = () => {
     verifyFingerprint();
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % slides.length), 4000);
     return () => clearInterval(timer);
-  }, []);
+  }, [authLoading, isAuthenticated, navigate, step, slides.length]);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -151,6 +158,7 @@ const Login = () => {
           fetchWalletData(supabaseUser.id),
           fetchTransactions(supabaseUser.id)
         ]);
+        await restoreSession();
         navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
@@ -168,10 +176,7 @@ const Login = () => {
     try {
       if (step === 1) {
         // Clear any lingering session keys
-        localStorage.removeItem('user_id');
-        localStorage.removeItem('token');
-        sessionStorage.removeItem('user_id');
-        sessionStorage.removeItem('token');
+        clearStoredAuthSession();
 
         // --- SUPABASE PASSWORD SIGN IN ---
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -184,7 +189,9 @@ const Login = () => {
         if (data?.user) {
           await startLoginEmailVerification(data.user, cleanEmail);
           setPendingCredentials({ email: cleanEmail, password: formData.password });
+          clearStoredAuthSession();
           await supabase.auth.signOut({ scope: 'local' });
+          clearStoredAuthSession();
         }
       } else {
         const code = otp.join('');
