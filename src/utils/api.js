@@ -3,8 +3,11 @@ import { supabase } from '../config/supabaseClient';
 
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
+const forceVpsHttp = (value) => (
+  stripApiSuffix(value).replace(/^https:\/\/72\.62\.79\.171(?=:5000|\/|$)/i, 'http://72.62.79.171')
+);
 
-const API_URL = stripApiSuffix(
+const API_URL = forceVpsHttp(
   import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://72.62.79.171:5000'
 );
 const API_BASE_URL = `${API_URL}/api`;
