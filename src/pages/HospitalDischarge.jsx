@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Search, Send, CheckCircle, FileSpreadsheet, X } from 'lucide-react';
-import axios from 'axios';
-import { useWallet } from '../context/WalletContext';
+import { UserPlus, Search, CheckCircle, X } from 'lucide-react';
+import api from '../utils/api';
 
 const HospitalDischarge = () => {
   const [patients, setPatients] = useState([]);
@@ -11,7 +10,7 @@ const HospitalDischarge = () => {
 
   const fetchPatients = async () => {
     const token = localStorage.getItem('token');
-    const res = await axios.get('http://localhost:5000/api/hospital/patients', {
+    const res = await api.get('/hospital/patients', {
       headers: { Authorization: `Bearer ${token}` }
     });
     setPatients(res.data);
@@ -24,7 +23,7 @@ const HospitalDischarge = () => {
     e.preventDefault();
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/api/hospital/admit', newPatient, {
+      await api.post('/hospital/admit', newPatient, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setShowModal(false);
@@ -39,7 +38,7 @@ const HospitalDischarge = () => {
     if (!window.confirm("Discharge this patient and send WhatsApp feedback?")) return;
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:5000/api/hospital/discharge', { patientId }, {
+      await api.post('/hospital/discharge', { patientId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       fetchPatients();

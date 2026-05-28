@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '../utils/api';
 
 // This component is for manual UPI proof upload, not directly related to PayU flow
 const Subscription = () => {
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
-  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
 
   const handleUpload = async (event) => {
     event.preventDefault();
@@ -21,7 +20,7 @@ const Subscription = () => {
 
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(`${API_URL}/payments/upload-proof`, formData, {
+      const res = await api.post('/payments/upload-proof', formData, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data',

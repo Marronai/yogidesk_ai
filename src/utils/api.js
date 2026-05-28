@@ -4,7 +4,9 @@ import { supabase } from '../config/supabaseClient';
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
 
-const API_URL = stripApiSuffix(import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com');
+const API_URL = stripApiSuffix(
+  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://72.62.79.171:5000'
+);
 const API_BASE_URL = `${API_URL}/api`;
 
 // Create axios instance with default config

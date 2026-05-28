@@ -10,9 +10,6 @@ const ForgotPassword = () => {
   const [msg, setMsg] = useState({ type: '', text: '' });
   const [isThrottled, setIsThrottled] = useState(false);
 
-  // 🔒 SECURITY PATCH: Hide Backend URL
-  const API_URL = import.meta.env.VITE_API_URL || 'https://yogidesk-ai.com';
-
   const validateEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { CheckCircle, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { useWallet } from '../context/WalletContext';
+import api from '../utils/api';
 
 const PaymentStatus = () => {
   const [searchParams] = useSearchParams();
@@ -17,7 +17,7 @@ const PaymentStatus = () => {
         const token = localStorage.getItem('token');
         
         // 🛡️ Backend verification call
-        const res = await axios.post('http://localhost:5000/api/payments/verify', 
+        const res = await api.post('/payments/verify',
           { order_id: orderId },
           { headers: { Authorization: `Bearer ${token}` } }
         );
