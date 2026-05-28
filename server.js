@@ -21,6 +21,9 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.get('/', (req, res) => {
+    return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
+});
 app.use('/api/payments', paymentRoutes);
 
 console.log("🚀 Yogi Desk Root Engine Initializing...");

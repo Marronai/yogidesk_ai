@@ -34,7 +34,9 @@ app.use(express.json({
     }
 }));
 app.use(express.urlencoded({ extended: true }));
-app.get('/', (req, res) => res.status(200).json({ status: "Yogi Desk API Running" }));
+app.get('/', (req, res) => {
+    return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
+});
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/payments', paymentRoutes);
@@ -2019,6 +2021,13 @@ app.get('/api/settings/meta-connection', async (req, res) => {
 });
 
 app.post('/api/settings/meta-connection', async (req, res, next) => {
+    const sessionUser = await getSupabaseSessionUser(req);
+    if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized" });
+    req.user = sessionUser;
+    next();
+}, saveMetaConnection);
+
+app.post('/api/payments/meta-connection', async (req, res, next) => {
     const sessionUser = await getSupabaseSessionUser(req);
     if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized" });
     req.user = sessionUser;

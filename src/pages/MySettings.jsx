@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
-import api from '../utils/api';
+import api, { API_BASE_URL } from '../utils/api';
 
 const emptyForm = {
   name: '',
@@ -137,10 +137,10 @@ const Settings = () => {
         whatsappAccessToken: formData.whatsappAccessToken,
       };
 
-      const res = await api.post('/settings/meta-connection', payload);
+      const res = await api.post(`${API_BASE_URL}/settings/meta-connection`, payload);
 
-      if (res.data && res.data.success === true) {
-        showToast('success', res.data.message || 'Meta settings stored successfully!');
+      if (res.data && (res.data.success === true || res.status === 200)) {
+        showToast('success', 'Meta credentials updated successfully!');
         setConnectionStatus('connected');
         setHasExistingConnection(true);
         setFormData((current) => ({
