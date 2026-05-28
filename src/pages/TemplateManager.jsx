@@ -25,8 +25,9 @@ const TemplateManager = () => {
   const [activeLang, setActiveLang] = useState('All');
   const [libraryPage, setLibraryPage] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [customBodyText, setCustomBodyText] = useState('');
-  const [variableSamples, setVariableSamples] = useState({});
+  const [editableBody, setEditableBody] = useState('');
+  const [parsedVariables, setParsedVariables] = useState([]);
+  const [variablesPayload, setVariablesPayload] = useState({});
   const [useMedia, setUseMedia] = useState(false);
   const [mediaUrl, setMediaUrl] = useState('');
   const [mediaFile, setMediaFile] = useState(null);
@@ -269,37 +270,40 @@ const TemplateManager = () => {
     return index === 3 ? '20' : `Sample ${index}`;
   }, [bookingLink]);
 
-  const bodyPlaceholders = useMemo(
-    () => collectBodyPlaceholders(customBodyText),
-    [collectBodyPlaceholders, customBodyText]
-  );
-
-  const bodyExampleValues = useMemo(
-    () => bodyPlaceholders.map((index) => variableSamples[index] || defaultSampleForPlaceholder(index)),
-    [bodyPlaceholders, defaultSampleForPlaceholder, variableSamples]
-  );
-
-  const examplesPayload = useMemo(
-    () => ({ body_text: bodyExampleValues.length ? [bodyExampleValues] : [[]] }),
-    [bodyExampleValues]
-  );
-
   useEffect(() => {
     if (!selectedTemplate) return;
-    setVariableSamples((current) => {
+    const variables = editableBody.match(/\{\{\d+\}\}/g) || [];
+    const uniqueVariables = [...new Set(variables)]
+      .map((token) => Number(token.replace(/[{}]/g, '')))
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+
+    setParsedVariables(uniqueVariables);
+    setVariablesPayload((current) => {
       const next = {};
-      bodyPlaceholders.forEach((index) => {
+      uniqueVariables.forEach((index) => {
         next[index] = current[index] || defaultSampleForPlaceholder(index);
       });
       return next;
     });
-  }, [bodyPlaceholders, defaultSampleForPlaceholder, selectedTemplate]);
+  }, [defaultSampleForPlaceholder, editableBody, selectedTemplate]);
+
+  const bodyExampleValues = useMemo(
+    () => parsedVariables.map((index) => variablesPayload[index] || ''),
+    [parsedVariables, variablesPayload]
+  );
+
+  const metaExamples = useMemo(
+    () => ({ body_text: bodyExampleValues.length ? [bodyExampleValues] : [[]] }),
+    [bodyExampleValues]
+  );
 
   const openTemplatePreview = (template) => {
     setSelectedTemplate(template);
-    setCustomBodyText(template?.body_text || '');
+    setEditableBody(template?.body_text || '');
     const placeholders = collectBodyPlaceholders(template?.body_text || '');
-    setVariableSamples(Object.fromEntries(placeholders.map((index) => [index, defaultSampleForPlaceholder(index)])));
+    setParsedVariables(placeholders);
+    setVariablesPayload(Object.fromEntries(placeholders.map((index) => [index, defaultSampleForPlaceholder(index)])));
     setUseMedia(false);
     setMediaType('IMAGE');
     setMediaUrl('');
@@ -309,8 +313,9 @@ const TemplateManager = () => {
 
   const closeTemplatePreview = () => {
     setSelectedTemplate(null);
-    setCustomBodyText('');
-    setVariableSamples({});
+    setEditableBody('');
+    setParsedVariables([]);
+    setVariablesPayload({});
     setUseMedia(false);
     setMediaUrl('');
     setMediaFile(null);
@@ -351,11 +356,11 @@ const TemplateManager = () => {
       const payload = new FormData();
       payload.append('userId', userId || '');
       payload.append('templateId', selectedTemplate.id);
-      payload.append('bodyText', customBodyText || selectedTemplate.body_text || '');
+      payload.append('bodyText', editableBody || selectedTemplate.body_text || '');
       payload.append('language', selectedTemplate.language || 'English');
       payload.append('category', selectedTemplate.category || 'MARKETING');
       payload.append('variables', JSON.stringify(bodyExampleValues));
-      payload.append('examples', JSON.stringify(examplesPayload));
+      payload.append('examples', JSON.stringify(metaExamples));
       payload.append('hasMedia', String(Boolean(useMedia && mediaFile)));
       payload.append('mediaType', mediaType);
       if (useMedia && mediaFile) payload.append('media', mediaFile);
@@ -792,8 +797,8 @@ const TemplateManager = () => {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <label className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Editable template body</label>
                 <textarea
-                  value={customBodyText}
-                  onChange={(event) => setCustomBodyText(event.target.value)}
+                  value={editableBody}
+                  onChange={(event) => setEditableBody(event.target.value)}
                   rows={8}
                   className="min-h-[180px] w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm font-semibold leading-relaxed text-slate-700 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-50"
                 />
@@ -802,17 +807,17 @@ const TemplateManager = () => {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Dynamic placeholder mapping</p>
-                  {bodyPlaceholders.length === 0 ? (
+                  {parsedVariables.length === 0 ? (
                     <p className="mt-2 text-xs font-bold text-emerald-900">No variable placeholders found in this body.</p>
                   ) : (
                     <div className="mt-3 space-y-3">
-                      {bodyPlaceholders.map((index) => (
+                      {parsedVariables.map((index) => (
                         <label key={index} className="block">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">{`{{${index}}}`} sample value</span>
+                          <span className="text-[10px] font-black uppercase tracking-widest text-emerald-700">{`{{${index}}}`} Sample Value</span>
                           <input
                             type="text"
-                            value={variableSamples[index] || ''}
-                            onChange={(event) => setVariableSamples((current) => ({ ...current, [index]: event.target.value }))}
+                            value={variablesPayload[index] || ''}
+                            onChange={(event) => setVariablesPayload((current) => ({ ...current, [index]: event.target.value }))}
                             className="mt-1 min-h-11 w-full rounded-xl border border-emerald-200 bg-white px-3 text-xs font-bold text-slate-800 outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
                             placeholder={defaultSampleForPlaceholder(index)}
                           />
@@ -820,9 +825,9 @@ const TemplateManager = () => {
                       ))}
                     </div>
                   )}
-                  {bodyPlaceholders.length > 0 && (
+                  {parsedVariables.length > 0 && (
                     <div className="mt-3 rounded-xl bg-white/70 p-3 text-[10px] font-bold leading-relaxed text-emerald-900">
-                      Meta sample matrix: {JSON.stringify(examplesPayload)}
+                      Meta sample matrix: {JSON.stringify(metaExamples)}
                     </div>
                   )}
                 </div>
@@ -894,7 +899,7 @@ const TemplateManager = () => {
               </button>
               <button
                 onClick={submitPremadeTemplate}
-                disabled={submittingTemplate || !customBodyText.trim() || bodyExampleValues.some((value) => !String(value || '').trim()) || (useMedia && !mediaFile)}
+                disabled={submittingTemplate || !editableBody.trim() || bodyExampleValues.some((value) => !String(value || '').trim()) || (useMedia && !mediaFile)}
                 className="min-h-12 rounded-xl bg-orange-600 px-5 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submittingTemplate ? 'Submitting...' : 'Submit to Meta'}
