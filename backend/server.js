@@ -34,6 +34,7 @@ app.use(express.json({
     }
 }));
 app.use(express.urlencoded({ extended: true }));
+app.get('/', (req, res) => res.status(200).json({ status: "Yogi Desk API Running" }));
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/payments', paymentRoutes);
@@ -1002,14 +1003,14 @@ const specializationSlugToSearchValue = (slug) => ({
 }[slug] || 'general physician');
 
 const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, language }) => {
-    const selectColumns = 'id,template_name,title,category,specialization,language,body_text,has_media,media_type,variable_schema';
+    const selectColumns = 'id,specialization,category,language,template_name,body_text,has_media';
     const runQuery = async (specializationPattern) => {
         let query = db
             .from('pre_made_templates')
             .select(selectColumns)
             .ilike('specialization', specializationPattern)
             .order('language', { ascending: true })
-            .order('title', { ascending: true })
+            .order('template_name', { ascending: true })
             .limit(50);
 
         if (language && language.toLowerCase() !== 'all') {
@@ -1021,15 +1022,31 @@ const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, 
 
     const humanPattern = specializationSlugToSearchValue(specializationQuery);
     let { data, error } = await runQuery(humanPattern);
-    if (error) throw error;
+    if (error) {
+        console.warn('Pre-made template lookup failed:', error.message || error);
+        return [];
+    }
 
     if (!Array.isArray(data) || data.length === 0) {
         const fallbackResult = await runQuery(specializationQuery);
-        if (fallbackResult.error) throw fallbackResult.error;
+        if (fallbackResult.error) {
+            console.warn('Pre-made template fallback lookup failed:', fallbackResult.error.message || fallbackResult.error);
+            return [];
+        }
         data = fallbackResult.data;
     }
 
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(data)
+        ? data.map((template) => ({
+            id: template.id,
+            specialization: template.specialization,
+            category: template.category,
+            language: template.language,
+            template_name: template.template_name,
+            body_text: template.body_text,
+            has_media: Boolean(template.has_media)
+        }))
+        : [];
 };
 
 const readSingleRowSafely = async ({ table, select, column = 'id', value }) => {
@@ -1386,7 +1403,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
         const hasMedia = Boolean(req.body?.hasMedia ?? premadeTemplate.has_media);
         const mediaType = sanitizePlainText(req.body?.mediaType || premadeTemplate.media_type || 'IMAGE', 20);
         const mediaUrl = sanitizePlainText(req.body?.mediaUrl || '', 600);
-        const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.template_name || premadeTemplate.title}_${language}_${Date.now()}`);
+        const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.template_name}_${language}_${Date.now()}`);
 
         const components = buildPremadeTemplateComponents({
             bodyText,
@@ -2261,11 +2278,6 @@ const processCampaignQueue = async () => {
 };
 
 setInterval(processCampaignQueue, 10000);
-
-// Agar koi aaisa rasta khole jo API ka nahi hai (jaise /login, /dashboard), toh React ka frontend khule
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 // ====== PORT LISTEN ENGINE ======
 if (require.main !== module) {

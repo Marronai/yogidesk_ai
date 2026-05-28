@@ -454,46 +454,23 @@ exports.saveMetaConnection = async (req, res) => {
             whatsappWabaId,
             whatsappBusinessAccountId,
             whatsappAccessToken,
+            metaPhoneNumberId,
+            metaWabaId,
+            systemUserToken,
             name,
             email
         } = req.body;
         
-        const phoneNumberId = String(whatsappPhoneNumberId || '').trim();
-        const businessAccountId = String(whatsappWabaId || whatsappBusinessAccountId || '').trim();
-        const accessToken = String(whatsappAccessToken || '').trim();
+        const phoneNumberId = String(whatsappPhoneNumberId || metaPhoneNumberId || '').trim();
+        const businessAccountId = String(whatsappWabaId || whatsappBusinessAccountId || metaWabaId || '').trim();
+        const accessToken = String(whatsappAccessToken || systemUserToken || '').trim();
 
         if (!phoneNumberId || !businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: "Invalid Meta configuration. All credentials are required." });
         }
 
         const client = supabaseAdmin || supabase;
-        let existingBusinessId = '';
-
-        try {
-            const { data: existingProfile, error: existingProfileError } = await client
-                .from('doctor_profiles')
-                .select('whatsapp_business_id')
-                .eq('id', sessionUser.id)
-                .maybeSingle();
-
-            if (existingProfileError && !isMissingColumnError(existingProfileError)) {
-                throw existingProfileError;
-            }
-
-            existingBusinessId = String(existingProfile?.whatsapp_business_id || '').trim();
-        } catch (lockCheckError) {
-            console.warn('Meta save lock check failed:', lockCheckError?.message || lockCheckError);
-            existingBusinessId = '';
-        }
-
-        if (existingBusinessId.length > 0) {
-            return res.status(403).json({ success: false, message: META_CONFIGURATION_LOCKED_MESSAGE });
-        }
-
-        const isValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
-        if (!isValid) {
-            return res.status(400).json({ success: false, message: "Invalid Meta configuration or access token permissions." });
-        }
+        if (!client?.from) throw new Error('Supabase admin client unavailable.');
 
         const profilePayload = {
             meta_phone_number_id: phoneNumberId,
@@ -523,10 +500,10 @@ exports.saveMetaConnection = async (req, res) => {
 
         if (error) throw error;
 
-        return res.status(200).json({ success: true, message: "Connection configurations saved securely." });
+        return res.status(200).json({ success: true, message: "Meta credentials updated successfully." });
     } catch (error) {
-        console.error('Meta save failure:', error.message);
-        return res.status(500).json({ success: false, message: "Internal Server Error during configuration save." });
+        console.error('Meta save failure:', error.message || error);
+        return res.status(500).json({ success: false, message: error.message || 'Meta credentials update failed.' });
     }
 };
 
