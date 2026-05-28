@@ -1527,7 +1527,11 @@ app.get('*', (req, res) => {
 });
 
 // ====== PORT LISTEN ENGINE ======
+if (require.main !== module) {
+  app.listen = () => app;
+}
 const PORT = process.env.PORT || 5000;
+module.exports = app;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Yogi Desk API running safely on port ${PORT}`);
 });
