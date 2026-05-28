@@ -486,4 +486,16 @@ const SignUp = () => {
             )}
           </form>
 
-          <p className="mt-8
+          <p className="mt-8 text-center text-sm text-gray-500">
+            Already have an account?{' '}
+            <Link to="/login" className="font-bold text-[#FF6B00] hover:underline">
+              Login
+            </Link>
+          </p>
+        </motion.div>
+      </div>
+    </div>
+  );
+};
+
+export default SignUp;

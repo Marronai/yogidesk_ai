@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('./config/supabase');
@@ -17,19 +18,11 @@ const { getWalletBalance } = require('./controllers/adminController');
 
 const app = express();
 
-app.use(cors({
-    origin: function (origin, callback) {
-        if (!origin || origin === 'https://yogidesk-ai.vercel.app' || origin.endsWith('.vercel.app')) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
+app.use(cors()); // Ekdum simple line, bas safe side ke liye
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
@@ -1528,8 +1521,13 @@ setInterval(async () => {
     }
 }, 60000);
 
+// Agar koi aaisa rasta khole jo API ka nahi hai (jaise /login, /dashboard), toh React ka frontend khule
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // ====== PORT LISTEN ENGINE ======
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Yogi Desk API running safely on port ${PORT}`);
 });

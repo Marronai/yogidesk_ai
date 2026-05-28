@@ -39,6 +39,7 @@ import TermsConditions from './pages/TermsConditions';
 import Footer from './components/Footer';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import SuperAdminRoute from './components/SuperAdminRoute';
+import { WalletProvider } from './context/WalletContext';
  // Agar navbar bhi global hai
 
 
@@ -138,7 +139,9 @@ const AppContent = () => {
 const App = () => {
   return (
     <BrowserRouter>
-      <AppContent />
+      <WalletProvider>
+        <AppContent />
+      </WalletProvider>
     </BrowserRouter>
   );
 };

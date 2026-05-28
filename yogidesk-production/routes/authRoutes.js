@@ -1,0 +1,93 @@
+const express = require('express');
+const router = express.Router();
+const passport = require('passport');
+const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+
+const { 
+  register, 
+  loginStep1, 
+  verifyOTP,
+  verifySignupOTP,
+  googleLogin,
+  sendWhatsAppOTP,
+  verifyWhatsAppOTP
+} = require('../controllers/authController');
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { msg: 'Too many login attempts. Please try again after 15 minutes.' }
+});
+
+const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { msg: 'Too many signup attempts. Please try again after 15 minutes.' }
+});
+
+const { protect } = require('../middleware/authMiddleware');
+
+// 🛠️ DEVELOPER TIP: Abhi ke liye Rate Limiters ko hata dete hain 
+// kyunki testing mein ye bar-bar block kar dete hain (405/429 error)
+// const loginLimiter = rateLimit({ ... }); 
+
+// --- SIGNUP & LOGIN ROUTES ---
+// 🚀 'createAccountLimiter' hata diya taaki testing mein block na ho
+router.post('/register', signupLimiter, register);
+router.post('/signup', signupLimiter, register);
+router.post('/login', loginLimiter, loginStep1);
+router.post('/verify-login', loginLimiter, verifyOTP);
+router.post('/verify-signup-otp', loginLimiter, verifySignupOTP);
+
+// --- WHATSAPP OTP AUTH ROUTES ---
+router.post('/send-whatsapp-otp', loginLimiter, sendWhatsAppOTP);
+router.post('/verify-whatsapp-otp', loginLimiter, verifyWhatsAppOTP);
+
+// --- GOOGLE AUTH ROUTES ---
+router.post('/google', googleLogin);
+
+// 1. Google par redirect
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+// 2. Google callback with JWT Token ✅
+router.get('/google/callback', 
+    passport.authenticate('google', { 
+        failureRedirect: 'https://yogidesk-ai.com/login?error=google_auth_failed',
+        session: false 
+    }),
+    (req, res) => {
+        try {
+            // ✅ JWT_SECRET agar .env mein na mile toh bypass secret use karein
+            const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
+            
+            const token = jwt.sign(
+                { 
+                    id: req.user._id, 
+                    email: req.user.email,
+                    role: req.user.role || 'doctor',
+                    name: req.user.name
+                },
+                secret,
+                { expiresIn: '30d' }
+            );
+
+            // ✅ Frontend redirect
+            res.redirect(`https://yogidesk-ai.com/auth-success?token=${token}`);
+        } catch (error) {
+            console.error('❌ Google callback error:', error);
+            res.redirect('https://yogidesk-ai.com/login?error=auth_failed');
+        }
+    }
+);
+
+// --- PROTECTED ROUTES ---
+router.get('/check-session', protect, (req, res) => {
+  res.status(200).json({ status: 'active', user: req.user });
+});
+
+module.exports = router;

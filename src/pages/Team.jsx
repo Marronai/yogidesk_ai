@@ -36,15 +36,17 @@ const Team = () => {
       return;
     }
 
-    const { data: teamData } = await supabase.from('team_members').select('id, name, email, status, created_at').eq('admin_id', userId).order('created_at', { ascending: false });
-    ]);
+    const { data: teamData } = await supabase
+      .from('team_members')
+      .select('id, name, email, status, created_at')
+      .eq('admin_id', userId)
+      .order('created_at', { ascending: false });
 
-    if (walletData) setWallet(walletData);
     if (teamData) setMembers(teamData);
     setLoading(false);
   };
 
-  useEffect(() => { fetchTeam(); }, []);
+  useEffect(() => { fetchTeam(); }, [userId]);
 
   const dispatchTeamInviteEmail = (invite) => {
     const payload = JSON.stringify(invite);
