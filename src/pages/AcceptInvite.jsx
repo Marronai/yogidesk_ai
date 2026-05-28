@@ -46,7 +46,37 @@ const AcceptInvite = () => {
     const { data } = await supabase.auth.getUser();
     const activeEmail = incomingUserEmailInputString || data?.user?.email;
     if (activeEmail) {
-      await supabase.from('team_members').update({ status: 'ACTIVE' }).eq('email', activeEmail);
+      const { data: invite, error: inviteError } = await supabase
+        .from('team_members')
+        .select('id,status,invite_expires_at')
+        .eq('email', activeEmail)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (inviteError || !invite) {
+        setToast('Invite not found. Please contact your admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (String(invite.status || '').toUpperCase() !== 'PENDING') {
+        setToast('This invite is no longer active. Please contact your admin.');
+        setLoading(false);
+        return;
+      }
+
+      if (invite.invite_expires_at && new Date(invite.invite_expires_at).getTime() <= Date.now()) {
+        await supabase.from('team_members').update({ status: 'EXPIRED' }).eq('id', invite.id);
+        setToast('This invite has expired. Please ask your admin to send a new invite.');
+        setLoading(false);
+        return;
+      }
+
+      await supabase
+        .from('team_members')
+        .update({ status: 'ACTIVE', accepted_at: new Date().toISOString() })
+        .eq('id', invite.id);
     }
 
     setToast('Account activated successfully.');
