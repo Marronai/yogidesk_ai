@@ -1002,7 +1002,7 @@ const specializationSlugToSearchValue = (slug) => ({
 }[slug] || 'general physician');
 
 const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, language }) => {
-    const selectColumns = 'id,slug,title,category,specialization,language,body_text,has_media,media_type,variable_schema';
+    const selectColumns = 'id,template_name,title,category,specialization,language,body_text,has_media,media_type,variable_schema';
     const runQuery = async (specializationPattern) => {
         let query = db
             .from('pre_made_templates')
@@ -1386,7 +1386,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
         const hasMedia = Boolean(req.body?.hasMedia ?? premadeTemplate.has_media);
         const mediaType = sanitizePlainText(req.body?.mediaType || premadeTemplate.media_type || 'IMAGE', 20);
         const mediaUrl = sanitizePlainText(req.body?.mediaUrl || '', 600);
-        const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.slug || premadeTemplate.title}_${language}_${Date.now()}`);
+        const formattedName = formatTemplateName(`${specializationQuery}_${premadeTemplate.template_name || premadeTemplate.title}_${language}_${Date.now()}`);
 
         const components = buildPremadeTemplateComponents({
             bodyText,

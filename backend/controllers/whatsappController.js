@@ -467,8 +467,26 @@ exports.saveMetaConnection = async (req, res) => {
         }
 
         const client = supabaseAdmin || supabase;
-        const existingMetaState = await getExistingMetaCredentialState(client, sessionUser.id);
-        if (hasCompleteMetaCredentials(existingMetaState)) {
+        let existingBusinessId = '';
+
+        try {
+            const { data: existingProfile, error: existingProfileError } = await client
+                .from('doctor_profiles')
+                .select('whatsapp_business_id')
+                .eq('id', sessionUser.id)
+                .maybeSingle();
+
+            if (existingProfileError && !isMissingColumnError(existingProfileError)) {
+                throw existingProfileError;
+            }
+
+            existingBusinessId = String(existingProfile?.whatsapp_business_id || '').trim();
+        } catch (lockCheckError) {
+            console.warn('Meta save lock check failed:', lockCheckError?.message || lockCheckError);
+            existingBusinessId = '';
+        }
+
+        if (existingBusinessId.length > 0) {
             return res.status(403).json({ success: false, message: META_CONFIGURATION_LOCKED_MESSAGE });
         }
 
