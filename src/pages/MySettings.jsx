@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -18,21 +18,49 @@ const getStoredAccount = () => {
   return { userId: userId.trim(), email: email.trim() };
 };
 
+const metaCacheKey = (userId) => `yogidesk_meta_connection_${userId || 'default'}`;
+
+const readCachedMetaConnection = (userId) => {
+  try {
+    return JSON.parse(localStorage.getItem(metaCacheKey(userId)) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const writeCachedMetaConnection = (userId, payload) => {
+  if (!userId) return;
+  localStorage.setItem(metaCacheKey(userId), JSON.stringify({
+    whatsappPhoneNumberId: payload.whatsappPhoneNumberId || '',
+    whatsappBusinessAccountId: payload.whatsappBusinessAccountId || '',
+    whatsappAccessToken: payload.whatsappAccessToken || '',
+    isConnected: true,
+    savedAt: new Date().toISOString(),
+  }));
+};
+
 const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
+  const [connectionAnimation, setConnectionAnimation] = useState(null);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const { userProfile, loadUserProfile } = useAuth();
+  const lastSavedMetaRef = useRef(null);
   const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
   const metaInputsLocked = isMetaActive || hasExistingConnection;
 
   const showToast = (type, text) => {
     setToast({ type, text });
     window.setTimeout(() => setToast(null), 3200);
+  };
+
+  const playConnectionAnimation = (type) => {
+    setConnectionAnimation(type);
+    window.setTimeout(() => setConnectionAnimation(null), 1800);
   };
 
   const getActiveAccount = async () => {
@@ -59,6 +87,8 @@ const Settings = () => {
         ? userProfile
         : await loadUserProfile(activeUserId, { force: false });
       let fetchedData = profile || {};
+      const cachedMeta = readCachedMetaConnection(activeUserId);
+      const lastSavedMeta = lastSavedMetaRef.current || {};
 
       try {
         const res = await api.get(`${API_BASE_URL}/settings/meta-connection`);
@@ -70,10 +100,31 @@ const Settings = () => {
         console.warn('Meta settings prefill fetch skipped:', metaFetchError?.message || metaFetchError);
       }
 
-      const metaPhoneNumberId = fetchedData.whatsapp_phone_number_id || fetchedData.meta_phone_number_id || '';
-      const metaWabaId = fetchedData.whatsapp_business_account_id || fetchedData.meta_waba_id || fetchedData.waba_id || '';
-      const systemUserToken = fetchedData.system_user_access_token || fetchedData.system_user_token || fetchedData.whatsapp_access_token || '';
-      const connectionExists = Boolean(fetchedData.meta_configured || metaPhoneNumberId || metaWabaId || systemUserToken);
+      const metaPhoneNumberId = fetchedData.whatsapp_phone_number_id
+        || fetchedData.meta_phone_number_id
+        || lastSavedMeta.whatsappPhoneNumberId
+        || cachedMeta.whatsappPhoneNumberId
+        || '';
+      const metaWabaId = fetchedData.whatsapp_business_account_id
+        || fetchedData.meta_waba_id
+        || fetchedData.waba_id
+        || lastSavedMeta.whatsappBusinessAccountId
+        || cachedMeta.whatsappBusinessAccountId
+        || '';
+      const systemUserToken = fetchedData.system_user_access_token
+        || fetchedData.system_user_token
+        || fetchedData.whatsapp_access_token
+        || lastSavedMeta.whatsappAccessToken
+        || cachedMeta.whatsappAccessToken
+        || '';
+      const connectionExists = Boolean(
+        fetchedData.meta_configured
+        || cachedMeta.isConnected
+        || lastSavedMeta.isConnected
+        || metaPhoneNumberId
+        || metaWabaId
+        || systemUserToken
+      );
 
       const nextForm = {
         name: fetchedData.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
@@ -159,7 +210,17 @@ const Settings = () => {
       const res = await api.post(`${API_BASE_URL}/settings/meta-connection`, payload);
 
       if (res.data && (res.data.success === true || res.status === 200)) {
+        const savedMeta = {
+          whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
+          whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
+          whatsappAccessToken: payload.whatsappAccessToken,
+          isConnected: true,
+        };
+        lastSavedMetaRef.current = savedMeta;
+        const { userId: activeUserId } = await getActiveAccount();
+        writeCachedMetaConnection(activeUserId, savedMeta);
         showToast('success', 'Meta credentials updated successfully!');
+        playConnectionAnimation('success');
         setConnectionStatus('connected');
         setHasExistingConnection(true);
         setFormData((current) => ({
@@ -169,10 +230,12 @@ const Settings = () => {
           whatsappAccessToken: payload.whatsappAccessToken,
         }));
       } else {
+        playConnectionAnimation('error');
         showToast('error', 'Server did not confirm the Meta connection. Please try again.');
       }
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
+      playConnectionAnimation('error');
       showToast('error', error.message || 'Failed to update connection settings. Please try again.');
     } finally {
       setSavingConnection(false);
@@ -198,6 +261,32 @@ const Settings = () => {
               <AlertCircle className="shrink-0 text-red-600" size={18} />
             )}
             <span>{toast.text}</span>
+          </div>
+        </div>
+      )}
+
+      {connectionAnimation && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-sm">
+          <div className={`w-full max-w-sm rounded-[2rem] border bg-white p-8 text-center shadow-2xl ${
+            connectionAnimation === 'success' ? 'border-emerald-100 shadow-emerald-200' : 'border-red-100 shadow-red-200'
+          }`}>
+            <div className={`mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full ${
+              connectionAnimation === 'success' ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'
+            }`}>
+              {connectionAnimation === 'success' ? (
+                <CheckCircle2 className="animate-in zoom-in duration-300" size={42} />
+              ) : (
+                <AlertCircle className="animate-in zoom-in duration-300" size={42} />
+              )}
+            </div>
+            <h3 className="text-xl font-black text-slate-950">
+              {connectionAnimation === 'success' ? 'Meta Connected' : 'Connection Failed'}
+            </h3>
+            <p className="mt-2 text-sm font-bold text-slate-500">
+              {connectionAnimation === 'success'
+                ? 'Your WhatsApp Cloud credentials are saved and locked.'
+                : 'Please check the credentials and try again.'}
+            </p>
           </div>
         </div>
       )}
