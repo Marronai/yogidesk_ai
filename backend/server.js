@@ -18,7 +18,15 @@ const { getWalletBalance } = require('./controllers/adminController');
 
 const app = express();
 
-app.use(cors()); // Ekdum simple line, bas safe side ke liye
+const corsOptions = {
+    origin: ['https://yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://localhost:5173'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
