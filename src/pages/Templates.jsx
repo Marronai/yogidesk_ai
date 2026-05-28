@@ -46,7 +46,7 @@ const Templates = () => {
   const [variableSamples, setVariableSamples] = useState({});
   const [customVariables, setCustomVariables] = useState([]);
   const [showCustomVariableInput, setShowCustomVariableInput] = useState(false);
-  const { userId } = useWallet(); // Get userId from global context
+  useWallet(); // Keep wallet context hydrated for template workflows.
   const [customVariableLabel, setCustomVariableLabel] = useState('');
 
   useEffect(() => {

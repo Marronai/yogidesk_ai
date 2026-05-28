@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, ChevronDown, Sparkles, Layers, RefreshCw } from 'lucide-react';
+import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, Image as ImageIcon, X, Upload, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
-import { getTemplatesBySpecialty, calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
+import { calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 
 const TemplateManager = () => {
@@ -16,19 +16,22 @@ const TemplateManager = () => {
   const [error, setError] = useState('');
   const [metaBusinessManagerId, setMetaBusinessManagerId] = useState('');
   const [planTier, setPlanTier] = useState('Starter Clinic');
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTab] = useState('library');
+  const [dashboardTemplates, setDashboardTemplates] = useState([]);
+  const [dashboardSpecialization, setDashboardSpecialization] = useState('');
+  const [bookingLink, setBookingLink] = useState('');
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [activeLang, setActiveLang] = useState('All');
+  const [libraryPage, setLibraryPage] = useState(0);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [useMedia, setUseMedia] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState('');
+  const [mediaType, setMediaType] = useState('IMAGE');
+  const [submittingTemplate, setSubmittingTemplate] = useState(false);
+  const [notice, setNotice] = useState(null);
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
   const { wallet } = useWallet(); // Consume wallet from global context
-
-  // Specialization Logic
-  const businessCategory = localStorage.getItem('user_business_category') || 'General Physician';
-
-  const [selectedSpecialty, setSelectedSpecialty] = useState(
-    MEDICAL_SPECIALTIES.find(s => s.toLowerCase() === businessCategory.toLowerCase()) || 'Diabetologist'
-  );
-
-  const libraryTemplates = useMemo(() => getTemplatesBySpecialty(selectedSpecialty), [selectedSpecialty]);
-  const [activeLang, setActiveLang] = useState('EN');
+  const [selectedSpecialty, setSelectedSpecialty] = useState('General Physician');
 
   const fetchTemplates = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -66,6 +69,24 @@ const TemplateManager = () => {
     }
   }, [fetchTemplates]);
 
+  const fetchDashboardTemplates = useCallback(async () => {
+    try {
+      setLibraryLoading(true);
+      const userId = localStorage.getItem('user_id');
+      const response = await api.get('/templates/dashboard', { params: { userId } });
+      setDashboardTemplates(Array.isArray(response.data?.templates) ? response.data.templates : []);
+      setDashboardSpecialization(response.data?.specialization || 'General Physician');
+      setBookingLink(response.data?.bookingLink || '');
+      setError('');
+    } catch (err) {
+      console.error('Dashboard template library failed:', err);
+      setError(err?.response?.data?.message || 'Unable to load specialization templates.');
+      setDashboardTemplates([]);
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const fetchPlanData = async () => {
       const userId = localStorage.getItem('user_id');
@@ -82,7 +103,50 @@ const TemplateManager = () => {
     fetchPlanData();
     fetchTemplates();
     syncAndRefreshTemplates({ silent: true });
-  }, [fetchTemplates, syncAndRefreshTemplates]);
+    fetchDashboardTemplates();
+  }, [fetchTemplates, syncAndRefreshTemplates, fetchDashboardTemplates]);
+
+  useEffect(() => {
+    setLibraryPage(0);
+  }, [activeLang]);
+
+  useEffect(() => {
+    const userId = localStorage.getItem('user_id');
+    if (!userId || !supabase?.channel) return undefined;
+
+    const channel = supabase
+      .channel(`template-status-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'whatsapp_templates',
+          filter: `user_id=eq.${userId}`
+        },
+        (payload) => {
+          const updated = payload.new || {};
+          setTemplates((current) => (
+            Array.isArray(current)
+              ? current.map((template) => template.id === updated.id ? { ...template, ...updated } : template)
+              : current
+          ));
+
+          const status = String(updated.status || '').toUpperCase();
+          if (['APPROVED', 'REJECTED'].includes(status)) {
+            setNotice({
+              type: status === 'APPROVED' ? 'success' : 'error',
+              text: `${updated.template_name || 'Template'} is now ${status}.`
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchMetaBusinessId = async () => {
@@ -140,6 +204,7 @@ const TemplateManager = () => {
     switch (String(status || '').toUpperCase()) {
       case 'APPROVED': return 'text-green-700 bg-green-50 border-green-200';
       case 'REJECTED': return 'text-red-700 bg-red-50 border-red-200';
+      case 'PENDING_APPROVAL':
       case 'PENDING_REVIEW':
       case 'PENDING': return 'text-orange-700 bg-orange-50 border-orange-200';
       case 'DRAFT': return 'text-slate-600 bg-slate-50 border-slate-200';
@@ -177,19 +242,93 @@ const TemplateManager = () => {
     await syncAndRefreshTemplates();
   };
 
-  const templateRows = Array.isArray(filteredTemplates) ? filteredTemplates : [];
+  const languageTabs = ['All', 'Hinglish', 'Hindi', 'English'];
+  const libraryTemplates = useMemo(() => {
+    const rows = Array.isArray(dashboardTemplates) ? dashboardTemplates : [];
+    if (activeLang === 'All') return rows;
+    return rows.filter((template) => String(template.language || '').toLowerCase() === activeLang.toLowerCase());
+  }, [dashboardTemplates, activeLang]);
+  const totalLibraryPages = Math.max(1, Math.ceil(libraryTemplates.length / 6));
+  const visibleLibraryTemplates = useMemo(
+    () => libraryTemplates.slice(libraryPage * 6, libraryPage * 6 + 6),
+    [libraryTemplates, libraryPage]
+  );
+  const patientSample = 'Sample Patient';
+  const smartVariableMapping = useMemo(() => ({
+    1: patientSample,
+    2: bookingLink || 'https://yogidesk-ai.com/book',
+    3: bookingLink || 'https://yogidesk-ai.com/book',
+    patient_name: patientSample,
+    booking_link: bookingLink || 'https://yogidesk-ai.com/book'
+  }), [bookingLink]);
+
+  const openTemplatePreview = (template) => {
+    setSelectedTemplate(template);
+    setUseMedia(Boolean(template?.has_media));
+    setMediaType(template?.media_type || 'IMAGE');
+    setMediaUrl('');
+  };
+
+  const handleMediaUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Media must be below 2MB for template preview.');
+      event.target.value = '';
+      return;
+    }
+
+    setMediaType(file.type === 'application/pdf' ? 'DOCUMENT' : 'IMAGE');
+    const reader = new FileReader();
+    reader.onloadend = () => setMediaUrl(String(reader.result || ''));
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const submitPremadeTemplate = async () => {
+    if (!selectedTemplate) return;
+
+    try {
+      setSubmittingTemplate(true);
+      const userId = localStorage.getItem('user_id');
+      const response = await api.post('/templates/create-and-submit', {
+        userId,
+        templateId: selectedTemplate.id,
+        bodyText: selectedTemplate.body_text,
+        language: selectedTemplate.language,
+        variableMapping: smartVariableMapping,
+        hasMedia: useMedia,
+        mediaType,
+        mediaUrl
+      });
+
+      setTemplates((current) => [response.data?.template, ...(Array.isArray(current) ? current : [])].filter(Boolean));
+      setNotice({ type: 'success', text: 'Template submitted to Meta for approval.' });
+      setSelectedTemplate(null);
+      setUseMedia(false);
+      setMediaUrl('');
+    } catch (err) {
+      console.error('Premade template submission failed:', err);
+      setError(err?.response?.data?.message || 'Unable to submit this template to Meta.');
+    } finally {
+      setSubmittingTemplate(false);
+    }
+  };
+
+  const templateRows = useMemo(() => Array.isArray(filteredTemplates) ? filteredTemplates : [], [filteredTemplates]);
   const parseButtons = (buttons) => {
     if (Array.isArray(buttons)) return buttons;
     try { return buttons ? JSON.parse(buttons) : []; } catch { return []; }
   };
   const submittedRows = useMemo(
-    () => (templateRows || []).filter((template) => ['PENDING', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(String(template?.status || '').toUpperCase())),
+    () => (templateRows || []).filter((template) => ['PENDING', 'PENDING_APPROVAL', 'PENDING_REVIEW', 'APPROVED', 'REJECTED'].includes(String(template?.status || '').toUpperCase())),
     [templateRows]
   );
   const submittedMetadata = useMemo(
     () => (submittedRows || []).map((template) => ({
       ...template,
-      status: String(template?.status || 'UNKNOWN').toUpperCase() === 'PENDING_REVIEW' ? 'PENDING' : String(template?.status || 'UNKNOWN').toUpperCase(),
+      status: ['PENDING_REVIEW', 'PENDING_APPROVAL'].includes(String(template?.status || 'UNKNOWN').toUpperCase()) ? 'PENDING' : String(template?.status || 'UNKNOWN').toUpperCase(),
       buttons: parseButtons(template?.buttons),
       headerType: template?.header_type || 'NONE',
       mediaUrl: template?.header_url || template?.media_url || ''
@@ -216,7 +355,7 @@ const TemplateManager = () => {
       console.log('Executing broadcast for', template.name);
       // await api.post('/campaign/broadcast', { templateId: template.id, cost: totalCost });
     }
-  }, []);
+  }, [wallet.balance]);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500">
@@ -304,8 +443,109 @@ const TemplateManager = () => {
         </div>
       )}
 
+      {activeTab === 'library' && <div className="space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+              <Globe size={16} /> Ready-Made Library
+            </h3>
+            <p className="mt-2 text-xl font-black text-slate-900">{dashboardSpecialization || 'General Physician'} Templates</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">50 Meta-ready templates mapped from your clinic profile.</p>
+          </div>
+
+          <div className="flex w-full gap-2 overflow-x-auto rounded-2xl bg-slate-100 p-1 lg:w-auto">
+            {languageTabs.map((lang) => (
+              <button
+                key={lang}
+                onClick={() => setActiveLang(lang)}
+                className={`min-h-11 flex-1 rounded-xl px-4 text-xs font-black transition-all lg:flex-none ${activeLang === lang ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {notice && (
+          <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-bold ${notice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+            {notice.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+            <span>{notice.text}</span>
+            <button onClick={() => setNotice(null)} className="ml-auto rounded-lg p-1 hover:bg-white/70"><X size={16} /></button>
+          </div>
+        )}
+
+        {libraryLoading ? (
+          <div className="rounded-[2rem] border border-slate-200 bg-white p-12 text-center text-sm font-bold text-slate-500">Loading specialization templates...</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {visibleLibraryTemplates.map((libTemp) => (
+                <div key={libTemp.id} className="flex min-h-[230px] flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-orange-200 hover:shadow-md">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-tight ${libTemp.category === 'MARKETING' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                        {libTemp.category}
+                      </span>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[9px] font-black uppercase tracking-tight text-slate-500">{libTemp.language}</span>
+                      {libTemp.has_media && <span className="rounded-md bg-orange-50 px-2 py-1 text-[9px] font-black uppercase tracking-tight text-orange-600">{libTemp.media_type || 'MEDIA'}</span>}
+                    </div>
+                    <button
+                      onClick={() => navigator.clipboard?.writeText(libTemp.body_text || '')}
+                      className="min-h-10 min-w-10 rounded-xl p-2 text-slate-300 transition-colors hover:bg-orange-50 hover:text-orange-500"
+                      title="Copy template"
+                    >
+                      <Copy size={16} />
+                    </button>
+                  </div>
+
+                  <h4 className="text-sm font-black text-slate-800">{libTemp.title}</h4>
+                  <p className="mt-3 line-clamp-4 flex-1 text-sm font-medium leading-relaxed text-slate-500">{libTemp.body_text}</p>
+
+                  <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">Unit Cost</span>
+                      <span className="text-xs font-black text-slate-700">Rs. {(PRICING_RULES[libTemp.category] || PRICING_RULES.UTILITY).toFixed(2)}</span>
+                    </div>
+                    <button
+                      onClick={() => openTemplatePreview(libTemp)}
+                      className="min-h-11 rounded-xl bg-slate-900 px-4 text-[10px] font-black uppercase tracking-widest text-white transition-all hover:bg-orange-600 active:scale-95"
+                    >
+                      Use / Submit
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {visibleLibraryTemplates.length === 0 && (
+              <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-12 text-center text-sm font-bold text-slate-400">No templates found for this language.</div>
+            )}
+
+            <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row">
+              <button
+                onClick={() => setLibraryPage((page) => Math.max(0, page - 1))}
+                disabled={libraryPage === 0}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-black uppercase text-slate-600 transition-all hover:border-orange-200 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+              >
+                <ChevronLeft size={16} /> Previous
+              </button>
+              <span className="text-xs font-black uppercase tracking-widest text-slate-400">
+                Page {libraryPage + 1} of {totalLibraryPages} - Showing 6 at a time
+              </span>
+              <button
+                onClick={() => setLibraryPage((page) => Math.min(totalLibraryPages - 1, page + 1))}
+                disabled={libraryPage >= totalLibraryPages - 1}
+                className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-black uppercase text-slate-600 transition-all hover:border-orange-200 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+              >
+                Next <ChevronRight size={16} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>}
+
       {/* Task 1 & 2: Specialization Library & Multi-Language Tabs */}
-      {activeTab === 'library' && <div className="space-y-4">
+      {activeTab === '__legacy_library__' && <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
@@ -473,6 +713,92 @@ const TemplateManager = () => {
         </div>
       </div>
       </div>}
+
+      {selectedTemplate && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-[2rem] bg-white p-5 shadow-2xl sm:rounded-[2rem] sm:p-6">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Meta submission preview</p>
+                <h3 className="mt-1 text-xl font-black text-slate-900">{selectedTemplate.title}</h3>
+                <p className="mt-1 text-xs font-bold text-slate-400">{selectedTemplate.category} · {selectedTemplate.language}</p>
+              </div>
+              <button onClick={() => setSelectedTemplate(null)} className="min-h-11 min-w-11 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
+                <X size={18} className="mx-auto" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Template body</p>
+                <p className="whitespace-pre-wrap text-sm font-semibold leading-relaxed text-slate-700">{selectedTemplate.body_text}</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Smart variable filler</p>
+                  <p className="mt-2 text-xs font-bold text-emerald-900">{"{{1}}"} Patient Name: {smartVariableMapping[1]}</p>
+                  <p className="mt-1 break-all text-xs font-bold text-emerald-900">{"{{2}}"} Booking Link: {smartVariableMapping[2]}</p>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <label className="flex min-h-11 cursor-pointer items-center justify-between gap-3">
+                    <span className="text-sm font-black text-slate-800">Add Image/Media</span>
+                    <input
+                      type="checkbox"
+                      checked={useMedia}
+                      onChange={(event) => setUseMedia(event.target.checked)}
+                      className="h-5 w-5 accent-orange-600"
+                    />
+                  </label>
+
+                  {useMedia && (
+                    <div className="mt-4 space-y-3">
+                      <div className="flex gap-2">
+                        {['IMAGE', 'DOCUMENT'].map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => setMediaType(type)}
+                            className={`min-h-10 flex-1 rounded-xl border text-xs font-black ${mediaType === type ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'}`}
+                          >
+                            {type}
+                          </button>
+                        ))}
+                      </div>
+                      <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 text-xs font-black uppercase text-slate-500 hover:border-orange-300 hover:text-orange-600">
+                        {mediaType === 'IMAGE' ? <ImageIcon size={16} /> : <Upload size={16} />}
+                        Upload preview asset
+                        <input type="file" accept={mediaType === 'DOCUMENT' ? 'application/pdf' : 'image/*'} className="hidden" onChange={handleMediaUpload} />
+                      </label>
+                      {mediaUrl && (
+                        <div className="rounded-xl bg-slate-100 p-3 text-xs font-semibold text-slate-500">
+                          Media selected for Meta header mapping.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => setSelectedTemplate(null)}
+                className="min-h-12 rounded-xl border border-slate-200 px-5 text-xs font-black uppercase text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitPremadeTemplate}
+                disabled={submittingTemplate}
+                className="min-h-12 rounded-xl bg-orange-600 px-5 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {submittingTemplate ? 'Submitting...' : 'Submit to Meta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

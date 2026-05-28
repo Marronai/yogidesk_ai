@@ -78,6 +78,17 @@ const sanitizeMetaPhoneNumber = (value) => {
     const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
     return digits.length === 10 ? `91${digits}` : digits;
 };
+const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
+    .replace(/[<>]/g, '')
+    .split('')
+    .filter((char) => {
+        const code = char.charCodeAt(0);
+        return code >= 32 || code === 9 || code === 10 || code === 13;
+    })
+    .join('')
+    .trim()
+    .slice(0, maxLength);
 const cleanCredentialValue = (value) => String(value || '').trim();
 const invalidMetaConfigurationResponse = {
     success: false,
@@ -982,6 +993,277 @@ app.get('/api/templates/sync', async (req, res) => {
     } catch (error) {
         console.error('Template sync error:', error.response?.data || error.message || error);
         return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template sync failed.' });
+    }
+});
+
+const normalizeSpecialization = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized.includes('dent')) return 'Dentist';
+    if (normalized.includes('gyn') || normalized.includes('obst')) return 'Gynecologist';
+    if (normalized.includes('ortho') || normalized.includes('bone') || normalized.includes('joint')) return 'Orthopedic';
+    if (normalized.includes('general') || normalized.includes('physician') || normalized.includes('clinic')) return 'General Physician';
+    return 'General Physician';
+};
+
+const getDoctorTemplateProfile = async (userId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !userId) return {};
+
+    const profileSelects = [
+        'id,name,business_name,businessName,business_category,specialization,industry,clinic_booking_link,booking_link,website',
+        'id,name,business_category,specialization,industry,booking_link',
+        'id,name'
+    ];
+
+    for (const selectColumns of profileSelects) {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select(selectColumns)
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (!error && data) {
+            return {
+                ...data,
+                specialization: normalizeSpecialization(data.specialization || data.business_category || data.industry),
+                bookingLink: data.clinic_booking_link || data.booking_link || data.website || `https://yogidesk-ai.com/book/${userId}`
+            };
+        }
+
+        if (error && !isMissingColumnError(error)) {
+            console.warn('Template dashboard profile lookup failed:', error.message || error);
+            break;
+        }
+    }
+
+    return {
+        specialization: 'General Physician',
+        bookingLink: `https://yogidesk-ai.com/book/${userId}`
+    };
+};
+
+const languageToMetaLocale = (language) => {
+    const normalized = String(language || '').trim().toLowerCase();
+    if (normalized === 'hindi' || normalized === 'hi') return 'hi';
+    return 'en_US';
+};
+
+const toMetaTemplateBody = (bodyText) => sanitizePlainText(bodyText)
+    .replace(/\{(\d+)\}/g, '{{$1}}')
+    .replace(/\[Patient_Name\]/gi, '{{1}}')
+    .replace(/\[Time\]/gi, '{{2}}')
+    .replace(/\[Booking_Link\]/gi, '{{2}}')
+    .replace(/\{\{\s*(\d+)\s*\}\}/g, '{{$1}}');
+
+const collectPlaceholderIndexes = (bodyText) => (
+    [...String(bodyText || '').matchAll(/\{\{(\d+)\}\}/g)]
+        .map((match) => Number(match[1]))
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b)
+);
+
+const buildBodyExample = (bodyText, variableMapping = {}) => {
+    const indexes = collectPlaceholderIndexes(bodyText);
+    if (!indexes.length) return null;
+
+    const defaults = {
+        1: 'Sample Patient',
+        2: 'https://yogidesk-ai.com/book',
+        3: 'https://yogidesk-ai.com/book'
+    };
+
+    return {
+        body_text: [
+            indexes.map((index) => sanitizePlainText(variableMapping[index] || defaults[index] || `Sample ${index}`, 120))
+        ]
+    };
+};
+
+const buildPremadeTemplateComponents = ({ bodyText, variableMapping, hasMedia, mediaType, mediaUrl }) => {
+    const components = [];
+    const cleanMediaUrl = sanitizePlainText(mediaUrl, 600);
+    const normalizedMediaType = String(mediaType || 'IMAGE').toUpperCase() === 'DOCUMENT' ? 'DOCUMENT' : 'IMAGE';
+
+    if (hasMedia) {
+        components.push({
+            type: 'HEADER',
+            format: normalizedMediaType,
+            ...(cleanMediaUrl && { example: { header_handle: [cleanMediaUrl] } })
+        });
+    }
+
+    const example = buildBodyExample(bodyText, variableMapping);
+    components.push({
+        type: 'BODY',
+        text: bodyText,
+        ...(example && { example })
+    });
+
+    return components;
+};
+
+app.get('/api/templates/dashboard', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        const profile = await getDoctorTemplateProfile(userId);
+        const specialization = normalizeSpecialization(profile.specialization);
+        const language = sanitizePlainText(req.query.language || '', 20);
+
+        let query = db
+            .from('pre_made_templates')
+            .select('id,slug,title,category,specialization,language,body_text,has_media,media_type,variable_schema')
+            .eq('specialization', specialization)
+            .order('language', { ascending: true })
+            .order('title', { ascending: true })
+            .limit(50);
+
+        if (language && language.toLowerCase() !== 'all') {
+            query = query.eq('language', language);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        return res.status(200).json({
+            success: true,
+            specialization,
+            bookingLink: profile.bookingLink,
+            templates: Array.isArray(data) ? data : []
+        });
+    } catch (error) {
+        console.error('Template dashboard error:', error.message || error);
+        return res.status(400).json({ success: false, message: error.message || 'Unable to load template dashboard.' });
+    }
+});
+
+app.post('/api/templates/create-and-submit', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.body?.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        const profile = await getDoctorTemplateProfile(userId);
+        const specialization = normalizeSpecialization(profile.specialization);
+        const templateId = sanitizePlainText(req.body?.templateId, 80);
+        if (!templateId) return res.status(400).json({ success: false, message: 'Template selection is required.' });
+
+        const { data: premadeTemplate, error: templateError } = await db
+            .from('pre_made_templates')
+            .select('*')
+            .eq('id', templateId)
+            .eq('specialization', specialization)
+            .maybeSingle();
+
+        if (templateError) throw templateError;
+        if (!premadeTemplate) return res.status(404).json({ success: false, message: 'Template not available for this specialization.' });
+
+        let { data: userMeta, error: credentialError } = await db
+            .from('doctor_profiles')
+            .select('system_user_token,meta_waba_id')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (credentialError && isMissingColumnError(credentialError)) {
+            const fallback = await db
+                .from('doctor_profiles')
+                .select('whatsapp_access_token,whatsapp_business_account_id')
+                .eq('id', userId)
+                .maybeSingle();
+            userMeta = fallback.data
+                ? {
+                    system_user_token: fallback.data.whatsapp_access_token,
+                    meta_waba_id: fallback.data.whatsapp_business_account_id
+                }
+                : null;
+            credentialError = fallback.error;
+        }
+
+        if (credentialError) throw credentialError;
+        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
+        }
+
+        const bodyText = toMetaTemplateBody(req.body?.bodyText || premadeTemplate.body_text);
+        const language = sanitizePlainText(req.body?.language || premadeTemplate.language, 20);
+        const variableMapping = {
+            1: sanitizePlainText(req.body?.variableMapping?.[1] || req.body?.variableMapping?.patient_name || 'Sample Patient', 120),
+            2: sanitizePlainText(req.body?.variableMapping?.[2] || req.body?.variableMapping?.booking_link || profile.bookingLink, 600),
+            3: sanitizePlainText(req.body?.variableMapping?.[3] || req.body?.variableMapping?.booking_link || profile.bookingLink, 600)
+        };
+        const hasMedia = Boolean(req.body?.hasMedia ?? premadeTemplate.has_media);
+        const mediaType = sanitizePlainText(req.body?.mediaType || premadeTemplate.media_type || 'IMAGE', 20);
+        const mediaUrl = sanitizePlainText(req.body?.mediaUrl || '', 600);
+        const formattedName = formatTemplateName(`${specialization}_${premadeTemplate.slug || premadeTemplate.title}_${language}_${Date.now()}`);
+
+        const components = buildPremadeTemplateComponents({
+            bodyText,
+            variableMapping,
+            hasMedia,
+            mediaType,
+            mediaUrl
+        });
+
+        const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
+        const response = await axios.post(graphUrl, {
+            messaging_product: 'whatsapp',
+            name: formattedName,
+            language: languageToMetaLocale(language),
+            category: premadeTemplate.category,
+            parameter_format: 'positional',
+            components
+        }, {
+            headers: {
+                Authorization: `Bearer ${userMeta.system_user_token}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const metaTemplateId = response.data?.id || response.data?.message_template_id || null;
+        const row = {
+            user_id: userId,
+            template_name: formattedName,
+            category: premadeTemplate.category,
+            language: languageToMetaLocale(language),
+            body_content: bodyText,
+            status: 'PENDING_APPROVAL',
+            header_type: hasMedia ? mediaType : 'NONE',
+            buttons: [],
+            meta_template_id: metaTemplateId,
+            created_at: new Date().toISOString()
+        };
+
+        const { data: savedTemplate, error: saveError } = await db
+            .from('whatsapp_templates')
+            .upsert(row)
+            .select()
+            .maybeSingle();
+
+        if (saveError) throw saveError;
+
+        return res.status(201).json({
+            success: true,
+            message: 'Template submitted to Meta.',
+            status: 'PENDING_APPROVAL',
+            meta: response.data,
+            template: savedTemplate
+        });
+    } catch (error) {
+        console.error('Premade template submit error:', error.response?.data || error.message || error);
+        return res.status(400).json({
+            success: false,
+            message: error.response?.data?.error?.message || error.message || 'Unable to submit template.'
+        });
     }
 });
 
