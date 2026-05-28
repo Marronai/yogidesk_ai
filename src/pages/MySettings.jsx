@@ -58,20 +58,39 @@ const Settings = () => {
       const profile = userProfile?.id
         ? userProfile
         : await loadUserProfile(activeUserId, { force: false });
-      const metaPhoneNumberId = profile?.whatsapp_phone_number_id || '';
-      const metaWabaId = profile?.whatsapp_business_account_id || '';
-      const systemUserToken = profile?.system_user_token || '';
-      const connectionExists = Boolean(profile?.meta_configured || (metaPhoneNumberId && metaWabaId && systemUserToken));
+      let fetchedData = profile || {};
+
+      try {
+        const res = await api.get(`${API_BASE_URL}/settings/meta-connection`);
+        fetchedData = {
+          ...fetchedData,
+          ...(res.data?.data || res.data || {}),
+        };
+      } catch (metaFetchError) {
+        console.warn('Meta settings prefill fetch skipped:', metaFetchError?.message || metaFetchError);
+      }
+
+      const metaPhoneNumberId = fetchedData.whatsapp_phone_number_id || fetchedData.meta_phone_number_id || '';
+      const metaWabaId = fetchedData.whatsapp_business_account_id || fetchedData.meta_waba_id || fetchedData.waba_id || '';
+      const systemUserToken = fetchedData.system_user_access_token || fetchedData.system_user_token || fetchedData.whatsapp_access_token || '';
+      const connectionExists = Boolean(fetchedData.meta_configured || metaPhoneNumberId || metaWabaId || systemUserToken);
 
       const nextForm = {
-        name: profile?.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
-        email: profile?.email || authUser?.email || localStorage.getItem('user_email') || '',
+        name: fetchedData.name || authUser?.user_metadata?.full_name || localStorage.getItem('user_name') || '',
+        email: fetchedData.email || authUser?.email || localStorage.getItem('user_email') || '',
         whatsappPhoneNumberId: metaPhoneNumberId,
         whatsappBusinessAccountId: metaWabaId,
-        whatsappAccessToken: connectionExists ? 'CONFIGURED' : systemUserToken,
+        whatsappAccessToken: systemUserToken || '',
       };
 
-      setFormData(nextForm);
+      setFormData((current) => ({
+        ...current,
+        name: nextForm.name || current.name,
+        email: nextForm.email || current.email,
+        whatsappPhoneNumberId: nextForm.whatsappPhoneNumberId || current.whatsappPhoneNumberId,
+        whatsappBusinessAccountId: nextForm.whatsappBusinessAccountId || current.whatsappBusinessAccountId,
+        whatsappAccessToken: nextForm.whatsappAccessToken || current.whatsappAccessToken,
+      }));
       setHasExistingConnection(connectionExists);
       setConnectionStatus(
         connectionExists ? 'connected' : 'disconnected'
@@ -147,10 +166,8 @@ const Settings = () => {
           ...current,
           whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
           whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
-          whatsappAccessToken: 'CONFIGURED',
+          whatsappAccessToken: payload.whatsappAccessToken,
         }));
-        const { userId: activeUserId } = await getActiveAccount();
-        await loadUserProfile(activeUserId, { force: true }).catch(() => null);
       } else {
         showToast('error', 'Server did not confirm the Meta connection. Please try again.');
       }
