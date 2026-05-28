@@ -5,6 +5,7 @@ import {
   PieChart,
   Send,
   Shield,
+  Sparkles,
   TrendingUp,
   Users,
   Wallet,
@@ -37,11 +38,17 @@ const DashboardHome = () => {
   const [walletBalance, setWalletBalance] = useState(0);
   const [stats, setStats] = useState({ weekly_sent: 0, leads_today: 0, ghost_mode: false });
   const [usage, setUsage] = useState({ lifetime_patients_count: 0, limit: 500 });
+  const [showWelcome, setShowWelcome] = useState(true);
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Doctor',
   });
   const backendPath = (path) => String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? path.replace(/^\/api/, '') : path;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowWelcome(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +119,17 @@ const DashboardHome = () => {
 
   return (
     <div className="space-y-8 animate-fade-in pb-10">
+      {showWelcome && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/90 px-4 backdrop-blur-sm">
+          <div className="flex flex-col items-center text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-xl shadow-orange-200 animate-bounce">
+              <Sparkles size={30} />
+            </div>
+            <h2 className="text-2xl font-black text-slate-900">Welcome to your dashboard</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Your clinic workspace is ready.</p>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Namaste, {formatDoctorName(profile.name)}</h1>

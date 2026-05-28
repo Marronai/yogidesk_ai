@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import { useWallet } from '../context/WalletContext';
-import { API_URL } from '../utils/api';
+import api, { API_URL } from '../utils/api';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -93,18 +93,11 @@ const Login = () => {
   };
 
   const startLoginEmailVerification = async (user, email) => {
-    const response = await fetch(`${API_URL}/api/auth/request-email-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        name: user?.user_metadata?.full_name || user?.user_metadata?.name || 'Doctor',
-        purpose: 'login'
-      })
+    await api.post('/auth/request-email-otp', {
+      email,
+      name: user?.user_metadata?.full_name || user?.user_metadata?.name || 'Doctor',
+      purpose: 'login'
     });
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.msg || 'Unable to send email OTP.');
 
     setPendingUser(user);
     setOtp(["", "", "", "", "", ""]);
@@ -153,9 +146,10 @@ const Login = () => {
         
         // 🚀 Redirect to Main Dashboard
         // After successful login, trigger a refresh of global wallet data
-        await Promise.all([
-          fetchWalletData(),
-          fetchTransactions()]);
+        await Promise.allSettled([
+          fetchWalletData(supabaseUser.id),
+          fetchTransactions(supabaseUser.id)
+        ]);
         navigate('/dashboard', { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
@@ -196,13 +190,7 @@ const Login = () => {
           return;
         }
 
-        const response = await fetch(`${API_URL}/api/auth/verify-email-otp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, otp: code, purpose: 'login' })
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.msg || 'Email OTP verification failed.');
+        await api.post('/auth/verify-email-otp', { email: cleanEmail, otp: code, purpose: 'login' });
 
         triggerLoginEmail(pendingUser);
         handleAuthSuccess(pendingUser);
