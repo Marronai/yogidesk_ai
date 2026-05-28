@@ -7,14 +7,17 @@ const { supabaseAdmin, supabase } = require('../config/supabase');
 const router = express.Router();
 const db = supabaseAdmin || supabase;
 
-const PAYU_CHECKOUT_URL = 'https://secure.payu.in/_payment';
+const PAYU_TEST_MERCHANT_KEY = 'gtK42w';
+const PAYU_TEST_MERCHANT_SALT = 'eCw7YixuWn';
+const isPayuSandbox = String(process.env.PAYU_SANDBOX_MODE || 'true').toLowerCase() !== 'false';
+const PAYU_CHECKOUT_URL = process.env.PAYU_CHECKOUT_URL || (isPayuSandbox ? 'https://test.payu.in/_payment' : 'https://secure.payu.in/_payment');
 const FRONTEND_WALLET_URL = 'https://yogidesk-ai.com/dashboard/wallet';
 const API_BASE_URL = 'https://api.yogidesk-ai.com';
 
 const sha512 = (value) => crypto.createHash('sha512').update(value).digest('hex');
 const getPayuCredentials = () => ({
-  key: String(process.env.PAYU_MERCHANT_KEY || '').trim(),
-  salt: String(process.env.PAYU_MERCHANT_SALT || '').trim(),
+  key: String(isPayuSandbox ? (process.env.PAYU_TEST_MERCHANT_KEY || PAYU_TEST_MERCHANT_KEY) : process.env.PAYU_MERCHANT_KEY).trim(),
+  salt: String(isPayuSandbox ? (process.env.PAYU_TEST_MERCHANT_SALT || PAYU_TEST_MERCHANT_SALT) : process.env.PAYU_MERCHANT_SALT).trim(),
 });
 
 const normalizeAmount = (value) => {

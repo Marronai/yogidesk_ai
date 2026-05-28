@@ -153,7 +153,7 @@ const YogiWallet = () => {
 
       const form = document.createElement('form');
       form.method = 'POST';
-      form.action = data.checkoutUrl || 'https://secure.payu.in/_payment';
+      form.action = data.checkoutUrl || 'https://test.payu.in/_payment';
       form.target = '_self';
       form.style.display = 'none';
 
