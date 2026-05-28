@@ -13,12 +13,12 @@ const API_BASE_URL = 'https://api.yogidesk-ai.com';
 
 const sha512 = (value) => crypto.createHash('sha512').update(value).digest('hex');
 const getPayuCredentials = () => ({
-  key: process.env.PAYU_MERCHANT_KEY,
-  salt: process.env.PAYU_MERCHANT_SALT,
+  key: String(process.env.PAYU_MERCHANT_KEY || '').trim(),
+  salt: String(process.env.PAYU_MERCHANT_SALT || '').trim(),
 });
 
 const normalizeAmount = (value) => {
-  const amount = Number(value);
+  const amount = parseFloat(value);
   return Number.isFinite(amount) ? amount.toFixed(2) : null;
 };
 
@@ -26,24 +26,29 @@ router.post('/initiate-payu', async (req, res) => {
   try {
     const { key, salt } = getPayuCredentials();
     if (!key || !salt) {
-      return res.status(500).json({ success: false, msg: 'PayU credentials are not configured.' });
+      return res.status(500).json({ success: false, message: 'Server configuration missing Merchant Key or Salt.' });
     }
 
     const userId = String(req.body?.userId || '').trim();
-    const amount = normalizeAmount(req.body?.amount);
+    const formattedAmount = normalizeAmount(req.body?.amount);
     const firstname = String(req.body?.firstname || 'Yogi Desk User').trim();
     const email = String(req.body?.email || '').trim();
     const phone = String(req.body?.phone || '').trim();
+    const udf1 = '';
+    const udf2 = '';
+    const udf3 = '';
+    const udf4 = '';
+    const udf5 = '';
 
     if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
-    if (!amount || Number(amount) < 10) return res.status(400).json({ success: false, msg: 'Minimum recharge amount is Rs. 10.' });
+    if (!formattedAmount || Number(formattedAmount) < 10) return res.status(400).json({ success: false, msg: 'Minimum recharge amount is Rs. 10.' });
     if (!email) return res.status(400).json({ success: false, msg: 'Email is required for PayU checkout.' });
 
     const txnid = `TXN_${Date.now()}`;
     const productinfo = userId;
     const surl = `${API_BASE_URL}/api/payments/payu-success`;
     const furl = `${API_BASE_URL}/api/payments/payu-failure`;
-    const hashString = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${salt}`;
+    const hashString = `${key}|${txnid}|${formattedAmount}|${productinfo}|${firstname}|${email}|${udf1}|${udf2}|${udf3}|${udf4}|${udf5}||||||${salt}`;
     const hash = sha512(hashString);
 
     return res.status(200).json({
@@ -52,11 +57,16 @@ router.post('/initiate-payu', async (req, res) => {
       payload: {
         key,
         txnid,
-        amount,
+        amount: formattedAmount,
         productinfo,
         firstname,
         email,
         phone,
+        udf1,
+        udf2,
+        udf3,
+        udf4,
+        udf5,
         surl,
         furl,
         hash,
