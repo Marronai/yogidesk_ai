@@ -1578,8 +1578,8 @@ const getDoctorTemplateProfile = async (userId) => {
     if (!db?.from || !userId) return {};
 
     const profileLookups = [
-        { table: 'doctor_profiles', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
-        { table: 'doctor_profiles', select: 'id,name,specialization,business_category,industry,booking_link' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_booking_link,booking_link,website' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,business_category,industry,booking_link' },
         { table: 'users', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
         { table: 'clinics', select: 'id,name,specialization,clinic_booking_link,booking_link,website' }
     ];
@@ -1597,6 +1597,7 @@ const getDoctorTemplateProfile = async (userId) => {
             return {
                 ...data,
                 specialization,
+                clinicName: data.clinic_name || data.business_name || data.name || '',
                 bookingLink: data.clinic_booking_link || data.booking_link || data.website || `https://yogidesk-ai.com/book/${userId}`
             };
         }
@@ -2108,6 +2109,7 @@ app.get('/api/profile/context', async (req, res) => {
                 id: userId,
                 name: profile.name || sessionUser.user_metadata?.full_name || sessionUser.email || 'Doctor',
                 email: sessionUser.email || '',
+                clinic_name: profile.clinicName || profile.clinic_name || profile.business_name || '',
                 specialization,
                 booking_link: profile.bookingLink || `https://yogidesk-ai.com/book/${userId}`,
                 ...metaConfig
@@ -2125,6 +2127,53 @@ app.get('/api/profile/context', async (req, res) => {
                 whatsapp_business_id: ''
             }
         });
+    }
+});
+
+app.post('/api/profile/onboarding', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.body?.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        const clinicName = sanitizePlainText(req.body?.clinic_name || req.body?.clinicName, 120);
+        const specialization = normalizeSpecialization(req.body?.specialization);
+        const phoneNumberId = sanitizePlainText(req.body?.whatsapp_phone_number_id || req.body?.phoneNumberId, 80);
+
+        if (!clinicName) return res.status(400).json({ success: false, message: 'Clinic name is required.' });
+        if (!specialization) return res.status(400).json({ success: false, message: 'Specialization is required.' });
+        if (!phoneNumberId) return res.status(400).json({ success: false, message: 'Meta WhatsApp Phone Number ID is required.' });
+
+        const payload = {
+            id: userId,
+            email: sessionUser.email || null,
+            name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || clinicName,
+            clinic_name: clinicName,
+            business_name: clinicName,
+            specialization,
+            business_category: specialization,
+            whatsapp_phone_number_id: phoneNumberId,
+            meta_phone_number_id: phoneNumberId,
+            updated_at: new Date().toISOString()
+        };
+
+        const savedProfile = await upsertSingleRowSafely({
+            db,
+            table: 'doctor_profiles',
+            row: payload
+        });
+
+        return res.status(200).json({
+            success: true,
+            profile: savedProfile || payload
+        });
+    } catch (error) {
+        console.error('Profile onboarding save error:', error.message || error);
+        return res.status(500).json({ success: false, message: error.message || 'Unable to save onboarding profile.' });
     }
 });
 

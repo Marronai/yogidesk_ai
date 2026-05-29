@@ -144,4 +144,11 @@ const App = () => {
     <BrowserRouter>
       <AuthProvider>
         <WalletProvider>
-          <AppCon
+          <AppContent />
+        </WalletProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+};
+
+export default App;

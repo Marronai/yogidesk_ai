@@ -5,7 +5,15 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export const handleGoogleSignIn = async (redirectTo = `${window.location.origin}/auth-success`) => {
+const getSiteOrigin = () => (
+  import.meta.env.VITE_SITE_URL ||
+  import.meta.env.VITE_PUBLIC_SITE_URL ||
+  window.location.origin
+).replace(/\/+$/, '');
+
+export const getOAuthRedirectUrl = (path = '/auth-success') => `${getSiteOrigin()}${path.startsWith('/') ? path : `/${path}`}`;
+
+export const handleGoogleSignIn = async (redirectTo = getOAuthRedirectUrl('/auth-success')) => {
   return supabase.auth.signInWithOAuth({
     provider: 'google',
     options: { redirectTo },

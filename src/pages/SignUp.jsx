@@ -5,7 +5,7 @@ import {
   Star, CheckCircle, Eye, EyeOff, Briefcase 
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
+import { getOAuthRedirectUrl, handleGoogleSignIn, supabase } from '../config/supabaseClient';
 
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { persistSupabaseSession } from '../utils/authSession';
@@ -17,6 +17,7 @@ const SignUp = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
+  const [countdown, setCountdown] = useState(0);
 
   // Signup Steps State (1 = Details, 2 = Confirm/Activation Screen)
   const [step, setStep] = useState(1);
@@ -53,6 +54,14 @@ const SignUp = () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (countdown <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      setCountdown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
 
   const handleSmsOtpChange = (element, index) => {
     if (isNaN(element.value)) return;
@@ -115,7 +124,22 @@ const SignUp = () => {
     });
     setPendingUser(user || null);
     setSmsOtp(["", "", "", "", "", ""]);
+    setCountdown(59);
     setStep(3);
+  };
+
+  const handleResendSignupOtp = async () => {
+    if (countdown > 0) return;
+    const email = (pendingUser?.email || formData.email || '').trim().toLowerCase();
+    if (!email) return;
+    setLoading(true);
+    try {
+      await startSignupEmailVerification(pendingUser, email);
+    } catch (error) {
+      alert(error?.response?.data?.msg || error.message || 'Unable to resend OTP.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // ✅ HELPER: LocalStorage token configuration dashboard navigation ke liye
@@ -144,7 +168,7 @@ const SignUp = () => {
     try {
       setLoading(true);
       setStep(4);
-      const { error } = await handleGoogleSignIn(`${window.location.origin}/signup`);
+      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success'));
       if (error) throw error;
     } catch (err) {
       alert(err.message || "Google Signup Failed");
@@ -453,9 +477,18 @@ const SignUp = () => {
                   {!loading && <ArrowRight size={20}/>}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={handleResendSignupOtp}
+                  disabled={loading || countdown > 0}
+                  className={`w-full py-2 rounded-xl font-bold transition ${countdown > 0 ? 'cursor-not-allowed text-gray-400' : 'text-[#FF6B00] hover:underline'}`}
+                >
+                  {countdown > 0 ? `Resend OTP in ${countdown}s` : 'Resend OTP'}
+                </button>
+
                 <button 
                   type="button" 
-                  onClick={() => setStep(1)} 
+                  onClick={() => { setCountdown(0); setStep(1); }} 
                   className="w-full text-gray-500 py-2 rounded-xl font-medium transition hover:text-gray-700"
                 >
                   Back to Edit Details

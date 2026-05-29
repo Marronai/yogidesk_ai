@@ -20,6 +20,7 @@ const Login = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [pendingCredentials, setPendingCredentials] = useState(null);
+  const [countdown, setCountdown] = useState(0);
   
   // Login flow is intentionally two-step: password check first, dashboard routing only after OTP.
   const [step, setStep] = useState('login');
@@ -67,6 +68,14 @@ const Login = () => {
     const timer = setInterval(() => setCurrentSlide((prev) => (prev + 1) % slides.length), 4000);
     return () => clearInterval(timer);
   }, [authLoading, isAuthenticated, loading, navigate, pendingCredentials, step, slides.length]);
+
+  useEffect(() => {
+    if (countdown <= 0) return undefined;
+    const timer = window.setInterval(() => {
+      setCountdown((value) => Math.max(0, value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [countdown]);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -117,7 +126,20 @@ const Login = () => {
 
     setPendingUser(user);
     setOtp(["", "", "", "", "", ""]);
+    setCountdown(59);
     setStep('otp');
+  };
+
+  const handleResendOtp = async () => {
+    if (countdown > 0 || !pendingCredentials?.email) return;
+    setLoading(true);
+    try {
+      await startLoginEmailVerification(pendingUser, pendingCredentials.email);
+    } catch (error) {
+      alert(error?.response?.data?.msg || error.message || 'Unable to resend OTP.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // 🌍 GOOGLE LOGIN HANDLER (Supabase Native Auth)
@@ -416,7 +438,16 @@ const Login = () => {
                   {!loading && <KeyRound size={20}/>}
                </button>
 
-               <button type="button" onClick={() => { setStep('login'); setPendingCredentials(null); setPendingUser(null); setOtp(["", "", "", "", "", ""]); }} className="w-full text-sm text-gray-500 hover:text-gray-800 font-bold">
+               <button
+                 type="button"
+                 onClick={handleResendOtp}
+                 disabled={loading || countdown > 0}
+                 className={`w-full text-sm font-bold transition ${countdown > 0 ? 'cursor-not-allowed text-gray-400' : 'text-[#FF6B00] hover:underline'}`}
+               >
+                 {countdown > 0 ? `Resend OTP in ${countdown}s` : 'Resend OTP'}
+               </button>
+
+               <button type="button" onClick={() => { setStep('login'); setPendingCredentials(null); setPendingUser(null); setCountdown(0); setOtp(["", "", "", "", "", ""]); }} className="w-full text-sm text-gray-500 hover:text-gray-800 font-bold">
                  Return to Login Screen
                </button>
             </MotionForm>
