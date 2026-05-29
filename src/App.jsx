@@ -37,8 +37,6 @@ import AdminLogin from './admin/AdminLogin';
 import AdminPrivateRoute from './admin/AdminPrivateRoute';
 import TermsConditions from './pages/TermsConditions';
 import Footer from './components/Footer';
-import SuperAdminDashboard from './pages/SuperAdminDashboard';
-import SuperAdminRoute from './components/SuperAdminRoute';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
  // Agar navbar bhi global hai
@@ -48,7 +46,7 @@ const AppContent = () => {
   const location = useLocation();
   
   // Comprehensive internal route exclusion array
-  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/admin-control-center', '/yogi-core-control-center'];
+  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team'];
   
   // Check if current URL starts with any internal application route
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
@@ -117,14 +115,6 @@ const AppContent = () => {
               <Route path="/hospital/discharge" element={<HospitalDischarge />} />
               <Route path="/payment-status" element={<PaymentStatus />} />
 
-          </Route>
-
-          {/* ============================== */}
-          {/* 4. SUPER ADMIN (HIDDEN)        */}
-          {/* ============================== */}
-          <Route element={<SuperAdminRoute />}>
-            <Route path="/admin-control-center" element={<SuperAdminDashboard />} />
-            <Route path="/yogi-core-control-center" element={<SuperAdminDashboard />} />
           </Route>
 
           {/* ============================== */}

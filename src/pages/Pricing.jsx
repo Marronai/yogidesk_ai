@@ -1,133 +1,170 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowLeft, Check, Hospital, ShieldCheck, Stethoscope, Users2, Wallet } from 'lucide-react';
-import { useWallet } from '../context/WalletContext';
+import React, { useMemo, useState } from 'react';
 
-const plans = [
-  {
-    name: 'Starter Clinic',
-    price: 199,
-    icon: <Stethoscope size={30} />,
-    accent: 'text-blue-600 bg-blue-50',
-    features: [
-      'Up to 500 Active Patients',
-      'Single Doctor Access',
-      'Auto Appointment Reminders',
-      '50+ Custom Templates',
-      'Wallet Integration',
-    ],
-  },
-  {
-    name: 'Growth Clinic',
-    price: 399,
-    icon: <Users2 size={30} />,
-    accent: 'text-orange-600 bg-orange-50',
-    popular: true,
-    features: [
-      'Up to 2,000 Active Patients',
-      'Admin + 2 Staff Members',
-      'Shared Team Inbox',
-      'Multi-Doctor Schedule',
-      'Priority Approvals',
-    ],
-  },
-  {
-    name: 'Multi-Specialty Hospital',
-    price: 799,
-    icon: <Hospital size={30} />,
-    accent: 'text-emerald-600 bg-emerald-50',
-    features: [
-      'Unlimited Patients',
-      'Admin + 10 Staff/Doctors Access',
-      'Facebook/Instagram Ads CRM',
-      'Advanced Ghost Mode & Internal Notes',
-    ],
-  },
+const DURATIONS = [
+  { id: '3m', label: '3 Months', months: 3 },
+  { id: '6m', label: '6 Months (Save 15%)', months: 6 },
+  { id: '12m', label: '1 Year (Save 30% - RECOMMENDED)', months: 12 },
 ];
 
-const Pricing = () => {
-  return (
-    <div className="min-h-screen bg-[#fcfcfc] py-16 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-7xl mx-auto">
-        <Link to="/" className="inline-flex items-center text-sm font-bold text-slate-400 hover:text-orange-600 transition-all mb-12">
-          <ArrowLeft size={18} className="mr-2" /> Back to Yogi Desk AI
-        </Link>
-
-        <div className="text-center mb-14">
-          <div className="inline-flex items-center gap-2 rounded-full border border-orange-100 bg-orange-50 px-5 py-2 text-xs font-black uppercase tracking-widest text-orange-700">
-            <ShieldCheck size={16} /> All Prices Include 18% GST - No Hidden Charges
-          </div>
-          <h1 className="mt-6 text-4xl md:text-6xl font-black text-slate-950 tracking-tight">
-            Affordable WhatsApp care plans for every clinic
-          </h1>
-          <p className="mt-5 text-lg font-medium text-slate-500 max-w-2xl mx-auto">
-            Pick a flat monthly plan, recharge your Yogi Wallet, and pay only for messages you send.
-          </p>
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-3">
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              className={`relative flex flex-col rounded-[2rem] border bg-white p-8 shadow-sm transition hover:-translate-y-1 hover:shadow-xl ${
-                plan.popular ? 'border-orange-300 ring-4 ring-orange-50' : 'border-slate-100'
-              }`}
-            >
-              {plan.popular && (
-                <div className="absolute -top-4 left-8 rounded-full bg-orange-600 px-4 py-1 text-[10px] font-black uppercase tracking-widest text-white shadow-lg">
-                  Most Popular
-                </div>
-              )}
-
-              <div className={`mb-6 flex h-14 w-14 items-center justify-center rounded-2xl ${plan.accent}`}>
-                {plan.icon}
-              </div>
-              <h2 className="text-2xl font-black text-slate-950">{plan.name}</h2>
-              <div className="mt-5 flex items-end gap-2">
-                <span className="text-5xl font-black text-slate-950">₹{plan.price}</span>
-                <span className="pb-2 text-sm font-bold text-slate-400">/ mo</span>
-              </div>
-
-              <ul className="mt-8 flex-1 space-y-4">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-3 text-sm font-semibold text-slate-600">
-                    <Check size={18} className="mt-0.5 shrink-0 text-emerald-500" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <Link
-                to="/signup"
-                className={`mt-8 inline-flex items-center justify-center rounded-2xl px-6 py-4 text-sm font-black uppercase tracking-widest transition ${
-                  plan.popular
-                    ? 'bg-orange-600 text-white shadow-lg shadow-orange-100 hover:bg-orange-700'
-                    : 'bg-slate-950 text-white hover:bg-slate-800'
-                }`}
-              >
-                Start with {plan.name}
-              </Link>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-10 grid gap-6 rounded-[2rem] border border-orange-100 bg-orange-50 p-6 md:grid-cols-3">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-orange-600">
-              <Wallet size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-black text-slate-900">Wallet rates</p>
-              <p className="text-xs font-semibold text-slate-500">Reminders ₹0.20/msg, marketing ₹0.90/msg</p>
-            </div>
-          </div>
-          <div className="md:col-span-2 text-sm font-semibold text-orange-800">
-            Manual UPI payments and wallet top-ups use <strong>yogidesk@icici</strong>. Recharge with ₹200 or more to unlock cashback eligibility.
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+const BASE_PRICES = {
+  '3m': { starter: 199, growth: 399, multi: 799 },
+  '6m': { starter: 169, growth: 339, multi: 679 },
+  '12m': { starter: 139, growth: 279, multi: 559 },
 };
 
-export default Pricing;
+const PLANS = [
+  { id: 'starter', name: 'STARTER', features: ['500 Patients', 'Standard Reminders', '50+ Templates'] },
+  { id: 'growth', name: 'GROWTH', features: ['2,000 Patients', 'Admin + 2 Staff', 'Shared Team Inbox'], popular: true },
+  { id: 'multi', name: 'MULTI-SPECIALTY', features: ['Unlimited Patients', 'Admin + 10 Staff', 'Priority API Access'] },
+];
+
+export default function Pricing() {
+  const [durationId, setDurationId] = useState('12m');
+  const [selectedPlan, setSelectedPlan] = useState('growth');
+  const [sliderValue, setSliderValue] = useState(2000);
+
+  const duration = useMemo(() => DURATIONS.find((d) => d.id === durationId) || DURATIONS[0], [durationId]);
+  const prices = useMemo(() => BASE_PRICES[durationId] || BASE_PRICES['12m'], [durationId]);
+
+  const COMPETITOR_SUB_MONTHLY = 2499;
+  const COMPETITOR_MSG_RATE = 2.2;
+  const YOGI_MSG_RATE = 0.55;
+
+  const months = duration.months;
+  const selectedPlanPrice = prices[selectedPlan] || prices.growth;
+
+  const competitorCost = Math.round((sliderValue * COMPETITOR_MSG_RATE * months) + (COMPETITOR_SUB_MONTHLY * months));
+  const yogiCost = Math.round((sliderValue * YOGI_MSG_RATE * months) + (selectedPlanPrice * months));
+  const savings = Math.max(0, competitorCost - yogiCost);
+  const periodLabel = months >= 12 ? 'year' : `${months} months`;
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 py-8 px-4">
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-slate-200">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 px-4 py-3">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-md bg-emerald-500 flex items-center justify-center text-white font-bold">Y</div>
+            <div className="text-sm font-semibold">Yogi Desk</div>
+            <nav className="text-sm text-slate-600">Dashboard &gt; Subscription Management</nav>
+          </div>
+          <div>
+            <button onClick={() => (window.location.href = '/dashboard')} className="inline-flex items-center gap-2 rounded-md bg-slate-900 text-white px-3 py-2 text-sm">Back to Workspace</button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto mt-8">
+        <section className="text-center mb-8">
+          <h1 className="text-3xl font-extrabold tracking-tight">Pricing & Plans</h1>
+          <p className="text-slate-500 mt-2">Choose the right plan and lock in discounts for longer durations.</p>
+        </section>
+
+        <section className="flex justify-center mb-8">
+          <div className="inline-flex rounded-full bg-slate-100 p-1 shadow-sm">
+            {DURATIONS.map((d) => (
+              <button key={d.id} onClick={() => setDurationId(d.id)} className={`px-4 py-2 rounded-full text-sm font-semibold ${durationId === d.id ? 'bg-white shadow text-slate-900' : 'text-slate-600'}`}>
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+          {PLANS.map((plan) => (
+            <div key={plan.id} className={`relative rounded-2xl p-6 border ${plan.popular ? 'border-emerald-300' : 'border-slate-200'} bg-white shadow-sm`}>
+              {plan.popular && <div className="absolute -top-3 left-4 bg-amber-500 text-white text-xs px-3 py-1 rounded-full font-bold">Most Popular</div>}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold">{plan.name}</h3>
+                  <p className="text-sm text-slate-500 mt-1">{plan.popular ? 'Popular choice for growing clinics' : 'Designed for clinics'}</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-extrabold">₹{prices[plan.id]}<span className="text-sm font-medium">/mo</span></div>
+                  <div className="text-xs text-slate-500">billed {months} months</div>
+                </div>
+              </div>
+              <ul className="mt-6 space-y-2 text-sm text-slate-700">
+                {plan.features.map((f) => (
+                  <li key={f} className="flex items-start gap-3"><span className="text-emerald-500 mt-1">●</span><span>{f}</span></li>
+                ))}
+              </ul>
+              <div className="mt-6">
+                <button onClick={() => setSelectedPlan(plan.id)} className={`w-full rounded-md px-4 py-2 font-semibold ${selectedPlan === plan.id ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-900'}`}>{selectedPlan === plan.id ? 'Selected' : 'Choose Plan'}</button>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="text-xl font-bold mb-4">Competitor Comparison</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left rounded-xl border-separate border-spacing-0">
+              <thead>
+                <tr className="text-sm text-slate-500">
+                  <th className="px-4 py-3">Feature</th>
+                  <th className="px-4 py-3">Wati / Interakt</th>
+                  <th className="px-4 py-3">Twilio</th>
+                  <th className="px-4 py-3">Yogi Desk</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm">
+                <tr className="border-t border-slate-200 bg-white">
+                  <td className="px-4 py-3 font-semibold">Platform Subscription</td>
+                  <td className="px-4 py-3">₹2,499/mo</td>
+                  <td className="px-4 py-3">API only</td>
+                  <td className="px-4 py-3 border-l-4 border-emerald-400 bg-emerald-50 relative"><div className="absolute -left-3 -top-3 bg-emerald-600 text-white text-xs px-2 py-1 rounded">Most Cost-Effective</div><div className="font-semibold">₹139/mo</div></td>
+                </tr>
+                <tr className="border-t border-slate-200 bg-white"><td className="px-4 py-3 font-semibold">Utility Reminders Cost</td><td className="px-4 py-3">~₹1.50 - ₹2.50/msg</td><td className="px-4 py-3">~₹1.80 - ₹2.20/msg</td><td className="px-4 py-3 border-l-4 border-emerald-400 bg-emerald-50">₹0.20/msg</td></tr>
+                <tr className="border-t border-slate-200 bg-white"><td className="px-4 py-3 font-semibold">Marketing Broadcast Cost</td><td className="px-4 py-3">~₹1.50 - ₹2.50/msg</td><td className="px-4 py-3">~₹1.80 - ₹2.20/msg</td><td className="px-4 py-3 border-l-4 border-emerald-400 bg-emerald-50">₹0.90/msg</td></tr>
+                <tr className="border-t border-slate-200 bg-white"><td className="px-4 py-3 font-semibold">Setup Ease</td><td className="px-4 py-3">Complex</td><td className="px-4 py-3">Developer Required</td><td className="px-4 py-3 border-l-4 border-emerald-400 bg-emerald-50">1-Click Doctor Workspace</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mb-20 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+          <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <h3 className="text-lg font-bold mb-3">Savings Calculator</h3>
+            <p className="text-sm text-slate-500 mb-4">Estimate your costs vs a typical competitor. Adjust monthly message volume and duration.</p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold">Monthly Message Volume</label>
+                <input type="range" min={500} max={20000} step={100} value={sliderValue} onChange={(e) => setSliderValue(Number(e.target.value))} className="w-full mt-3" />
+                <div className="flex justify-between text-xs text-slate-500 mt-2"><span>500</span><span>{sliderValue.toLocaleString()} msgs</span><span>20,000</span></div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+                <div className="p-4 rounded-md bg-slate-50 border border-slate-100 text-center"><div className="text-xs text-slate-500">Competitor Cost</div><div className="text-2xl font-extrabold text-rose-500">₹{competitorCost.toLocaleString()}</div><div className="text-xs text-slate-400">for {periodLabel}</div></div>
+                <div className="p-4 rounded-md bg-slate-50 border border-slate-100 text-center"><div className="text-xs text-slate-500">Yogi Desk Cost</div><div className="text-2xl font-extrabold text-emerald-600">₹{yogiCost.toLocaleString()}</div><div className="text-xs text-slate-400">({selectedPlan.toUpperCase()} plan)</div></div>
+                <div className="p-4 rounded-md bg-emerald-50 border border-emerald-100 text-center"><div className="text-xs text-slate-500">Estimated Savings</div><div className="text-3xl font-extrabold text-emerald-700">₹{savings.toLocaleString()}</div><div className="text-xs text-slate-400">vs competitor for {periodLabel}</div></div>
+              </div>
+
+              <div className="mt-4 p-4 rounded-md bg-gradient-to-r from-emerald-50 to-white border border-emerald-100">
+                <div className="text-xl font-bold text-emerald-800">🎉 Dr. Doctor, you are saving <span className="text-emerald-900">₹{savings.toLocaleString()}</span> every <span className="font-semibold">{periodLabel}</span> by switching to Yogi Desk!</div>
+                <div className="text-sm text-slate-500 mt-2">Based on {sliderValue.toLocaleString()} messages per month and the {duration.label} billing cycle.</div>
+              </div>
+            </div>
+          </div>
+
+          <aside className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <h4 className="text-lg font-bold mb-3">Plan Quick Pick</h4>
+            <div className="space-y-3">
+              {PLANS.map((p) => (
+                <div key={p.id} className={`flex items-center justify-between p-3 rounded-md ${selectedPlan === p.id ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-100'}`}>
+                  <div>
+                    <div className="text-sm font-semibold">{p.name}</div>
+                    <div className="text-xs text-slate-500">₹{prices[p.id]}/mo</div>
+                  </div>
+                  <div>
+                    <button onClick={() => setSelectedPlan(p.id)} className={`px-3 py-1 rounded-md text-sm font-semibold ${selectedPlan === p.id ? 'bg-emerald-600 text-white' : 'bg-white text-slate-700 border border-slate-200'}`}>{selectedPlan === p.id ? 'Active' : 'Select'}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </section>
+      </main>
+    </div>
+  );
+}
