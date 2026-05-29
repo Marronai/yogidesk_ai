@@ -615,6 +615,103 @@ const processFailedDeliveryWebhook = async (payload = {}) => {
     }
 };
 
+const extractMessageStatusUpdates = (payload = {}) => {
+    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+    const updates = [];
+    for (const entry of payload.entry) {
+        if (!Array.isArray(entry.changes)) continue;
+
+        for (const change of entry.changes) {
+            if (change.field !== 'messages') continue;
+            const value = change.value || {};
+            const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+
+            for (const statusRow of statuses) {
+                const messageId = statusRow.id || statusRow.message_id || null;
+                const status = String(statusRow.status || '').trim().toUpperCase();
+                if (!messageId || !status) continue;
+
+                updates.push({
+                    messageId,
+                    status,
+                    timestamp: statusRow.timestamp || null,
+                    recipientPhone: sanitizeMetaPhoneNumber(statusRow.recipient_id || ''),
+                    error: statusRow.errors?.[0] || null,
+                    raw: statusRow
+                });
+            }
+        }
+    }
+
+    return updates;
+};
+
+const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
+    if (!supabase?.from) return;
+    const db = supabaseAdmin || supabase;
+
+    for (const update of extractMessageStatusUpdates(payload)) {
+        try {
+            let { data: messages, error } = await db
+                .from('inbox_messages')
+                .select('id, chat_id, metadata')
+                .filter('metadata->>meta_message_id', 'eq', update.messageId)
+                .limit(10);
+
+            if (error || !Array.isArray(messages) || messages.length === 0) {
+                const fallback = await db
+                    .from('inbox_messages')
+                    .select('id, chat_id, metadata')
+                    .filter('metadata->>message_id', 'eq', update.messageId)
+                    .limit(10);
+                messages = fallback.data || [];
+                error = fallback.error;
+            }
+
+            if (error) {
+                console.error('Inbox delivery status lookup failed:', error.message || error);
+                continue;
+            }
+
+            for (const message of messages || []) {
+                const nextMetadata = {
+                    ...(message.metadata || {}),
+                    delivery_status: update.status,
+                    delivery_status_at: update.timestamp,
+                    delivery_error: update.error,
+                    last_meta_status: update.raw
+                };
+
+                const { error: updateError } = await db
+                    .from('inbox_messages')
+                    .update({
+                        status: update.status,
+                        metadata: nextMetadata
+                    })
+                    .eq('id', message.id);
+
+                if (updateError) {
+                    console.error('Inbox delivery status update failed:', updateError.message || updateError);
+                    continue;
+                }
+
+                if (message.chat_id) {
+                    await db
+                        .from('inbox_chats')
+                        .update({
+                            status: update.status,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', message.chat_id);
+                }
+            }
+        } catch (error) {
+            console.error('Inbox delivery status sync failed:', error.message || error);
+        }
+    }
+};
+
 const verifyWhatsAppWebhook = (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -636,6 +733,7 @@ const handleWhatsAppWebhook = (req, res) => {
     Promise.resolve()
         .then(async () => {
             await processTemplateStatusWebhook(req.body);
+            await updateInboxMessageDeliveryStatuses(req.body);
             await processFailedDeliveryWebhook(req.body);
         })
         .catch((error) => {
@@ -2302,6 +2400,137 @@ const safeInsertRows = async ({ table, rows, pruneMissingColumns = true }) => {
 
     return { success: false };
 };
+
+const resolveInboxRequestUserId = async (req) => {
+    const sessionUser = await getSupabaseSessionUser(req);
+    const requestedUserId = String(req.query.userId || req.body?.userId || '').trim();
+
+    if (sessionUser?.id && requestedUserId && requestedUserId !== sessionUser.id) {
+        const error = new Error('Forbidden');
+        error.statusCode = 403;
+        throw error;
+    }
+
+    return sessionUser?.id || requestedUserId || '';
+};
+
+app.get('/api/inbox/chats', async (req, res) => {
+    try {
+        if (!supabase?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+        const userId = await resolveInboxRequestUserId(req);
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+
+        const db = supabaseAdmin || supabase;
+        const { data: teamMembers, error: teamError } = await db
+            .from('team_members')
+            .select('id, name, email, status')
+            .eq('admin_id', userId)
+            .in('status', ['ACTIVE', 'INVITED']);
+
+        if (teamError && teamError.code !== 'PGRST205') {
+            console.error('Inbox team member load failed:', teamError.message || teamError);
+        }
+
+        let chatResult = await db
+            .from('inbox_chats')
+            .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
+            .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
+            .order('updated_at', { ascending: false });
+
+        if (chatResult.error && getMissingSchemaColumn(chatResult.error)) {
+            chatResult = await db
+                .from('inbox_chats')
+                .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at')
+                .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
+                .order('updated_at', { ascending: false });
+        }
+
+        if (chatResult.error) throw chatResult.error;
+
+        let chats = chatResult.data || [];
+        if (chats.length === 0) {
+            const { data: messageRows, error: messageError } = await db
+                .from('inbox_messages')
+                .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, status, created_at')
+                .or(`workspace_id.eq.${userId},sender_id.eq.${userId}`)
+                .order('created_at', { ascending: false })
+                .limit(50);
+
+            if (messageError && !getMissingSchemaColumn(messageError)) throw messageError;
+
+            const fallbackChats = new Map();
+            for (const item of messageRows || []) {
+                const phone = item.receiver_phone || item.sender_phone || '';
+                const key = item.chat_id || phone || item.created_at;
+                if (fallbackChats.has(key)) continue;
+                fallbackChats.set(key, {
+                    id: item.chat_id || `message-${key}`,
+                    name: phone || 'Patient',
+                    patient_name: phone || 'Patient',
+                    phone,
+                    last_message: item.message_text || item.message_body || item.body || item.text || '',
+                    updated_at: item.created_at,
+                    status: item.status || 'SENT',
+                    unread_count: 0,
+                    metadata: { messages: [item], source_chat_id: item.chat_id || null },
+                });
+            }
+            chats = Array.from(fallbackChats.values());
+        }
+
+        return res.status(200).json({
+            success: true,
+            chats,
+            teamMembers: teamMembers || []
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('Inbox chat API failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load inbox.' });
+    }
+});
+
+app.get('/api/inbox/messages', async (req, res) => {
+    try {
+        if (!supabase?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+        const userId = await resolveInboxRequestUserId(req);
+        const chatId = String(req.query.chatId || '').trim();
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+        if (!chatId || chatId.startsWith('message-')) return res.status(200).json({ success: true, messages: [] });
+
+        const db = supabaseAdmin || supabase;
+        const { data: chat, error: chatError } = await db
+            .from('inbox_chats')
+            .select('id')
+            .eq('id', chatId)
+            .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
+            .maybeSingle();
+
+        if (chatError) throw chatError;
+        if (!chat?.id) return res.status(404).json({ success: false, message: 'Chat not found.' });
+
+        let result = await db
+            .from('inbox_messages')
+            .select('id, chat_id, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
+            .eq('chat_id', chatId)
+            .order('created_at', { ascending: true });
+
+        if (result.error && getMissingSchemaColumn(result.error)) {
+            result = await db
+                .from('inbox_messages')
+                .select('id, chat_id, body, text, message_body, sender, from_me, type, is_private_note, status, created_at')
+                .eq('chat_id', chatId)
+                .order('created_at', { ascending: true });
+        }
+
+        if (result.error) throw result.error;
+        return res.status(200).json({ success: true, messages: result.data || [] });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('Inbox messages API failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load messages.' });
+    }
+});
 
 app.post('/api/campaigns/send', async (req, res) => {
     try {

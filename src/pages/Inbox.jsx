@@ -20,6 +20,7 @@ import {
   Loader,
 } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 
@@ -33,6 +34,7 @@ const mapStoredMessage = (item = {}) => ({
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
   is_private_note: Boolean(item.is_private_note),
+  status: item.status || item.metadata?.delivery_status || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
 const logInboxError = (error) => {
@@ -132,20 +134,35 @@ const InboxContent = () => {
 
     let teamData = [];
     let chatData = [];
+    let loadedFromApi = false;
 
     try {
-      const { data, error } = await supabase
-        .from('team_members')
-        .select('id, name, email, status')
-        .eq('admin_id', user.id)
-        .in('status', ['ACTIVE', 'INVITED']);
-      if (error) throw error;
-      teamData = data || [];
+      const response = await api.get('/api/inbox/chats', { params: { userId: user.id } });
+      if (response.data?.success) {
+        teamData = response.data.teamMembers || [];
+        chatData = response.data.chats || [];
+        loadedFromApi = true;
+      }
     } catch (error) {
       logInboxError(error);
     }
 
+    if (!loadedFromApi) {
+      try {
+        const { data, error } = await supabase
+          .from('team_members')
+          .select('id, name, email, status')
+          .eq('admin_id', user.id)
+          .in('status', ['ACTIVE', 'INVITED']);
+        if (error) throw error;
+        teamData = data || [];
+      } catch (error) {
+        logInboxError(error);
+      }
+    }
+
     try {
+      if (loadedFromApi) throw new Error('__INBOX_API_LOADED__');
       let result = await supabase
         .from('inbox_chats')
         .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
@@ -220,7 +237,7 @@ const InboxContent = () => {
         }
       }
     } catch (error) {
-      logInboxError(error);
+      if (error?.message !== '__INBOX_API_LOADED__') logInboxError(error);
     }
 
     const mappedAgents = Array.isArray(teamData) && teamData.length
@@ -262,17 +279,28 @@ const InboxContent = () => {
     setMessages(storedMessages.map(mapStoredMessage));
 
     if (!chat?.id || String(chat.id).startsWith('message-')) return;
+    const user = await getUser();
+    try {
+      const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
+      if (apiResult.data?.success) {
+        setMessages((apiResult.data.messages || []).map(mapStoredMessage));
+        return;
+      }
+    } catch (error) {
+      logInboxError(error);
+    }
+
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, chat_id, body, text, message_body, sender, from_me, type, is_private_note, created_at')
+        .select('id, chat_id, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
       if (result.error) {
         result = await supabase
           .from('inbox_messages')
-          .select('id, chat_id, body, text, message_body, sender, from_me, created_at')
+          .select('id, chat_id, body, text, message_body, sender, from_me, status, created_at')
           .eq('chat_id', chat.id)
           .order('created_at', { ascending: true });
       }
@@ -284,7 +312,7 @@ const InboxContent = () => {
     } catch (error) {
       logInboxError(error);
     }
-  }, []);
+  }, [getUser]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -321,6 +349,7 @@ const InboxContent = () => {
     if (normalized === 'SENT') return <Check size={13} className="text-slate-400" />;
     if (normalized === 'DELIVERED') return <CheckCheck size={14} className="text-slate-400" />;
     if (normalized === 'READ') return <CheckCheck size={14} className="text-blue-500" />;
+    if (normalized === 'FAILED') return <AlertCircle size={13} className="text-rose-500" />;
     return null;
   };
 
@@ -652,7 +681,7 @@ const InboxContent = () => {
                     <p className="text-[13.5px] font-medium leading-relaxed">{messageText}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
-                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && <CheckCheck size={12} className="text-blue-500" />}
+                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && (renderStatusBadge(msg.status) || <Check size={12} className="text-slate-400" />)}
                     </div>
                   </div>
                 </div>
