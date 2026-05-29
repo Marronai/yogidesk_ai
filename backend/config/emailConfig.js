@@ -1,8 +1,8 @@
 const axios = require('axios');
 
 const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
-const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || 'no-reply@yogidesk-ai.com';
-const ONBOARDING_FROM_EMAIL = process.env.BREVO_ONBOARDING_FROM_EMAIL || process.env.BREVO_REPLY_TO_EMAIL || 'support@yogidesk-ai.com';
+const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || 'info@vyaparwallah.com';
+const ONBOARDING_FROM_EMAIL = process.env.BREVO_ONBOARDING_FROM_EMAIL || process.env.BREVO_REPLY_TO_EMAIL || DEFAULT_FROM_EMAIL;
 const DEFAULT_FROM_NAME = process.env.BREVO_FROM_NAME || 'Yogi Desk AI';
 const REPLY_TO_EMAIL = process.env.BREVO_REPLY_TO_EMAIL || ONBOARDING_FROM_EMAIL;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
