@@ -1500,18 +1500,42 @@ const upsertSingleRowSafely = async ({ db, table, row }) => {
     throw new Error(`Unable to save ${table}: schema cache rejected all payload columns.`);
 };
 
-const saveSubmittedMetaTemplate = async ({ db, row }) => {
+const resolveSubmittedTemplateBodyText = (...sources) => {
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        const value = source.body_text
+            || source.text
+            || source.messageBody
+            || source.content
+            || source.body
+            || source.bodyText
+            || source.body_content
+            || source.templateText;
+        if (String(value || '').trim()) return String(value).trim();
+    }
+    return '';
+};
+
+const saveSubmittedMetaTemplate = async ({ db, row, requestBody = {}, userId }) => {
     const templateData = row || {};
+    const bodyText = resolveSubmittedTemplateBodyText(requestBody, templateData);
     const cleanPayload = {
-        user_id: templateData.user_id,
-        template_name: templateData.template_name || templateData.name,
-        category: String(templateData.category || 'MARKETING').toUpperCase(),
-        language: templateData.language || 'hi',
-        body_content: templateData.body_content || templateData.body_text || templateData.text || null,
-        header_url: templateData.header_url || null,
+        user_id: userId || templateData.user_id || requestBody.user_id || requestBody.userId,
+        template_name: requestBody.template_name || requestBody.name || templateData.template_name || templateData.name || `custom_template_${Date.now()}`,
+        category: String(requestBody.category || templateData.category || 'MARKETING').toUpperCase(),
+        language: requestBody.language || templateData.language || 'hi',
+        body_text: bodyText,
+        body_content: bodyText,
+        header_url: requestBody.header_url || templateData.header_url || null,
         status: 'PENDING_APPROVAL',
-        meta_template_id: templateData.meta_template_id || null
+        meta_template_id: requestBody.meta_template_id || templateData.meta_template_id || null
     };
+
+    if (!cleanPayload.body_text || cleanPayload.body_text.trim() === '') {
+        const validationError = new Error('Validation Error: Template body text cannot be empty or null.');
+        validationError.statusCode = 400;
+        throw validationError;
+    }
 
     try {
         return await upsertSingleRowSafely({ db, table: 'submitted_meta_templates', row: cleanPayload });
@@ -1732,7 +1756,7 @@ app.post('/api/templates/submit-to-meta', async (req, res) => {
         };
 
         const [submittedTemplate, campaignTemplate] = await Promise.all([
-            saveSubmittedMetaTemplate({ db, row }),
+            saveSubmittedMetaTemplate({ db, row, requestBody, userId }),
             saveCampaignTemplateMirror({ db, row })
         ]);
 
