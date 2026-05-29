@@ -16,6 +16,7 @@ const {
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 const paymentRoutes = require('./routes/paymentRoutes');
+const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 
 const app = express();
 
@@ -2708,6 +2709,12 @@ const processCampaignQueue = async () => {
 };
 
 setInterval(processCampaignQueue, 10000);
+
+if (process.env.DISABLE_META_SYNC_WORKER !== 'true') {
+    startMetaSyncWorker({ supabase: supabaseAdmin || supabase });
+    process.once('SIGTERM', stopMetaSyncWorker);
+    process.once('SIGINT', stopMetaSyncWorker);
+}
 
 // ====== PORT LISTEN ENGINE ======
 if (require.main !== module) {
