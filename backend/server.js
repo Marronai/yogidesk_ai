@@ -2825,12 +2825,33 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         meta_result: metaResult,
         fallback_dispatch: fallbackDispatch,
     };
+    const storedMessagePreview = {
+        id: getMetaMessageId(metaResult) || `${nowIso}-${safeReceiverPhone}`,
+        chat_id: null,
+        message_text: messageBody,
+        message_body: messageBody,
+        body: messageBody,
+        text: messageBody,
+        sender: 'agent',
+        from_me: true,
+        type: 'template',
+        message_type: 'text',
+        sender_phone: safeSenderPhone,
+        receiver_phone: safeReceiverPhone,
+        workspace_id: userId,
+        sender_id: userId,
+        created_at: nowIso,
+        metadata
+    };
 
     let chatId = null;
     const { data: existingChat } = await selectInboxChatByPhone(db, recipientPhone);
 
     if (existingChat?.id) {
         chatId = existingChat.id;
+        const existingMessages = Array.isArray(existingChat.metadata?.messages)
+            ? existingChat.metadata.messages
+            : [];
         await writeInboxChatSafely({ db, chatId, payload: {
             user_id: userId,
             doctor_id: userId,
@@ -2843,6 +2864,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             metadata: {
                 ...(existingChat.metadata || {}),
                 last_template: metadata,
+                messages: [...existingMessages, { ...storedMessagePreview, chat_id: chatId }].slice(-50),
             },
         } });
     } else {
@@ -2857,7 +2879,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             last_message: messageBody,
             unread_count: 0,
             updated_at: nowIso,
-            metadata: { last_template: metadata },
+            metadata: { last_template: metadata, messages: [storedMessagePreview] },
         } });
         chatId = createdChat?.id || null;
     }

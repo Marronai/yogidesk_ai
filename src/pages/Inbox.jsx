@@ -28,10 +28,10 @@ const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
-  text: item.body || item.text || item.message_body || '',
+  text: item.message_text || item.body || item.text || item.message_body || '',
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
-  type: item.type || (item.is_private_note ? 'private' : 'public'),
+  type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
   is_private_note: Boolean(item.is_private_note),
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
@@ -118,8 +118,9 @@ const InboxContent = () => {
   ), [conversations, tagFilter]);
 
   const getUser = useCallback(async () => {
+    const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
     const { data } = await supabase.auth.getUser();    
-    return data?.user || { id: localStorage.getItem('user_id') };
+    return { ...(data?.user || {}), id: storedUserId || data?.user?.id || '' };
   }, []);
 
   const loadInbox = useCallback(async () => {
@@ -147,27 +148,55 @@ const InboxContent = () => {
     try {
       let result = await supabase
         .from('inbox_chats')
-        .select('id, name, last_message, updated_at, phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
+        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
+        .or(`user_id.eq.${user.id},doctor_id.eq.${user.id}`)
         .order('updated_at', { ascending: false });
 
       if (result.error) {
         const safeResult = await supabase
           .from('inbox_chats')
-          .select('id, name, last_message, updated_at, phone, status, unread_count, patient_name, scheduled_at')
+          .select('id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at')
+          .or(`user_id.eq.${user.id},doctor_id.eq.${user.id}`)
           .order('updated_at', { ascending: false });
         result = safeResult;
+      }
+
+      if (result.error) {
+        const unfilteredResult = await supabase
+          .from('inbox_chats')
+          .select('id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, metadata')
+          .order('updated_at', { ascending: false });
+        result = unfilteredResult;
       }
 
       if (result.error) throw result.error;
       chatData = result.data || [];
 
       if (chatData.length === 0) {
-        const messageResult = await supabase
+        let messageResult = await supabase
           .from('inbox_messages')
-          .select('chat_id, message_body, body, text, sender, from_me, type, receiver_phone, sender_phone, workspace_id, created_at')
+          .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, created_at')
           .eq('workspace_id', user.id)
           .order('created_at', { ascending: false })
           .limit(50);
+
+        if (messageResult.error || !messageResult.data?.length) {
+          messageResult = await supabase
+            .from('inbox_messages')
+            .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, created_at')
+            .eq('sender_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        }
+
+        if (messageResult.error) {
+          messageResult = await supabase
+            .from('inbox_messages')
+            .select('chat_id, message_body, body, text, sender, from_me, type, receiver_phone, sender_phone, workspace_id, created_at')
+            .eq('workspace_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(50);
+        }
 
         if (!messageResult.error && Array.isArray(messageResult.data)) {
           const fallbackChats = new Map();
@@ -180,7 +209,7 @@ const InboxContent = () => {
               name: phone || 'Patient',
               patient_name: phone || 'Patient',
               phone,
-              last_message: item.message_body || item.body || item.text || '',
+              last_message: item.message_text || item.message_body || item.body || item.text || '',
               updated_at: item.created_at,
               status: 'SENT',
               unread_count: 0,
@@ -210,7 +239,7 @@ const InboxContent = () => {
         return {
           id: chat.id,
           name: displayName,
-          phone: chat?.phone || '',
+          phone: chat?.phone || chat?.patient_phone || '',
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
           unread: count,
