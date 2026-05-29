@@ -49,6 +49,12 @@ const formatDoctorName = (name = 'Doctor') => {
   const cleanName = String(name || 'Doctor').trim();
   return /^dr\.?\s/i.test(cleanName) ? cleanName : `Dr. ${cleanName}`;
 };
+const getGreetingPhrase = (name = 'Doctor') => {
+  const currentHour = new Date().getHours();
+  if (currentHour >= 5 && currentHour < 12) return `Good morning, ${formatDoctorName(name)} ☀️`;
+  if (currentHour >= 12 && currentHour < 17) return `Good afternoon, ${formatDoctorName(name)} 🌤️`;
+  return `Good evening, ${formatDoctorName(name)} 🌙`;
+};
 const backendPath = (path) => String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api')
   ? path.replace(/^\/api/, '')
   : path;
@@ -159,7 +165,8 @@ const DashboardHome = () => {
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
   const [walletBalance, setWalletBalance] = useState(0);
-  const [showWelcome, setShowWelcome] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [isDashboardInitialized, setIsDashboardInitialized] = useState(false);
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Doctor',
@@ -178,9 +185,13 @@ const DashboardHome = () => {
   const [messageHistory, setMessageHistory] = useState(() => buildSevenDayWindow());
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowWelcome(false), 900);
-    return () => window.clearTimeout(timer);
-  }, []);
+    const storageKey = 'dashboard_greeting_shown';
+    const todayKey = new Date().toISOString().slice(0, 10);
+    if (!isDashboardInitialized) return;
+    if (localStorage.getItem(storageKey) === todayKey) return;
+    localStorage.setItem(storageKey, todayKey);
+    setShowWelcome(true);
+  }, [isDashboardInitialized]);
 
   useEffect(() => {
     let active = true;
@@ -368,6 +379,7 @@ const DashboardHome = () => {
         leakageCount: Array.isArray(leakageRows?.data) ? leakageRows.data.length : 0,
         peakWindow,
       });
+      setIsDashboardInitialized(true);
     };
 
     loadDashboard();
@@ -377,10 +389,11 @@ const DashboardHome = () => {
   const isStaff = profile.role === 'STAFF';
   const walletPercent = Math.min(100, Math.max(0, (walletBalance / WEEK_BASELINE_BALANCE) * 100));
   const walletTone = walletBalance >= 700
-    ? { fill: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50', label: 'Healthy credit runway' }
+    ? 'bg-emerald-500'
     : walletBalance >= 200
-      ? { fill: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50', label: 'Recharge before a large broadcast' }
-      : { fill: 'bg-red-500 animate-pulse', text: 'text-red-700', bg: 'bg-red-50', label: 'Low credits! Reminders may halt soon.' };
+      ? 'bg-amber-500'
+      : 'bg-red-500 animate-pulse';
+  const isLowWallet = walletBalance < 200;
   const weeklyTrendUp = stats.weeklySent >= stats.lastWeekSent;
   const totalTemplates = templateStats.approved + templateStats.pending + templateStats.rejected;
   const chartTotal = useMemo(() => messageHistory.reduce((total, item) => total + Number(item.total || 0), 0), [messageHistory]);
@@ -388,13 +401,42 @@ const DashboardHome = () => {
   return (
     <div className="space-y-8 pb-10">
       {showWelcome && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/90 px-4 backdrop-blur-sm">
-          <div className="flex flex-col items-center text-center">
-            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-md bg-orange-600 text-white shadow-xl shadow-orange-200 animate-bounce">
-              <Sparkles size={30} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl ring-1 ring-slate-200">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-600 text-white">
+              <Sparkles size={28} />
             </div>
-            <h2 className="text-2xl font-black text-slate-900">Welcome to your dashboard</h2>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Your clinic workspace is ready.</p>
+            <h2 className="mt-5 text-2xl font-black text-slate-900">{getGreetingPhrase(profile.name)}</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              {isLowWallet
+                ? 'Your wallet balance is currently low. Please top up your credits to ensure uninterrupted automated patient broadcasts and alerts.'
+                : 'Yogi Desk is fully active. You have active analytics and patients awaiting care updates today.'}
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {isLowWallet ? (
+                <Link to="/dashboard/wallet" className="inline-flex w-full justify-center rounded-2xl bg-orange-600 px-4 py-3 text-sm font-black text-white transition hover:bg-orange-700 sm:w-auto">
+                  Recharge Wallet
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  className="inline-flex w-full justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-black text-white transition hover:bg-slate-800 sm:w-auto"
+                  onClick={() => {
+                    setShowWelcome(false);
+                    document.getElementById('dashboard-analytics-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                >
+                  View Daily Analytics
+                </button>
+              )}
+              <button
+                type="button"
+                className="inline-flex w-full justify-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:w-auto"
+                onClick={() => setShowWelcome(false)}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -422,16 +464,16 @@ const DashboardHome = () => {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-6 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
-        <div className="white-card p-6">
+      <div className={`grid grid-cols-1 gap-5 ${isStaff ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}>
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="mb-1 text-sm font-semibold text-slate-500">Messages Sent (This Week)</p>
-              <h3 className="text-4xl font-black text-slate-950">{stats.weeklySent.toLocaleString()}</h3>
+              <h3 className="text-3xl font-black text-slate-950">{stats.weeklySent.toLocaleString()}</h3>
             </div>
-            <div className="flex h-16 w-16 items-center justify-center rounded-md bg-blue-50 text-blue-600"><Send size={30} /></div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Send size={24} /></div>
           </div>
-          <div className={`mt-4 inline-flex items-center gap-1 rounded-md px-3 py-1 text-xs font-black ${weeklyTrendUp ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+          <div className={`mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-black ${weeklyTrendUp ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
             {weeklyTrendUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
             {weeklyTrendUp ? 'High vs last week' : 'Low vs last week'}
           </div>
@@ -439,38 +481,28 @@ const DashboardHome = () => {
         </div>
 
         {!isStaff && (
-          <div className="white-card p-6">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold text-slate-500">Wallet Balance</p>
-                <h3 className="text-4xl font-black text-slate-950">Rs. {walletBalance.toFixed(2)}</h3>
+                <h3 className="text-3xl font-black text-slate-950">Rs. {walletBalance.toFixed(2)}</h3>
               </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-orange-50 text-orange-600"><Wallet size={22} /></div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-600"><Wallet size={22} /></div>
             </div>
-            <div className="relative h-4 overflow-hidden rounded-full bg-slate-100">
-              <div className={`h-full rounded-full transition-all duration-700 ${walletTone.fill}`} style={{ width: `${walletPercent}%` }} />
-              <div className="absolute left-[70%] top-0 h-full w-px bg-white/80" />
+            <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+              <div className={`h-full rounded-full transition-all duration-700 ${walletTone}`} style={{ width: `${walletPercent}%` }} />
             </div>
-            <div className="mt-2 flex items-center justify-between text-[11px] font-black uppercase text-slate-400">
-              <span>Rs. 0</span>
-              <span>Baseline Rs. {WEEK_BASELINE_BALANCE.toFixed(2)}</span>
-            </div>
-            <div className={`mt-4 flex flex-wrap items-center justify-between gap-2 rounded-md px-3 py-2 text-xs font-bold ${walletTone.bg} ${walletTone.text}`}>
-              <span>{walletTone.label}</span>
-              {walletBalance < 200 && <Link to="/dashboard/wallet" className="underline">Recharge Now</Link>}
-            </div>
-            <p className="mt-3 text-xs font-medium text-slate-500">Utility Rs. {MESSAGE_RATES.utility.toFixed(2)}/msg · Marketing Rs. {MESSAGE_RATES.marketing.toFixed(2)}/msg</p>
           </div>
         )}
 
-        <div className="white-card border-l-4 border-l-green-500 p-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="mb-1 text-sm font-semibold text-slate-500">Lifetime Patients</p>
-              <h3 className="text-4xl font-black text-slate-950">{stats.lifetimePatients}/{stats.patientLimit || STARTER_LIMIT}</h3>
+              <h3 className="text-3xl font-black text-slate-950">{stats.lifetimePatients}/{stats.patientLimit || STARTER_LIMIT}</h3>
               <span className="mt-1 block text-xs text-slate-400">New today: {stats.leadsToday}</span>
             </div>
-            <div className="flex h-16 w-16 items-center justify-center rounded-md bg-green-50 text-green-600"><Users size={30} /></div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-50 text-green-600"><Users size={24} /></div>
           </div>
         </div>
       </div>
@@ -512,7 +544,7 @@ const DashboardHome = () => {
         </div>
       </div>
 
-      <div className="white-card p-6">
+      <div id="dashboard-analytics-section" className="white-card p-6">
         <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="flex items-center gap-2 text-lg font-black text-slate-900"><BarChart3 size={20} className="text-orange-500" /> Message Sent History (Last 7 Days)</h3>
           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{chartTotal.toLocaleString()} total messages</span>
