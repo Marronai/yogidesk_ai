@@ -2229,6 +2229,169 @@ app.post('/api/campaigns/schedule', async (req, res) => {
     }
 });
 
+const safeInsertRows = async ({ table, rows }) => {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return;
+    const { error } = await supabase.from(table).insert(rows);
+    if (error) {
+        console.error(`${table} insert failed:`, {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+        });
+    }
+};
+
+app.post('/api/campaigns/send', async (req, res) => {
+    try {
+        if (!supabase) return res.status(500).json({ success: false, message: "Database connection unavailable" });
+
+        const { userId, template, recipients = [] } = req.body;
+        if (!userId || !template || !Array.isArray(recipients) || recipients.length === 0) {
+            return res.status(400).json({ success: false, message: "Template and recipients are required" });
+        }
+
+        const seen = new Set();
+        const uniqueRecipients = recipients
+            .map((recipient) => ({
+                name: String(recipient.name || recipient.patientName || '').trim(),
+                phone: normalizePhone(recipient.phone || recipient.patientPhone || ''),
+                appointment_time: String(recipient.appointment_time || recipient.appointmentTime || '').trim()
+            }))
+            .filter((recipient) => {
+                if (!recipient.name || !recipient.phone || seen.has(recipient.phone)) return false;
+                seen.add(recipient.phone);
+                return true;
+            });
+
+        if (!uniqueRecipients.length) {
+            return res.status(400).json({ success: false, message: "No valid recipients found." });
+        }
+
+        const unitCost = getUnitCost(template.category);
+        const totalCost = Number((uniqueRecipients.length * unitCost).toFixed(2));
+
+        const { data: wallet, error: walletError } = await supabase
+            .from('wallets')
+            .select('balance, plan_tier, lifetime_contacts_count')
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (walletError) throw walletError;
+        if (!wallet) return res.status(404).json({ success: false, message: "Wallet not found. Please recharge." });
+
+        const currentBalance = Number(wallet.balance || 0);
+        if (currentBalance < totalCost) {
+            return res.status(400).json({ success: false, message: "Insufficient wallet balance. Please recharge." });
+        }
+
+        const nextBalance = Number((currentBalance - totalCost).toFixed(2));
+        const nextContactsCount = Number(wallet.lifetime_contacts_count || 0) + uniqueRecipients.length;
+        const campaignId = crypto.randomUUID();
+        const nowIso = new Date().toISOString();
+
+        const { error: debitError } = await supabase
+            .from('wallets')
+            .update({
+                balance: nextBalance,
+                lifetime_contacts_count: nextContactsCount
+            })
+            .eq('user_id', userId);
+
+        if (debitError) throw debitError;
+
+        let sentCount = 0;
+        let failedCount = 0;
+        const failures = [];
+
+        for (const recipient of uniqueRecipients) {
+            const row = buildCampaignQueuePayload({
+                userId,
+                template: {
+                    ...template,
+                    variables: Object.fromEntries(
+                        Object.entries(template.variables || {}).map(([key, value]) => [
+                            key,
+                            resolveCampaignVariableValue(value, recipient)
+                        ])
+                    )
+                },
+                recipient,
+                scheduledFor: nowIso
+            });
+            row.status = 'SENDING';
+
+            try {
+                const metaResult = await sendCampaignMessageToMeta(row);
+                sentCount += 1;
+                await upsertCampaignInboxMessage({ row, metaResult });
+            } catch (sendError) {
+                failedCount += 1;
+                failures.push({
+                    phone: recipient.phone,
+                    message: sendError.clientPayload?.msg || sendError.message || 'Meta send failed'
+                });
+                console.error('Immediate campaign send failed:', sendError.message || sendError);
+            }
+        }
+
+        await safeInsertRows({
+            table: 'wallet_transactions',
+            rows: [{
+                user_id: userId,
+                amount: totalCost,
+                type: 'message_debit',
+                description: `Campaign ${template.template_name || template.name || 'WhatsApp Template'} sent to ${uniqueRecipients.length} patients`,
+                metadata: {
+                    campaign_id: campaignId,
+                    template_id: template.id || null,
+                    template_name: template.template_name || template.name || 'WhatsApp Template',
+                    category: template.category || 'UTILITY',
+                    unit_cost: unitCost,
+                    recipients: uniqueRecipients.length,
+                    sent: sentCount,
+                    failed: failedCount
+                },
+                created_at: nowIso
+            }]
+        });
+
+        await safeInsertRows({
+            table: 'campaign_analytics',
+            rows: [{
+                user_id: userId,
+                campaign_id: campaignId,
+                template_id: template.id || null,
+                template_name: template.template_name || template.name || 'WhatsApp Template',
+                category: template.category || 'UTILITY',
+                total_recipients: uniqueRecipients.length,
+                sent_count: sentCount,
+                failed_count: failedCount,
+                total_cost: totalCost,
+                wallet_balance_before: currentBalance,
+                wallet_balance_after: nextBalance,
+                status: failedCount === uniqueRecipients.length ? 'FAILED' : 'SENT',
+                metadata: { failures },
+                created_at: nowIso
+            }]
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Campaign executed successfully.",
+            campaignId,
+            sent: sentCount,
+            failed: failedCount,
+            deducted: totalCost,
+            remaining_balance: nextBalance,
+            failures
+        });
+    } catch (error) {
+        console.error('Campaign send error:', error.message || error);
+        return res.status(500).json({ success: false, message: "Campaign execution failed. Please try again." });
+    }
+});
+
 // ====== TASK 3: DYNAMIC WALLET DEDUCTION ENGINE ======
 app.post('/api/campaign/broadcast', async (req, res) => {
     const { userId, templateCategory, patientCount, templateName } = req.body;

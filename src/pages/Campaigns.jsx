@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CalendarClock, Eye, RefreshCw, Send, Sparkles, User, Users, Wallet } from 'lucide-react';
+import { AlertCircle, CalendarClock, Eye, RefreshCw, Send, Sparkles, User, Users, Wallet, X } from 'lucide-react';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
 import { calculateMessageCost } from '../utils/wallet';
@@ -21,6 +21,7 @@ const Campaigns = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [toast, setToast] = useState('');
   const [walletBalance, setWalletBalance] = useState(0);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(selectedTemplateId));
   const variableKeys = Array.from(new Set(
@@ -80,6 +81,7 @@ const Campaigns = () => {
   const templateType = String(selectedTemplate?.category || 'utility').toLowerCase();
   const unitCost = calculateMessageCost(templateType, 1);
   const totalCost = Number((patients.length * unitCost).toFixed(2));
+  const remainingBalance = Number((walletBalance - totalCost).toFixed(2));
   const hasCredits = walletBalance >= totalCost && totalCost > 0;
   const missingVariableKeys = variableKeys.filter((key) => !String(templateVariables[key] || '').trim());
 
@@ -163,9 +165,14 @@ const Campaigns = () => {
     if (patients.length === 0) return notify('No patients found for this campaign.');
     if (missingVariableKeys.length > 0) return notify(`Fill values for ${missingVariableKeys.map((key) => `{{${key}}}`).join(', ')}.`);
     if (!hasCredits) return notify('Insufficient Yogi Wallet balance.');
+    setShowConfirmModal(true);
+  };
+
+  const confirmCampaign = async () => {
+    if (!selectedTemplate || !hasCredits || missingVariableKeys.length > 0) return;
     setLoading(true);
     try {
-      await api.post('/api/campaigns/schedule', {
+      const response = await api.post('/api/campaigns/send', {
         userId,
         template: {
           ...selectedTemplate,
@@ -177,10 +184,12 @@ const Campaigns = () => {
           appointment_time: p.appointment_time
         }))
       });
-      notify('Campaign queued with 3-minute intervals.');
+      notify(response.data?.message || 'Campaign executed successfully.');
+      setShowConfirmModal(false);
+      setPatients([]);
       refreshWallet();
     } catch (error) {
-      notify(error?.response?.data?.msg || 'Campaign scheduling failed.');
+      notify(error?.response?.data?.message || error?.response?.data?.msg || 'Campaign execution failed.');
     } finally {
       setLoading(false);
     }
@@ -188,6 +197,83 @@ const Campaigns = () => {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#fcfcfc] p-4 sm:p-6 lg:p-10">
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-green-600">Pre-Campaign Confirmation</p>
+                <h2 className="mt-2 text-2xl font-black text-slate-950">Review wallet deduction</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5 sm:p-6">
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Template Name & Preview</div>
+                <div className="mt-2 text-base font-black text-slate-900">{selectedTemplate?.template_name || 'Selected Template'}</div>
+                <p className="mt-2 max-h-36 overflow-y-auto whitespace-pre-wrap text-sm font-semibold leading-6 text-slate-600">
+                  {selectedTemplate?.body_content || ''}
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-100 p-4">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Recipients</div>
+                  <div className="mt-1 text-2xl font-black text-slate-950">{patients.length} Patients</div>
+                </div>
+                <div className="rounded-2xl border border-slate-100 p-4">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Cost Per Message</div>
+                  <div className="mt-1 text-2xl font-black text-slate-950">Rs. {unitCost.toFixed(2)}</div>
+                </div>
+                <div className="rounded-2xl border border-orange-100 bg-orange-50 p-4">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-orange-700">Estimated Total Cost</div>
+                  <div className="mt-1 text-2xl font-black text-orange-700">Rs. {totalCost.toFixed(2)}</div>
+                </div>
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-emerald-700">Wallet After Deduction</div>
+                  <div className="mt-1 text-2xl font-black text-emerald-700">Rs. {remainingBalance.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-100 bg-white p-4 text-sm font-bold text-slate-600">
+                Current Wallet Balance: <span className="text-slate-950">Rs. {walletBalance.toFixed(2)}</span>
+              </div>
+
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+                <AlertCircle size={18} className="mt-0.5 shrink-0" />
+                <span>Ensure you have enough balance before confirmation.</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-slate-100 p-5 sm:flex-row sm:justify-end sm:p-6">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCampaign}
+                disabled={loading || !hasCredits}
+                className="rounded-2xl bg-green-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-green-100 hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {loading ? 'Sending...' : `Confirm & Deduct Wallet Rs. ${totalCost.toFixed(2)}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-3xl font-black">Campaign Manager</h1>
