@@ -124,12 +124,13 @@ const Campaigns = () => {
     setLoading(true);
     const [{ data: approvedTemplates }, { data: profile }] = await Promise.all([
       supabase.from('whatsapp_templates').select('id, template_name, category, language, body_content').eq('user_id', userId).eq('status', 'APPROVED').order('created_at', { ascending: false }),
-      supabase.from('doctor_profiles').select('meta_phone_number_id, whatsapp_phone_number_id').eq('id', userId).maybeSingle()
+      supabase.from('doctor_profiles').select('*').eq('id', userId).maybeSingle()
     ]);
     setPatients([]);
     setLedgerMatches([]);
     setTemplates(Array.isArray(approvedTemplates) ? approvedTemplates : []);
-    setSenderPhoneId(profile?.meta_phone_number_id || profile?.whatsapp_phone_number_id || '');
+    const phoneId = profile?.meta_phone_number_id || profile?.whatsapp_phone_number_id || '';
+    setSenderPhoneId(phoneId);
     setSelectedTemplateId((current) => current || approvedTemplates?.[0]?.id || '');
     setLoading(false);
   };

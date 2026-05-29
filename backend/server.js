@@ -845,18 +845,21 @@ const syncTemplatesFromMetaInBackground = async (userId) => {
 
     const { data: userMeta, error: credentialError } = await supabase
         .from('doctor_profiles')
-        .select('system_user_token,meta_waba_id')
+        .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-    if (credentialError || !userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+    const businessAccountId = userMeta?.meta_waba_id || userMeta?.whatsapp_business_account_id;
+    const accessToken = userMeta?.system_user_token || userMeta?.whatsapp_access_token;
+
+    if (credentialError || !businessAccountId || !accessToken) {
         if (credentialError) console.warn('Background template sync credential error:', credentialError.message);
         return;
     }
 
-    const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
+    const graphUrl = `https://graph.facebook.com/v20.0/${businessAccountId}/message_templates`;
     const response = await axios.get(graphUrl, {
-        headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
+        headers: { Authorization: `Bearer ${accessToken}` }
     });
 
     const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
@@ -1192,19 +1195,15 @@ const getMetaConfigForUser = async (userId) => {
     const lookups = [
         {
             table: 'doctor_profiles',
-            select: 'meta_phone_number_id,meta_waba_id,system_user_token,meta_business_manager_id,meta_business_id,business_id'
-        },
-        {
-            table: 'doctor_profiles',
-            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_id,business_id'
+            select: '*'
         },
         {
             table: 'users',
-            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_manager_id,meta_business_id,business_id'
+            select: '*'
         },
         {
             table: 'clinics',
-            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token,meta_business_manager_id,meta_business_id,business_id'
+            select: '*'
         }
     ];
 
@@ -1253,12 +1252,9 @@ const getRawMetaCredentialsForUser = async (userId) => {
     }
 
     const tokenLookups = [
-        { table: 'doctor_profiles', select: 'system_user_token' },
-        { table: 'doctor_profiles', select: 'whatsapp_access_token' },
-        { table: 'users', select: 'system_user_token' },
-        { table: 'users', select: 'whatsapp_access_token' },
-        { table: 'clinics', select: 'system_user_token' },
-        { table: 'clinics', select: 'whatsapp_access_token' }
+        { table: 'doctor_profiles', select: '*' },
+        { table: 'users', select: '*' },
+        { table: 'clinics', select: '*' }
     ];
 
     for (const lookup of tokenLookups) {
@@ -1284,20 +1280,11 @@ const getFreshTemplateSubmitCredentials = async (userId) => {
     const lookups = [
         {
             table: 'doctor_profiles',
-            select: 'system_user_token,meta_waba_id,meta_phone_number_id',
+            select: '*',
             map: (row) => ({
-                accessToken: row?.system_user_token || '',
-                businessAccountId: row?.meta_waba_id || '',
-                phoneNumberId: row?.meta_phone_number_id || ''
-            })
-        },
-        {
-            table: 'doctor_profiles',
-            select: 'whatsapp_access_token,whatsapp_business_account_id,whatsapp_phone_number_id',
-            map: (row) => ({
-                accessToken: row?.whatsapp_access_token || '',
-                businessAccountId: row?.whatsapp_business_account_id || '',
-                phoneNumberId: row?.whatsapp_phone_number_id || ''
+                accessToken: row?.system_user_token || row?.whatsapp_access_token || '',
+                businessAccountId: row?.meta_waba_id || row?.whatsapp_business_account_id || '',
+                phoneNumberId: row?.meta_phone_number_id || row?.whatsapp_phone_number_id || ''
             })
         }
     ];
@@ -2080,37 +2067,24 @@ app.delete('/api/templates/:id', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Template not found.' });
         }
 
-        let { data: userMeta, error: credentialError } = await db
+        const { data: userMeta, error: credentialError } = await db
             .from('doctor_profiles')
-            .select('system_user_token,meta_waba_id')
+            .select('*')
             .eq('id', userId)
             .maybeSingle();
 
-        if (credentialError && isMissingColumnError(credentialError)) {
-            const fallbackResult = await db
-                .from('doctor_profiles')
-                .select('whatsapp_access_token,whatsapp_business_account_id')
-                .eq('id', userId)
-                .maybeSingle();
-            userMeta = fallbackResult.data
-                ? {
-                    system_user_token: fallbackResult.data.whatsapp_access_token,
-                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id
-                }
-                : null;
-            credentialError = fallbackResult.error;
-        }
-
         if (credentialError) throw credentialError;
-        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+        const businessAccountId = userMeta?.meta_waba_id || userMeta?.whatsapp_business_account_id;
+        const accessToken = userMeta?.system_user_token || userMeta?.whatsapp_access_token;
+        if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
         let metaResponse;
         try {
-            metaResponse = await axios.delete(`https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`, {
+            metaResponse = await axios.delete(`https://graph.facebook.com/v20.0/${businessAccountId}/message_templates`, {
                 params: { name: template.template_name },
-                headers: { Authorization: `Bearer ${userMeta.system_user_token}` }
+                headers: { Authorization: `Bearer ${accessToken}` }
             });
         } catch (error) {
             const providerMessage = error.response?.data?.error?.message || error.message || 'Meta template deletion failed.';
@@ -2665,41 +2639,21 @@ const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
     try {
-        let { data, error } = await supabase
+        const { data, error } = await supabase
             .from('doctor_profiles')
-            .select('meta_phone_number_id,meta_waba_id,system_user_token')
+            .select('*')
             .eq('id', userId)
             .maybeSingle();
 
-        if (error) {
-            const message = String(error?.message || error?.details || '').toLowerCase();
-            const isMissingColumn = error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
-            if (!isMissingColumn) return {};
-
-            const fallbackResult = await supabase
-                .from('doctor_profiles')
-                .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-                .eq('id', userId)
-                .maybeSingle();
-
-            data = fallbackResult.data
-                ? {
-                    meta_phone_number_id: fallbackResult.data.whatsapp_phone_number_id,
-                    meta_waba_id: fallbackResult.data.whatsapp_business_account_id,
-                    system_user_token: fallbackResult.data.whatsapp_access_token
-                }
-                : null;
-            error = fallbackResult.error;
-        }
-
         if (error || !data) return {};
-        const finalToken = data.system_user_token || null;
-        const finalPhoneId = data.meta_phone_number_id || null;
+        const finalToken = data.system_user_token || data.whatsapp_access_token || null;
+        const finalPhoneId = data.meta_phone_number_id || data.whatsapp_phone_number_id || null;
+        const finalBusinessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || null;
         console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
 
         return {
             phoneNumberId: finalPhoneId,
-            businessAccountId: data.meta_waba_id || null,
+            businessAccountId: finalBusinessAccountId,
             accessToken: finalToken,
         };
     } catch (err) {
@@ -2935,7 +2889,11 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         created_at: nowIso,
     };
 
-    const messageInsert = await safeInsertRows({ table: 'inbox_messages', rows: [inboxPayload] });
+    const messageInsert = await safeInsertRows({
+        table: 'inbox_messages',
+        rows: [inboxPayload],
+        pruneMissingColumns: false
+    });
 
     if (!messageInsert.success) console.error('Campaign inbox message insert failed for chat:', chatId);
 };

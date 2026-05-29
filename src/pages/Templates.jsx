@@ -79,9 +79,9 @@ const Templates = () => {
         const { data: connectionResult } = await api.get('/settings/meta-connection');
         const connectionData = connectionResult?.data || {};
         const profileData = {
-          whatsapp_access_token: connectionData.system_user_token || '',
-          whatsapp_phone_number_id: connectionData.meta_phone_number_id || '',
-          whatsapp_business_account_id: connectionData.meta_waba_id || ''
+          whatsapp_access_token: connectionData.system_user_token || connectionData.whatsapp_access_token || '',
+          whatsapp_phone_number_id: connectionData.meta_phone_number_id || connectionData.whatsapp_phone_number_id || '',
+          whatsapp_business_account_id: connectionData.meta_waba_id || connectionData.whatsapp_business_account_id || ''
         };
 
         setDoctorProfile(profileData || null);
@@ -433,9 +433,9 @@ const Templates = () => {
         const { data: connectionResult } = await api.get('/settings/meta-connection');
         const connectionData = connectionResult?.data || {};
         activeProfile = {
-          whatsapp_access_token: connectionData.system_user_token || '',
-          whatsapp_phone_number_id: connectionData.meta_phone_number_id || '',
-          whatsapp_business_account_id: connectionData.meta_waba_id || ''
+          whatsapp_access_token: connectionData.system_user_token || connectionData.whatsapp_access_token || '',
+          whatsapp_phone_number_id: connectionData.meta_phone_number_id || connectionData.whatsapp_phone_number_id || '',
+          whatsapp_business_account_id: connectionData.meta_waba_id || connectionData.whatsapp_business_account_id || ''
         };
         setDoctorProfile(activeProfile);
         const refreshedCredentials = resolveMetaCredentials(activeProfile || {});

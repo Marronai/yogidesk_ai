@@ -337,24 +337,14 @@ const getDoctorMetaCredentials = async (doctorId) => {
     if (!supabase || !doctorId) return {};
 
     const lookupColumns = ['doctor_id', 'id', 'user_id'];
-    const credentialLookups = [
-        {
-            select: 'meta_phone_number_id,meta_waba_id,system_user_token',
-            map: (row) => ({
-                phoneNumberId: row?.meta_phone_number_id || null,
-                businessAccountId: row?.meta_waba_id || null,
-                accessToken: row?.system_user_token || null
-            })
-        },
-        {
-            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token',
-            map: (row) => ({
-                phoneNumberId: row?.whatsapp_phone_number_id || null,
-                businessAccountId: row?.whatsapp_business_account_id || null,
-                accessToken: row?.whatsapp_access_token || null
-            })
-        }
-    ];
+    const credentialLookups = [{
+        select: '*',
+        map: (row) => ({
+            phoneNumberId: row?.meta_phone_number_id || row?.whatsapp_phone_number_id || null,
+            businessAccountId: row?.meta_waba_id || row?.whatsapp_business_account_id || null,
+            accessToken: row?.system_user_token || row?.whatsapp_access_token || null
+        })
+    }];
     let data = null;
     let lastError = null;
 
@@ -439,22 +429,14 @@ const hasCompleteMetaCredentials = (row = {}) => Boolean(
 );
 
 const getExistingMetaCredentialState = async (client, userId) => {
-    const lookups = [
-        'meta_phone_number_id,meta_waba_id,system_user_token',
-        'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token'
-    ];
+    const result = await client
+        .from('doctor_profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-    for (const selectColumns of lookups) {
-        const result = await client
-            .from('doctor_profiles')
-            .select(selectColumns)
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (!result.error) return result.data || {};
-        if (!isMissingColumnError(result.error)) throw result.error;
-    }
-
+    if (!result.error) return result.data || {};
+    if (!isMissingColumnError(result.error)) throw result.error;
     return {};
 };
 

@@ -196,24 +196,14 @@ const getUserMetaCredentials = async (userId) => {
   const db = getDb();
   if (!db?.from || !userId) return {};
 
-  const lookups = [
-    {
-      select: 'meta_phone_number_id,meta_waba_id,system_user_token',
-      map: (row) => ({
-        phoneNumberId: row?.meta_phone_number_id || null,
-        businessAccountId: row?.meta_waba_id || null,
-        accessToken: row?.system_user_token || null
-      })
-    },
-    {
-      select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token',
-      map: (row) => ({
-        phoneNumberId: row?.whatsapp_phone_number_id || null,
-        businessAccountId: row?.whatsapp_business_account_id || null,
-        accessToken: row?.whatsapp_access_token || null
-      })
-    }
-  ];
+  const lookups = [{
+    select: '*',
+    map: (row) => ({
+      phoneNumberId: row?.meta_phone_number_id || row?.whatsapp_phone_number_id || null,
+      businessAccountId: row?.meta_waba_id || row?.whatsapp_business_account_id || null,
+      accessToken: row?.system_user_token || row?.whatsapp_access_token || null
+    })
+  }];
 
   for (const lookup of lookups) {
     const result = await db

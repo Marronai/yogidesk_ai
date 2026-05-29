@@ -17,24 +17,14 @@ const unique = (items) => [...new Set((items || []).filter(Boolean))];
 const fetchCredentialRows = async (supabase, userIds) => {
   const credentialsByUser = new Map();
 
-  const credentialLookups = [
-    {
-      select: 'id,system_user_token,meta_waba_id',
-      map: (row) => ({
-        userId: row.id,
-        accessToken: row.system_user_token,
-        businessAccountId: row.meta_waba_id
-      })
-    },
-    {
-      select: 'id,whatsapp_access_token,whatsapp_business_account_id',
-      map: (row) => ({
-        userId: row.id,
-        accessToken: row.whatsapp_access_token,
-        businessAccountId: row.whatsapp_business_account_id
-      })
-    }
-  ];
+  const credentialLookups = [{
+    select: '*',
+    map: (row) => ({
+      userId: row.id,
+      accessToken: row.system_user_token || row.whatsapp_access_token,
+      businessAccountId: row.meta_waba_id || row.whatsapp_business_account_id
+    })
+  }];
 
   for (const lookup of credentialLookups) {
     const { data, error } = await supabase
