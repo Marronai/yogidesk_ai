@@ -2172,6 +2172,12 @@ app.post('/api/campaigns/schedule', async (req, res) => {
             return res.status(403).json({ success: false, msg: "Contact tier limit reached. Upgrade required." });
         }
 
+        const scheduleUnitCost = getUnitCost(template.category);
+        const scheduleTotalCost = Number((uniqueRecipients.length * scheduleUnitCost).toFixed(2));
+        if (Number(wallet.balance || 0) < scheduleTotalCost) {
+            return res.status(400).json({ success: false, msg: "Insufficient wallet balance. Please recharge." });
+        }
+
         const baseTime = Date.now();
         const queueRows = uniqueRecipients.map((recipient, index) => buildCampaignQueuePayload({
             userId,
@@ -2205,7 +2211,7 @@ app.post('/api/campaigns/schedule', async (req, res) => {
 
         const queueInsertResult = await insertCampaignQueueRows({ rows: queueRows, fallbackRows });
         if (queueInsertResult.fallbackRequired) {
-            Promise.resolve().then(() => processCampaignFallbackRows(queueRows));
+            return res.status(500).json({ success: false, msg: "Campaign queue unavailable. Please try again after schema refresh." });
         }
         await insertQueuedInboxChatRows({ rows: inboxChatRows });
         Promise.resolve()
@@ -2230,16 +2236,39 @@ app.post('/api/campaigns/schedule', async (req, res) => {
 });
 
 const safeInsertRows = async ({ table, rows }) => {
-    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return;
-    const { error } = await supabase.from(table).insert(rows);
-    if (error) {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { success: false };
+    let payload = rows.map((row) => removeUndefinedValues(row || {}));
+    const removedColumns = new Set();
+
+    while (payload.length && Object.keys(payload[0] || {}).length) {
+        const { data, error } = await supabase.from(table).insert(payload).select();
+        if (!error) return { success: true, data };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && !removedColumns.has(missingColumn)) {
+            console.warn(`Skipping missing ${table}.${missingColumn} column during insert.`, {
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            removedColumns.add(missingColumn);
+            payload = payload.map((row) => {
+                const { [missingColumn]: _removed, ...nextRow } = row;
+                return nextRow;
+            });
+            continue;
+        }
+
         console.error(`${table} insert failed:`, {
             message: error.message,
             details: error.details,
             hint: error.hint,
             code: error.code
         });
+        return { success: false, error };
     }
+
+    return { success: false };
 };
 
 app.post('/api/campaigns/send', async (req, res) => {
@@ -2580,8 +2609,8 @@ const getUserMetaCredentials = async (userId) => {
         }
 
         if (error || !data) return {};
-        const finalToken = data.system_user_token || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null;
-        const finalPhoneId = data.meta_phone_number_id || process.env.WHATSAPP_PHONE_NUMBER_ID || null;
+        const finalToken = data.system_user_token || null;
+        const finalPhoneId = data.meta_phone_number_id || null;
         console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
 
         return {
@@ -2598,8 +2627,8 @@ const getUserMetaCredentials = async (userId) => {
 const sendCampaignMessageToMeta = async (queueItem) => {
     const doctorId = queueItem.user_id || queueItem.doctor_id || queueItem.payload?.template?.user_id || queueItem.payload?.template?.doctor_id;
     const credentials = await getUserMetaCredentials(doctorId);
-    const finalToken = credentials.accessToken || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null;
-    const finalPhoneId = credentials.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || null;
+    const finalToken = credentials.accessToken || null;
+    const finalPhoneId = credentials.phoneNumberId || null;
 
     console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
 
@@ -2666,6 +2695,59 @@ const resolveCampaignMessagePreview = (row = {}) => {
     return String(text || `Sent template: ${row.template_name || 'WhatsApp Template'}`).trim();
 };
 
+const selectInboxChatByPhone = async (db, recipientPhone) => {
+    let result = await db
+        .from('inbox_chats')
+        .select('id, metadata')
+        .eq('phone', recipientPhone)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (result.error && getMissingSchemaColumn(result.error) === 'metadata') {
+        result = await db
+            .from('inbox_chats')
+            .select('id')
+            .eq('phone', recipientPhone)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+    }
+
+    return result;
+};
+
+const writeInboxChatSafely = async ({ db, payload, chatId }) => {
+    let nextPayload = removeUndefinedValues(payload);
+    const removedColumns = new Set();
+
+    while (Object.keys(nextPayload).length) {
+        const query = chatId
+            ? db.from('inbox_chats').update(nextPayload).eq('id', chatId).select('id').maybeSingle()
+            : db.from('inbox_chats').insert([nextPayload]).select('id').maybeSingle();
+        const { data, error } = await query;
+        if (!error) return data;
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && !removedColumns.has(missingColumn)) {
+            console.warn(`Skipping missing inbox_chats.${missingColumn} column during campaign inbox write.`, {
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...strippedPayload } = nextPayload;
+            nextPayload = strippedPayload;
+            continue;
+        }
+
+        console.error('Campaign inbox chat write failed:', error.message || error);
+        return null;
+    }
+
+    return null;
+};
+
 const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbackDispatch = false }) => {
     if (!supabase?.from) return;
     const db = supabaseAdmin || supabase;
@@ -2684,17 +2766,11 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
     };
 
     let chatId = null;
-    const { data: existingChat } = await db
-        .from('inbox_chats')
-        .select('id, metadata')
-        .eq('phone', recipientPhone)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const { data: existingChat } = await selectInboxChatByPhone(db, recipientPhone);
 
     if (existingChat?.id) {
         chatId = existingChat.id;
-        await db.from('inbox_chats').update({
+        await writeInboxChatSafely({ db, chatId, payload: {
             user_id: userId,
             doctor_id: userId,
             name: recipientName || 'Patient',
@@ -2707,9 +2783,9 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
                 ...(existingChat.metadata || {}),
                 last_template: metadata,
             },
-        }).eq('id', chatId);
+        } });
     } else {
-        const { data: createdChat } = await db.from('inbox_chats').insert([{
+        const createdChat = await writeInboxChatSafely({ db, payload: {
             user_id: userId,
             doctor_id: userId,
             name: recipientName || 'Patient',
@@ -2721,13 +2797,13 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             unread_count: 0,
             updated_at: nowIso,
             metadata: { last_template: metadata },
-        }]).select('id').maybeSingle();
+        } });
         chatId = createdChat?.id || null;
     }
 
     if (!chatId) return;
 
-    const { error } = await db.from('inbox_messages').insert([{
+    const messageInsert = await safeInsertRows({ table: 'inbox_messages', rows: [{
         chat_id: chatId,
         workspace_id: userId,
         sender: 'agent',
@@ -2741,11 +2817,9 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         is_private_note: false,
         metadata,
         created_at: nowIso,
-    }]);
+    }] });
 
-    if (error) {
-        console.error('Campaign inbox message insert failed:', error.message || error);
-    }
+    if (!messageInsert.success) console.error('Campaign inbox message insert failed for chat:', chatId);
 };
 
 const processCampaignFallbackRows = async (rows = []) => {

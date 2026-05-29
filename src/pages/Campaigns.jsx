@@ -267,7 +267,7 @@ const Campaigns = () => {
                 disabled={loading || !hasCredits}
                 className="rounded-2xl bg-green-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-green-100 hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {loading ? 'Sending...' : `Confirm & Deduct Wallet Rs. ${totalCost.toFixed(2)}`}
+                {loading ? 'Sending...' : `Confirm & Deduct Wallet Balance (Rs. ${totalCost.toFixed(2)})`}
               </button>
             </div>
           </div>
