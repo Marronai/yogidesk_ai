@@ -8,7 +8,7 @@ import {
   User, Mail, Calendar, Hash, ArrowLeft, Eye, AlertCircle,
   Settings, MessageSquare, ChevronRight, Link, Phone, Trash2,
   MoreVertical, PhoneCall, Video as VideoIcon, Tag, LayoutGrid, Plus,
-  Smartphone, Monitor, Loader, MapPin
+  Smartphone, Monitor, Loader, MapPin, Bold, Italic, Strikethrough, Smile
 } from 'lucide-react';
 
 const Templates = () => {
@@ -48,6 +48,10 @@ const Templates = () => {
   const [showCustomVariableInput, setShowCustomVariableInput] = useState(false);
   useWallet(); // Keep wallet context hydrated for template workflows.
   const [customVariableLabel, setCustomVariableLabel] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const bodySelectionRef = useRef({ start: 0, end: 0 });
+
+  const emojiOptions = ['😄', '😊', '🙏', '👋', '❤️', '✅', '📅', '⏰', '📍', '💊', '🩺', '🎉', '⭐', '📞', '🔔', '👍'];
 
   useEffect(() => {
     const fetchLimits = async () => {
@@ -278,6 +282,58 @@ const Templates = () => {
     });
   };
 
+  const rememberBodySelection = () => {
+    const textarea = bodyTextareaRef.current;
+    if (!textarea) return;
+    bodySelectionRef.current = {
+      start: textarea.selectionStart ?? 0,
+      end: textarea.selectionEnd ?? textarea.selectionStart ?? 0
+    };
+  };
+
+  const updateBodyAtSelection = (nextBody, nextStart, nextEnd = nextStart) => {
+    setTemplate((current) => ({ ...current, [activeBodyLang]: nextBody }));
+    bodySelectionRef.current = { start: nextStart, end: nextEnd };
+
+    window.requestAnimationFrame(() => {
+      bodyTextareaRef.current?.focus();
+      bodyTextareaRef.current?.setSelectionRange(nextStart, nextEnd);
+    });
+  };
+
+  const applyBodyFormat = (marker) => {
+    const currentBody = template[activeBodyLang] || '';
+    const textarea = bodyTextareaRef.current;
+    const fallbackSelection = bodySelectionRef.current;
+    const start = textarea?.selectionStart ?? fallbackSelection.start ?? currentBody.length;
+    const end = textarea?.selectionEnd ?? fallbackSelection.end ?? start;
+    const selectedText = currentBody.slice(start, end);
+    const innerText = selectedText || 'text';
+    const formattedText = `${marker}${innerText}${marker}`;
+    const nextBody = `${currentBody.slice(0, start)}${formattedText}${currentBody.slice(end)}`;
+    const innerStart = start + marker.length;
+    const innerEnd = innerStart + innerText.length;
+
+    updateBodyAtSelection(nextBody, selectedText ? start + formattedText.length : innerStart, selectedText ? start + formattedText.length : innerEnd);
+    setShowEmojiPicker(false);
+  };
+
+  const insertEmojiAtCursor = (emoji) => {
+    const currentBody = template[activeBodyLang] || '';
+    const textarea = bodyTextareaRef.current;
+    const fallbackSelection = bodySelectionRef.current;
+    const start = textarea?.selectionStart ?? fallbackSelection.start ?? currentBody.length;
+    const end = textarea?.selectionEnd ?? fallbackSelection.end ?? start;
+    const prefixNeedsSpace = start > 0 && !/\s$/.test(currentBody.slice(0, start));
+    const suffixNeedsSpace = end < currentBody.length && !/^\s/.test(currentBody.slice(end));
+    const insertText = `${prefixNeedsSpace ? ' ' : ''}${emoji}${suffixNeedsSpace ? ' ' : ''}`;
+    const nextBody = `${currentBody.slice(0, start)}${insertText}${currentBody.slice(end)}`;
+    const cursorPosition = start + insertText.length;
+
+    updateBodyAtSelection(nextBody, cursorPosition);
+    setShowEmojiPicker(false);
+  };
+
   const insertPlaceholder = (label) => {
     insertVariableAtCursor(label);
   };
@@ -306,20 +362,27 @@ const Templates = () => {
     setTemplate({ ...template, buttons: template.buttons.filter((_, i) => i !== index) });
   };
 
-  const renderWhatsAppLook = (text) => {
+  const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+  const formatWhatsAppText = (text) => {
     if (!text) return '';
-    return text.replace(/\{\{(\d+)\}\}/g, (match, num) => {
+    return escapeHtml(text)
+      .replace(/\*([^*]+)\*/g, '<strong>$1</strong>')
+      .replace(/_([^_]+)_/g, '<em>$1</em>')
+      .replace(/~([^~]+)~/g, '<del>$1</del>')
+      .replace(/\{\{(\d+)\}\}/g, (match, num) => {
       const sampleValue = variableSamples?.[num];
       if (sampleValue && String(sampleValue).trim() !== '') {
-        return `<span class="text-blue-600 font-bold">${sampleValue}</span>`;
+        return `<span class="text-blue-600 font-bold">${escapeHtml(sampleValue)}</span>`;
       }
       return `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md font-bold border border-blue-100 text-[11px]">{{${num}}}</span>`;
     })
-               .replace(/\*(.*?)\*/g, '<strong>$1</strong>') // Bold
-               .replace(/_(.*?)_/g, '<em>$1</em>') // Italic
-               .replace(/~(.*?)~/g, '<s>$1</s>') // Strikethrough
-               .replace(/```(.*?)```/g, '<pre>$1</pre>') // Monospace
-               .replace(/\n/g, '<br/>'); // Handle newlines
+      .replace(/\n/g, '<br />');
   };
 
   const allSamplesProvided = useMemo(() => {
@@ -598,7 +661,77 @@ const Templates = () => {
                          )}
                       </div>
                     </div>
-                    <textarea ref={bodyTextareaRef} className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white outline-none transition-all font-medium text-slate-700 min-h-[180px] resize-none" placeholder={`Write your message in ${activeBodyLang}...`} value={template[activeBodyLang]} onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })} />
+                    <div className="relative">
+                      <div className="flex flex-wrap gap-2 items-center p-2 bg-gray-50 border-b border-gray-200 rounded-t-lg">
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyBodyFormat('*')}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                          title="Bold"
+                          aria-label="Bold"
+                        >
+                          <Bold size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyBodyFormat('_')}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                          title="Italic"
+                          aria-label="Italic"
+                        >
+                          <Italic size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyBodyFormat('~')}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                          title="Strikethrough"
+                          aria-label="Strikethrough"
+                        >
+                          <Strikethrough size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setShowEmojiPicker((current) => !current)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                          title="Emoji"
+                          aria-label="Emoji"
+                        >
+                          <Smile size={16} />
+                        </button>
+                      </div>
+                      {showEmojiPicker && (
+                        <div className="absolute left-2 top-12 z-30 grid w-[min(18rem,calc(100vw-4rem))] grid-cols-8 gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
+                          {emojiOptions.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => insertEmojiAtCursor(emoji)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg text-lg transition-colors hover:bg-orange-50"
+                              aria-label={`Insert ${emoji}`}
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <textarea
+                        ref={bodyTextareaRef}
+                        className="w-full min-h-[180px] resize-none rounded-b-2xl rounded-t-none border border-t-0 border-slate-200 bg-slate-50 p-6 font-medium text-slate-700 outline-none transition-all focus:bg-white"
+                        placeholder={`Write your message in ${activeBodyLang}...`}
+                        value={template[activeBodyLang]}
+                        onChange={(e) => setTemplate({ ...template, [activeBodyLang]: e.target.value })}
+                        onSelect={rememberBodySelection}
+                        onClick={rememberBodySelection}
+                        onKeyUp={rememberBodySelection}
+                        onBlur={rememberBodySelection}
+                      />
+                    </div>
                     
                     {/* DYNAMIC SAMPLE INPUTS */}
                     {Object.keys(variableSamples).length > 0 && (
@@ -733,7 +866,7 @@ const Templates = () => {
                             {/* Body Section */}
                             <div className="p-3 relative min-h-[60px] break-words">
                                 {template.headerType === 'TEXT' && template.headerText && <div className="text-[#111b21] text-[13.5px] leading-[1.4] font-bold mb-1">{template.headerText}</div>}
-                                <div className="text-[#111b21] text-[13.5px] leading-[1.4] whitespace-pre-wrap tracking-tight" dangerouslySetInnerHTML={{ __html: renderWhatsAppLook(template[activeBodyLang]) }} />
+                                <div className="text-[#111b21] text-[13.5px] leading-[1.4] whitespace-pre-wrap tracking-tight" dangerouslySetInnerHTML={{ __html: formatWhatsAppText(template[activeBodyLang]) }} />
                                 {template.footerText && <div className="text-[#667781] text-[10.5px] pt-1.5 mt-2 border-t border-slate-50">{template.footerText}</div>}
                                 <div className="text-right text-[9px] text-[#667781] mt-1 italic">12:45 PM ✓✓</div>
                             </div>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, X, Upload, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
-import { calculateCampaignCost, MEDICAL_SPECIALTIES, PRICING_RULES } from '../constants/templateLibrary';
+import { calculateCampaignCost, MEDICAL_SPECIALTIES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 import { useAuth } from '../context/AuthContext';
 
@@ -569,7 +569,7 @@ const TemplateManager = () => {
                   <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
                     <div className="flex flex-col">
                       <span className="text-[9px] text-slate-400 font-bold uppercase">Unit Cost</span>
-                      <span className="text-xs font-black text-slate-700">Rs. {(PRICING_RULES[libTemp.category] || PRICING_RULES.UTILITY).toFixed(2)}</span>
+                      <span className="text-xs font-black text-slate-700">Rs. {libTemp.category?.toLowerCase() === 'marketing' ? '1.30' : '0.20'}</span>
                     </div>
                     <button
                       onClick={() => openTemplatePreview(libTemp)}
@@ -664,7 +664,7 @@ const TemplateManager = () => {
               <div className="flex items-center justify-between pt-4 border-t border-slate-50">
                 <div className="flex flex-col">
                   <span className="text-[9px] text-slate-400 font-bold uppercase">Unit Cost</span>
-                  <span className="text-xs font-black text-slate-700">₹{(PRICING_RULES[libTemp.category] || PRICING_RULES.UTILITY).toFixed(2)}</span>
+                  <span className="text-xs font-black text-slate-700">Rs. {libTemp.category?.toLowerCase() === 'marketing' ? '1.30' : '0.20'}</span>
                 </div>
                 <button 
                   onClick={() => handleExecuteBroadcast(libTemp)}
