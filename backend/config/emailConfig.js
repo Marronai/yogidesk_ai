@@ -1,8 +1,13 @@
 const axios = require('axios');
 
 const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
-const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || 'no-reply@yogidesk-ai.com';
-const ONBOARDING_FROM_EMAIL = process.env.BREVO_ONBOARDING_FROM_EMAIL || 'support@yogidesk-ai.com';
+const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || 'no-reply@yogidesk-ai.com';
+const ONBOARDING_FROM_EMAIL = process.env.BREVO_ONBOARDING_FROM_EMAIL || process.env.BREVO_REPLY_TO_EMAIL || 'support@yogidesk-ai.com';
+const DEFAULT_FROM_NAME = process.env.BREVO_FROM_NAME || 'Yogi Desk AI';
+const REPLY_TO_EMAIL = process.env.BREVO_REPLY_TO_EMAIL || ONBOARDING_FROM_EMAIL;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeRecipientEmail = (email) => String(email || '').trim().toLowerCase();
 
 const sendBrevoEmail = async ({ to, subject, htmlContent, senderType = 'system' }) => {
     const apiKey = process.env.BREVO_API_KEY;
@@ -11,12 +16,19 @@ const sendBrevoEmail = async ({ to, subject, htmlContent, senderType = 'system' 
         return false;
     }
 
+    const recipientEmail = normalizeRecipientEmail(to);
+    if (!EMAIL_PATTERN.test(recipientEmail)) {
+        console.error('Brevo email skipped: invalid recipient email.', { to: recipientEmail || '(empty)' });
+        return false;
+    }
+
     const fromEmail = senderType === 'onboarding' ? ONBOARDING_FROM_EMAIL : DEFAULT_FROM_EMAIL;
 
     try {
-        await axios.post(BREVO_EMAIL_API_URL, {
-            sender: { name: 'YogiDesk AI', email: fromEmail },
-            to: [{ email: to }],
+        const response = await axios.post(BREVO_EMAIL_API_URL, {
+            sender: { name: DEFAULT_FROM_NAME, email: fromEmail },
+            to: [{ email: recipientEmail }],
+            replyTo: { email: REPLY_TO_EMAIL, name: DEFAULT_FROM_NAME },
             subject,
             htmlContent,
         }, {
@@ -26,7 +38,8 @@ const sendBrevoEmail = async ({ to, subject, htmlContent, senderType = 'system' 
             },
             timeout: 10000,
         });
-        console.log(`Brevo mail successfully sent to ${to} via ${fromEmail}`);
+        const messageId = response.data?.messageId || response.data?.messageIds?.[0] || 'accepted-no-message-id';
+        console.log(`Brevo mail accepted for ${recipientEmail} via ${fromEmail}. messageId=${messageId}`);
         return true;
     } catch (error) {
         console.error('Brevo Email Error:', error.response?.data || error.message || error);
@@ -113,8 +126,8 @@ exports.sendOTP = async (email, name, otp) => {
     });
 };
 
-exports.sendDirectEmail = async (email, subject, htmlContent) => {
-    return sendBrevoEmail({ to: email, subject, htmlContent });
+exports.sendDirectEmail = async (email, subject, htmlContent, senderType = 'system') => {
+    return sendBrevoEmail({ to: email, subject, htmlContent, senderType });
 };
 
 exports.verifyConnection = async () => Boolean(process.env.BREVO_API_KEY);
