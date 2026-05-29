@@ -2235,7 +2235,7 @@ app.post('/api/campaigns/schedule', async (req, res) => {
     }
 });
 
-const safeInsertRows = async ({ table, rows }) => {
+const safeInsertRows = async ({ table, rows, pruneMissingColumns = true }) => {
     if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { success: false };
     let payload = rows.map((row) => removeUndefinedValues(row || {}));
     const removedColumns = new Set();
@@ -2245,7 +2245,7 @@ const safeInsertRows = async ({ table, rows }) => {
         if (!error) return { success: true, data };
 
         const missingColumn = getMissingSchemaColumn(error);
-        if (missingColumn && !removedColumns.has(missingColumn)) {
+        if (pruneMissingColumns && missingColumn && !removedColumns.has(missingColumn)) {
             console.warn(`Skipping missing ${table}.${missingColumn} column during insert.`, {
                 details: error.details,
                 hint: error.hint,
@@ -2364,45 +2364,57 @@ app.post('/api/campaigns/send', async (req, res) => {
             }
         }
 
+        const templateName = template.template_name || template.name || 'WhatsApp Template';
+        const templateCategory = template.category || 'MARKETING';
+
+        const transactionPayload = {
+            user_id: userId,
+            amount: totalCost,
+            transaction_type: 'DEBIT',
+            description: `Campaign ${templateName} sent to patients`,
+            metadata: {
+                campaign_id: campaignId,
+                template_id: template.id || null,
+                template_name: templateName,
+                category: templateCategory,
+                unit_cost: unitCost,
+                recipients: uniqueRecipients.length,
+                sent: sentCount,
+                failed: failedCount
+            },
+            created_at: nowIso
+        };
+
         await safeInsertRows({
             table: 'wallet_transactions',
-            rows: [{
-                user_id: userId,
-                amount: totalCost,
-                type: 'message_debit',
-                description: `Campaign ${template.template_name || template.name || 'WhatsApp Template'} sent to ${uniqueRecipients.length} patients`,
-                metadata: {
-                    campaign_id: campaignId,
-                    template_id: template.id || null,
-                    template_name: template.template_name || template.name || 'WhatsApp Template',
-                    category: template.category || 'UTILITY',
-                    unit_cost: unitCost,
-                    recipients: uniqueRecipients.length,
-                    sent: sentCount,
-                    failed: failedCount
-                },
-                created_at: nowIso
-            }]
+            rows: [transactionPayload],
+            pruneMissingColumns: false
         });
+
+        const analyticsPayload = {
+            user_id: userId,
+            campaign_id: campaignId || `camp_${Date.now()}`,
+            template_name: templateName,
+            template_id: template.id || null,
+            category: templateCategory,
+            total_recipients: uniqueRecipients.length,
+            sent_count: sentCount,
+            failed_count: failedCount,
+            total_cost: totalCost,
+            wallet_balance_before: currentBalance,
+            wallet_balance_after: nextBalance,
+            status: failedCount === uniqueRecipients.length ? 'FAILED' : 'COMPLETED',
+            metadata: {
+                timestamp: nowIso,
+                failures
+            },
+            created_at: nowIso
+        };
 
         await safeInsertRows({
             table: 'campaign_analytics',
-            rows: [{
-                user_id: userId,
-                campaign_id: campaignId,
-                template_id: template.id || null,
-                template_name: template.template_name || template.name || 'WhatsApp Template',
-                category: template.category || 'UTILITY',
-                total_recipients: uniqueRecipients.length,
-                sent_count: sentCount,
-                failed_count: failedCount,
-                total_cost: totalCost,
-                wallet_balance_before: currentBalance,
-                wallet_balance_after: nextBalance,
-                status: failedCount === uniqueRecipients.length ? 'FAILED' : 'SENT',
-                metadata: { failures },
-                created_at: nowIso
-            }]
+            rows: [analyticsPayload],
+            pruneMissingColumns: false
         });
 
         return res.status(200).json({
@@ -2469,7 +2481,7 @@ app.post('/api/campaign/broadcast', async (req, res) => {
             { 
                 user_id: userId,
                 amount: totalCost,
-                type: 'message_debit',
+                transaction_type: 'DEBIT',
                 description: `Broadcast: Sent ${templateCategory} template "${templateName}" to ${patientCount} patients`,
                 metadata: {
                     unit_cost: unitCost,
@@ -2530,7 +2542,7 @@ app.post('/api/wallet/recharge', async (req, res) => {
             { 
                 user_id: userId,
                 amount: amount,
-                type: 'CREDIT',
+                transaction_type: 'CREDIT',
                 description: `Wallet recharge of ₹${amount} successful.`,
                 metadata: {
                     payment_method: 'Manual/Internal',
@@ -2846,7 +2858,7 @@ const processCampaignFallbackRows = async (rows = []) => {
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id || row.doctor_id,
                     amount: getUnitCost(row.template_category),
-                    type: 'message_debit',
+                    transaction_type: 'DEBIT',
                     description: `Fallback campaign sent to ${row.recipient_phone} using ${row.template_name}`,
                     metadata: logPayload,
                     created_at: new Date().toISOString(),
@@ -2931,7 +2943,7 @@ const processCampaignQueue = async () => {
                 supabase.from('wallet_transactions').insert([{
                     user_id: row.user_id,
                     amount: unitCost,
-                    type: 'message_debit',
+                    transaction_type: 'DEBIT',
                     description: `Campaign sent to ${row.recipient_phone} using ${row.template_name}`,
                     metadata: logPayload,
                     created_at: new Date().toISOString(),

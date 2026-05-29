@@ -156,7 +156,7 @@ router.post('/payu-success', async (req, res) => {
     await db.from('wallet_transactions').insert([{
       user_id: userId,
       amount: paidAmount,
-      type: 'CREDIT',
+      transaction_type: 'CREDIT',
       description: `PayU wallet recharge successful: ${txnid}`,
       metadata: {
         provider: 'payu',
