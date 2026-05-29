@@ -1467,7 +1467,7 @@ const upsertSingleRowSafely = async ({ db, table, row }) => {
     let payload = removeUndefinedValues(row);
     const removedColumns = new Set();
 
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    while (Object.keys(payload).length > 0) {
         const { data, error } = await db
             .from(table)
             .upsert(payload)
@@ -1477,25 +1477,53 @@ const upsertSingleRowSafely = async ({ db, table, row }) => {
         if (!error) return data;
 
         const missingColumn = getMissingSchemaColumn(error);
-        if (!missingColumn || removedColumns.has(missingColumn)) throw error;
+        if (!missingColumn || removedColumns.has(missingColumn)) {
+            console.error(`${table} save rejected by Supabase.`, {
+                message: error.message,
+                details: error.details,
+                hint: error.hint,
+                code: error.code
+            });
+            throw error;
+        }
 
-        console.warn(`Skipping missing ${table}.${missingColumn} column during template save.`);
+        console.warn(`Skipping missing ${table}.${missingColumn} column during template save.`, {
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+        });
         removedColumns.add(missingColumn);
         const { [missingColumn]: _removed, ...nextPayload } = payload;
         payload = nextPayload;
     }
 
-    throw new Error(`Unable to save ${table}: schema cache rejected multiple columns.`);
+    throw new Error(`Unable to save ${table}: schema cache rejected all payload columns.`);
 };
 
-const saveSubmittedMetaTemplate = async ({ db, row, components }) => {
-    const submittedRow = {
-        ...row,
-        components,
-        updated_at: new Date().toISOString()
+const saveSubmittedMetaTemplate = async ({ db, row }) => {
+    const templateData = row || {};
+    const cleanPayload = {
+        user_id: templateData.user_id,
+        template_name: templateData.template_name || templateData.name,
+        category: String(templateData.category || 'MARKETING').toUpperCase(),
+        language: templateData.language || 'hi',
+        body_content: templateData.body_content || templateData.body_text || templateData.text || null,
+        header_url: templateData.header_url || null,
+        status: 'PENDING_APPROVAL',
+        meta_template_id: templateData.meta_template_id || null
     };
 
-    return upsertSingleRowSafely({ db, table: 'submitted_meta_templates', row: submittedRow });
+    try {
+        return await upsertSingleRowSafely({ db, table: 'submitted_meta_templates', row: cleanPayload });
+    } catch (error) {
+        console.error('submitted_meta_templates transaction failed.', {
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+            code: error.code
+        });
+        throw error;
+    }
 };
 
 const saveCampaignTemplateMirror = async ({ db, row }) => {
@@ -1704,7 +1732,7 @@ app.post('/api/templates/submit-to-meta', async (req, res) => {
         };
 
         const [submittedTemplate, campaignTemplate] = await Promise.all([
-            saveSubmittedMetaTemplate({ db, row, components }),
+            saveSubmittedMetaTemplate({ db, row }),
             saveCampaignTemplateMirror({ db, row })
         ]);
 
