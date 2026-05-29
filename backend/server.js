@@ -700,14 +700,156 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                     await db
                         .from('inbox_chats')
                         .update({
-                            status: update.status,
-                            updated_at: new Date().toISOString()
+                            status: update.status
                         })
                         .eq('id', message.chat_id);
                 }
             }
         } catch (error) {
             console.error('Inbox delivery status sync failed:', error.message || error);
+        }
+    }
+};
+
+const extractIncomingInboxMessages = (payload = {}) => {
+    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+    const messages = [];
+    for (const entry of payload.entry) {
+        if (!Array.isArray(entry.changes)) continue;
+
+        for (const change of entry.changes) {
+            if (change.field !== 'messages') continue;
+            const value = change.value || {};
+            const metadata = value.metadata || {};
+            const contactsByWaId = new Map((value.contacts || []).map((contact) => [String(contact.wa_id || ''), contact]));
+
+            for (const message of value.messages || []) {
+                const fromPhone = sanitizeMetaPhoneNumber(message.from || '');
+                const contact = contactsByWaId.get(String(message.from || '')) || {};
+                const text = message.text?.body ||
+                    message.button?.text ||
+                    message.interactive?.button_reply?.title ||
+                    message.interactive?.list_reply?.title ||
+                    message.image?.caption ||
+                    message.document?.caption ||
+                    '';
+
+                if (!fromPhone) continue;
+                messages.push({
+                    messageId: message.id || null,
+                    fromPhone,
+                    clinicMetaId: sanitizeMetaPhoneNumber(metadata.phone_number_id || metadata.display_phone_number || ''),
+                    patientName: contact.profile?.name || 'WhatsApp Patient',
+                    text: String(text || `[${message.type || 'message'}]`).trim(),
+                    raw: message
+                });
+            }
+        }
+    }
+
+    return messages;
+};
+
+const resolveInboxOwnerByMetaPhoneId = async (clinicMetaId) => {
+    if (!clinicMetaId || !supabase?.from) return null;
+    const db = supabaseAdmin || supabase;
+    const { data } = await db
+        .from('doctor_profiles')
+        .select('id')
+        .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
+        .limit(1)
+        .maybeSingle();
+    return data?.id || null;
+};
+
+const processIncomingInboxMessagesWebhook = async (payload = {}) => {
+    if (!supabase?.from) return;
+    const db = supabaseAdmin || supabase;
+
+    for (const incoming of extractIncomingInboxMessages(payload)) {
+        try {
+            const userId = await resolveInboxOwnerByMetaPhoneId(incoming.clinicMetaId);
+            if (!userId) continue;
+
+            const nowIso = new Date().toISOString();
+            const { data: existingChat } = await selectInboxChatByPhone(db, incoming.fromPhone, userId);
+            const existingMetadata = existingChat?.metadata || {};
+            const nextMetadata = {
+                ...existingMetadata,
+                last_customer_message_at: nowIso,
+                last_inbound_at: nowIso,
+                whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            };
+
+            let chatId = existingChat?.id || null;
+            if (chatId) {
+                await writeInboxChatSafely({
+                    db,
+                    chatId,
+                    payload: {
+                        user_id: userId,
+                        doctor_id: userId,
+                        name: incoming.patientName,
+                        patient_name: incoming.patientName,
+                        phone: incoming.fromPhone,
+                        patient_phone: incoming.fromPhone,
+                        last_message: incoming.text,
+                        status: 'Active',
+                        unread_count: 1,
+                        updated_at: nowIso,
+                        metadata: nextMetadata
+                    }
+                });
+            } else {
+                const createdChat = await writeInboxChatSafely({
+                    db,
+                    payload: {
+                        user_id: userId,
+                        doctor_id: userId,
+                        name: incoming.patientName,
+                        patient_name: incoming.patientName,
+                        phone: incoming.fromPhone,
+                        patient_phone: incoming.fromPhone,
+                        last_message: incoming.text,
+                        status: 'Active',
+                        unread_count: 1,
+                        updated_at: nowIso,
+                        metadata: nextMetadata
+                    }
+                });
+                chatId = createdChat?.id || null;
+            }
+
+            if (!chatId) continue;
+            await safeInsertRows({
+                table: 'inbox_messages',
+                rows: [{
+                    chat_id: chatId,
+                    workspace_id: userId,
+                    sender_phone: incoming.fromPhone,
+                    receiver_phone: incoming.clinicMetaId,
+                    sender: 'user',
+                    from_me: false,
+                    type: 'public',
+                    message_type: 'text',
+                    status: 'RECEIVED',
+                    body: incoming.text,
+                    text: incoming.text,
+                    message_body: incoming.text,
+                    message_text: incoming.text,
+                    is_private_note: false,
+                    metadata: {
+                        meta_message_id: incoming.messageId,
+                        inbound: true,
+                        raw: incoming.raw
+                    },
+                    created_at: nowIso
+                }],
+                pruneMissingColumns: false
+            });
+        } catch (error) {
+            console.error('Incoming inbox webhook sync failed:', error.message || error);
         }
     }
 };
@@ -734,6 +876,7 @@ const handleWhatsAppWebhook = (req, res) => {
         .then(async () => {
             await processTemplateStatusWebhook(req.body);
             await updateInboxMessageDeliveryStatuses(req.body);
+            await processIncomingInboxMessagesWebhook(req.body);
             await processFailedDeliveryWebhook(req.body);
         })
         .catch((error) => {
@@ -2478,6 +2621,22 @@ app.get('/api/inbox/chats', async (req, res) => {
             chats = Array.from(fallbackChats.values());
         }
 
+        const collapsedChats = new Map();
+        for (const chat of chats) {
+            const key = String(chat.phone || chat.patient_phone || chat.id || '').trim();
+            const previous = collapsedChats.get(key);
+            const previousTime = previous?.updated_at ? new Date(previous.updated_at).getTime() : 0;
+            const nextTime = chat?.updated_at ? new Date(chat.updated_at).getTime() : 0;
+            if (!previous || nextTime >= previousTime) {
+                collapsedChats.set(key, chat);
+            }
+        }
+        chats = Array.from(collapsedChats.values()).sort((a, b) => {
+            const aTime = a?.updated_at ? new Date(a.updated_at).getTime() : 0;
+            const bTime = b?.updated_at ? new Date(b.updated_at).getTime() : 0;
+            return bTime - aTime;
+        });
+
         return res.status(200).json({
             success: true,
             chats,
@@ -2624,6 +2783,12 @@ app.post('/api/campaigns/send', async (req, res) => {
                     phone: recipient.phone,
                     message_id: failedMessageId,
                     message: sendError.clientPayload?.msg || sendError.message || 'Meta send failed'
+                });
+                await upsertCampaignInboxMessage({
+                    row,
+                    metaResult: null,
+                    deliveryStatus: 'FAILED',
+                    deliveryError: sendError.clientPayload?.msg || sendError.message || 'Meta send failed'
                 });
                 await processFailedDeliveryRefund({
                     userId,
@@ -3079,7 +3244,7 @@ const writeInboxChatSafely = async ({ db, payload, chatId }) => {
     return null;
 };
 
-const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbackDispatch = false }) => {
+const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbackDispatch = false, deliveryStatus = 'SENT', deliveryError = null }) => {
     if (!supabase?.from) return;
     const db = supabaseAdmin || supabase;
 
@@ -3116,6 +3281,8 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         message_id: getMetaMessageId(metaResult),
         meta_message_id: getMetaMessageId(metaResult),
         meta_result: metaResult,
+        delivery_status: deliveryStatus,
+        delivery_error: deliveryError,
         fallback_dispatch: fallbackDispatch,
     };
     const conversationChatId = await resolveCampaignConversationChatId({
@@ -3160,7 +3327,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             name: recipientName || 'Patient',
             patient_name: recipientName || 'Patient',
             patient_phone: safeReceiverPhone,
-            status: 'SENT',
+            status: deliveryStatus,
             last_message: messageBody,
             updated_at: nowIso,
             metadata: {
@@ -3177,7 +3344,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             patient_name: recipientName || 'Patient',
             phone: safeReceiverPhone,
             patient_phone: safeReceiverPhone,
-            status: 'SENT',
+            status: deliveryStatus,
             last_message: messageBody,
             unread_count: 0,
             updated_at: nowIso,
@@ -3203,7 +3370,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         from_me: true,
         type: 'template',
         message_type: 'text',
-        status: 'SENT',
+        status: deliveryStatus,
         is_agent: true,
         body: messageBody,
         text: messageBody,
@@ -3217,7 +3384,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             campaign_name: row.campaign_name || row.payload?.campaign_name || null,
             bulk_broadcast: true,
             conversation_chat_id: conversationChatId,
-            meta_response: 'SUCCESSFUL_DISPATCH',
+            meta_response: deliveryStatus === 'FAILED' ? 'FAILED_DISPATCH' : 'SUCCESSFUL_DISPATCH',
             campaign_triggered: true
         },
         created_at: nowIso,
@@ -3311,6 +3478,12 @@ const processCampaignQueue = async () => {
                 metaResult = await sendCampaignMessageToMeta(row);
             } catch (sendError) {
                 await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: sendError.message || 'Meta send failed' }).eq('id', row.id);
+                await upsertCampaignInboxMessage({
+                    row,
+                    metaResult: null,
+                    deliveryStatus: 'FAILED',
+                    deliveryError: sendError.clientPayload?.msg || sendError.message || 'Meta send failed'
+                });
                 if (sendError.clientPayload) {
                     console.error(sendError.clientPayload.msg);
                 }

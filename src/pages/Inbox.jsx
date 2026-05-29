@@ -18,7 +18,9 @@ import {
   UserPlus,
   Image as ImageIcon,
   Loader,
+  X,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 
@@ -35,6 +37,7 @@ const mapStoredMessage = (item = {}) => ({
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
   is_private_note: Boolean(item.is_private_note),
   status: item.status || item.metadata?.delivery_status || '',
+  created_at: item.created_at || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
 const logInboxError = (error) => {
@@ -103,7 +106,9 @@ const InboxContent = () => {
   const [customTagInput, setCustomTagInput] = useState('');
   const [showPhone, setShowPhone] = useState(false);
   const [showBgMenu, setShowBgMenu] = useState(false);
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
+  const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
   const allTags = useMemo(() => {
@@ -118,6 +123,18 @@ const InboxContent = () => {
       ? (Array.isArray(conversations) ? conversations : [])
       : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
   ), [conversations, tagFilter]);
+  const lastInboundAt = useMemo(() => {
+    const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
+    const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
+    const messageMs = (Array.isArray(messages) ? messages : []).reduce((latest, item) => {
+      if (item.from_me === true || item.sender === 'agent' || item.sender === 'doctor') return latest;
+      const itemMs = item.created_at ? new Date(item.created_at).getTime() : 0;
+      return Number.isFinite(itemMs) ? Math.max(latest, itemMs) : latest;
+    }, 0);
+    return Math.max(metadataMs, messageMs);
+  }, [messages, selectedChat]);
+  const isReplyWindowOpen = Boolean(lastInboundAt && Date.now() - lastInboundAt <= 24 * 60 * 60 * 1000);
+  const canUseComposer = isPrivateNote || isReplyWindowOpen;
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -271,6 +288,10 @@ const InboxContent = () => {
     setAgents(mappedAgents);
     setActiveAgent(mappedAgents[0]);
     setConversations(mappedChats);
+    setSelectedChat((current) => {
+      if (!current?.id) return current;
+      return mappedChats.find((chat) => chat.id === current.id) || current;
+    });
     setLoading(false);
   }, [getUser]);
 
@@ -360,7 +381,7 @@ const InboxContent = () => {
   useEffect(() => {
     const timer = window.setInterval(() => {
       setReloadToken((value) => value + 1);
-    }, 5000);
+    }, 30000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -397,7 +418,7 @@ const InboxContent = () => {
     if (!selectedChat?.id) return undefined;
     const timer = window.setInterval(() => {
       loadMessages(selectedChat);
-    }, 5000);
+    }, 15000);
     return () => window.clearInterval(timer);
   }, [selectedChat, loadMessages]);
 
@@ -422,6 +443,10 @@ const InboxContent = () => {
   const handleSendMessage = async () => {
     const text = message.trim();
     if (!text || !selectedChat) return;
+    if (!canUseComposer) {
+      navigate('/campaigns');
+      return;
+    }
 
     const created = {
       id: Date.now(),
@@ -516,6 +541,7 @@ const InboxContent = () => {
     setSelectedChat(chat);
     setShowPhone(false);
     setShowBgMenu(false);
+    setShowDetailsPanel(false);
     const agent = agents.find((item) => String(item.id) === String(chat?.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
@@ -624,6 +650,14 @@ const InboxContent = () => {
                   {isGhostMode ? <Eye size={14} /> : <EyeOff size={14} />}
                   {isGhostMode ? 'Ghost Mode ON' : 'Spy Mode'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDetailsPanel(true)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+                  aria-label="Open chat details"
+                >
+                  <Settings size={16} />
+                </button>
               </div>
             </div>
 
@@ -708,24 +742,41 @@ const InboxContent = () => {
                   </div>
                 )}
 
-                <div className={`flex items-center gap-3 rounded-2xl border p-2 transition-all ${isPrivateNote ? 'border-yellow-300 bg-yellow-50 ring-2 ring-yellow-100' : 'border-slate-100 bg-slate-50'}`}>
-                  <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Smile size={20} /></button>
-                  <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Paperclip size={20} /></button>
-                  <input
-                    type="text"
-                    placeholder={isGhostMode ? 'Ghost mode active: typing disabled' : (isPrivateNote ? 'Type a private team note...' : 'Reply to customer...')}
-                    disabled={isGhostMode}
-                    className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
-                    value={message}
-                    onChange={(event) => setMessage(event.target.value)}
-                    onKeyDown={(event) => event.key === 'Enter' && handleSendMessage()}
-                  />
-                  {!isGhostMode && (
-                    <button onClick={handleSendMessage} className={`rounded-xl p-3 shadow-lg transition-all ${isPrivateNote ? 'bg-yellow-400 text-yellow-900' : 'bg-green-500 text-white shadow-green-100 hover:bg-green-600'}`}>
-                      <Send size={20} />
+                {!canUseComposer && !isGhostMode ? (
+                  <div className="flex flex-col gap-3 rounded-2xl border border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">Customer reply window is closed</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">Send an approved template first. Free-form chat opens after the patient replies.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/campaigns')}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-4 py-3 text-xs font-black uppercase tracking-wide text-white shadow-sm hover:bg-green-700"
+                    >
+                      <Send size={16} />
+                      Send Template
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className={`flex items-center gap-3 rounded-2xl border p-2 transition-all ${isPrivateNote ? 'border-yellow-300 bg-yellow-50 ring-2 ring-yellow-100' : 'border-slate-100 bg-slate-50'}`}>
+                    <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Smile size={20} /></button>
+                    <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Paperclip size={20} /></button>
+                    <input
+                      type="text"
+                      placeholder={isGhostMode ? 'Ghost mode active: typing disabled' : (isPrivateNote ? 'Type a private team note...' : 'Reply to customer...')}
+                      disabled={isGhostMode}
+                      className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
+                      value={message}
+                      onChange={(event) => setMessage(event.target.value)}
+                      onKeyDown={(event) => event.key === 'Enter' && handleSendMessage()}
+                    />
+                    {!isGhostMode && (
+                      <button onClick={handleSendMessage} className={`rounded-xl p-3 shadow-lg transition-all ${isPrivateNote ? 'bg-yellow-400 text-yellow-900' : 'bg-green-500 text-white shadow-green-100 hover:bg-green-600'}`}>
+                        <Send size={20} />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </>
@@ -738,8 +789,19 @@ const InboxContent = () => {
         )}
       </div>
 
-      {selectedChat && (
+      {selectedChat && showDetailsPanel && (
         <div className="hidden w-72 flex-col space-y-8 overflow-y-auto border-l border-slate-200 bg-white p-6 xl:flex">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Chat Details</h3>
+            <button
+              type="button"
+              onClick={() => setShowDetailsPanel(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+              aria-label="Close chat details"
+            >
+              <X size={16} />
+            </button>
+          </div>
           <div className="space-y-4">
             <button
               onClick={() => setIsGhostMode(!isGhostMode)}

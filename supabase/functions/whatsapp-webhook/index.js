@@ -74,12 +74,13 @@ serve(async (req) => {
     let chatId = null;
     const { data: existingChat } = await supabase
       .from('inbox_chats')
-      .select('id, unread_count')
+      .select('id, unread_count, metadata')
       .eq('phone', fromPhone)
       .maybeSingle();
 
     if (existingChat?.id) {
       chatId = existingChat.id;
+      const existingMetadata = existingChat.metadata || {};
       await supabase
         .from('inbox_chats')
         .update({
@@ -92,6 +93,12 @@ serve(async (req) => {
           status: 'Active',
           unread_count: Number(existingChat.unread_count || 0) + 1,
           updated_at: new Date().toISOString(),
+          metadata: {
+            ...existingMetadata,
+            last_customer_message_at: new Date().toISOString(),
+            last_inbound_at: new Date().toISOString(),
+            whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          },
         })
         .eq('id', chatId);
     } else {
@@ -108,6 +115,11 @@ serve(async (req) => {
           status: 'Active',
           unread_count: 1,
           updated_at: new Date().toISOString(),
+          metadata: {
+            last_customer_message_at: new Date().toISOString(),
+            last_inbound_at: new Date().toISOString(),
+            whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          },
         }])
         .select('id')
         .maybeSingle();
@@ -119,8 +131,17 @@ serve(async (req) => {
       workspace_id: currentAdminId,
       sender_phone: fromPhone,
       receiver_phone: clinicMetaId,
+      sender: 'user',
+      from_me: false,
+      type: 'public',
+      message_type: 'text',
+      status: 'RECEIVED',
+      body: messageText,
+      text: messageText,
+      message_text: messageText,
       message_body: messageText,
       is_private_note: false,
+      metadata: { inbound: true },
     }]);
 
     return json({ ok: true });
