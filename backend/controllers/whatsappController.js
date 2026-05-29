@@ -428,6 +428,8 @@ const cleanStoredCredential = (value) => {
     return normalized && normalized !== 'CONFIGURED' ? normalized : '';
 };
 
+const isNumericMetaId = (value) => /^\d+$/.test(String(value || '').trim());
+
 const hasCompleteMetaCredentials = (row = {}) => Boolean(
     cleanStoredCredential(row.meta_phone_number_id || row.whatsapp_phone_number_id) &&
     cleanStoredCredential(row.meta_waba_id || row.whatsapp_business_account_id) &&
@@ -483,6 +485,10 @@ exports.saveMetaConnection = async (req, res) => {
 
         if (!phoneNumberId || !businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: "Invalid Meta configuration. All credentials are required." });
+        }
+
+        if (!isNumericMetaId(phoneNumberId) || !isNumericMetaId(businessAccountId)) {
+            return res.status(400).json({ success: false, message: "Meta Phone Number ID and WABA ID must be numeric IDs." });
         }
 
         const client = supabaseAdmin || supabase;

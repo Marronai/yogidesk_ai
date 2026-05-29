@@ -45,13 +45,28 @@ const Settings = () => {
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
+  const [credentialsUnlocked, setCredentialsUnlocked] = useState(false);
+  const [metaValidationError, setMetaValidationError] = useState('');
   const [connectionAnimation, setConnectionAnimation] = useState(null);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const { userProfile, loadUserProfile } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
-  const metaInputsLocked = isMetaActive || hasExistingConnection;
+  const isConfigured = isMetaActive || hasExistingConnection;
+  const metaInputsLocked = isConfigured && !credentialsUnlocked;
+
+  const isNumericMetaId = (value) => /^\d+$/.test(String(value || '').trim());
+
+  const validateMetaIds = ({ phoneNumberId, businessAccountId }) => {
+    if (!isNumericMetaId(phoneNumberId)) {
+      return 'WhatsApp Phone Number ID must contain numbers only.';
+    }
+    if (!isNumericMetaId(businessAccountId)) {
+      return 'WhatsApp Business Account ID must contain numbers only.';
+    }
+    return '';
+  };
 
   const showToast = (type, text) => {
     setToast({ type, text });
@@ -143,6 +158,7 @@ const Settings = () => {
         whatsappAccessToken: nextForm.whatsappAccessToken || current.whatsappAccessToken,
       }));
       setHasExistingConnection(connectionExists);
+      setCredentialsUnlocked(false);
       setConnectionStatus(
         connectionExists ? 'connected' : 'disconnected'
       );
@@ -159,6 +175,14 @@ const Settings = () => {
   }, [userProfile]);
 
   const updateField = (field, value) => {
+    if (field === 'whatsappPhoneNumberId' || field === 'whatsappBusinessAccountId') {
+      if (/[^\d]/.test(value)) {
+        setMetaValidationError('Meta IDs must be numeric. Emails or names are not valid Meta IDs.');
+      } else {
+        setMetaValidationError('');
+      }
+    }
+
     setFormData((current) => ({
       ...current,
       [field]: value,
@@ -189,8 +213,17 @@ const Settings = () => {
 
   const handleSaveConnection = async (event) => {
     event.preventDefault();
-    if (isMetaActive) {
+    if (isMetaActive && !credentialsUnlocked) {
       showToast('error', 'Integration Active. Contact support for modifications.');
+      return;
+    }
+    const validationError = validateMetaIds({
+      phoneNumberId: formData.whatsappPhoneNumberId,
+      businessAccountId: formData.whatsappBusinessAccountId,
+    });
+    if (validationError) {
+      setMetaValidationError(validationError);
+      showToast('error', validationError);
       return;
     }
     setSavingConnection(true);
@@ -223,6 +256,8 @@ const Settings = () => {
         playConnectionAnimation('success');
         setConnectionStatus('connected');
         setHasExistingConnection(true);
+        setCredentialsUnlocked(false);
+        setMetaValidationError('');
         setFormData((current) => ({
           ...current,
           whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
@@ -236,7 +271,7 @@ const Settings = () => {
     } catch (error) {
       console.error('Supabase Settings Sync Error:', error);
       playConnectionAnimation('error');
-      showToast('error', error.message || 'Failed to update connection settings. Please try again.');
+      showToast('error', error?.response?.data?.message || error.message || 'Failed to update connection settings. Please try again.');
     } finally {
       setSavingConnection(false);
     }
@@ -376,6 +411,27 @@ const Settings = () => {
               </span>
             </div>
 
+            {isConfigured && (
+              <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-emerald-800">Credentials loaded from database</p>
+                  <p className="mt-1 text-xs font-semibold text-emerald-700/80">
+                    Fields are locked to prevent accidental clearing or invalid Meta IDs.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCredentialsUnlocked((current) => !current);
+                    setMetaValidationError('');
+                  }}
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-100 sm:w-auto"
+                >
+                  {credentialsUnlocked ? 'Lock Credentials' : 'Edit Credentials'}
+                </button>
+              </div>
+            )}
+
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Phone Number ID</label>
@@ -383,6 +439,8 @@ const Settings = () => {
                   <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input
                     type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={formData.whatsappPhoneNumberId}
                     onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
                     disabled={metaInputsLocked}
@@ -396,6 +454,8 @@ const Settings = () => {
                 <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Business Account ID</label>
                 <input
                   type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={formData.whatsappBusinessAccountId}
                   onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
                   disabled={metaInputsLocked}
@@ -417,6 +477,12 @@ const Settings = () => {
               </div>
             </div>
 
+            {metaValidationError && (
+              <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                {metaValidationError}
+              </div>
+            )}
+
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="w-full rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800 sm:flex-1">
                 Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
@@ -424,7 +490,7 @@ const Settings = () => {
 
               {metaInputsLocked ? (
                 <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800 sm:w-auto">
-                  Integration Active. Contact support for modifications.
+                  Integration active. Use Edit Credentials to update Meta IDs.
                 </div>
               ) : (
                 <button
@@ -440,7 +506,7 @@ const Settings = () => {
             </div>
 
             {metaInputsLocked && (
-              <p className="text-xs text-slate-400 mt-2">Your API connection is locked securely. To modify or transfer credentials, please submit an official request to Yogi Desk Admin Support.</p>
+              <p className="text-xs text-slate-400 mt-2">Your API connection is locked securely to protect the saved Meta configuration from accidental edits.</p>
             )}
           </section>
 

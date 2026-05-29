@@ -1453,6 +1453,41 @@ const buildMetaTemplateComponents = ({ bodyText, examples, hasMedia, mediaUrl })
     return components;
 };
 
+const removeUndefinedValues = (row = {}) => Object.fromEntries(
+    Object.entries(row).filter(([, value]) => value !== undefined)
+);
+
+const getMissingSchemaColumn = (error) => {
+    if (!isMissingColumnError(error)) return '';
+    const message = String(error?.message || error?.details || '');
+    return message.match(/'([^']+)'\s+column/i)?.[1] || '';
+};
+
+const upsertSingleRowSafely = async ({ db, table, row }) => {
+    let payload = removeUndefinedValues(row);
+    const removedColumns = new Set();
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const { data, error } = await db
+            .from(table)
+            .upsert(payload)
+            .select()
+            .maybeSingle();
+
+        if (!error) return data;
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (!missingColumn || removedColumns.has(missingColumn)) throw error;
+
+        console.warn(`Skipping missing ${table}.${missingColumn} column during template save.`);
+        removedColumns.add(missingColumn);
+        const { [missingColumn]: _removed, ...nextPayload } = payload;
+        payload = nextPayload;
+    }
+
+    throw new Error(`Unable to save ${table}: schema cache rejected multiple columns.`);
+};
+
 const saveSubmittedMetaTemplate = async ({ db, row, components }) => {
     const submittedRow = {
         ...row,
@@ -1460,25 +1495,11 @@ const saveSubmittedMetaTemplate = async ({ db, row, components }) => {
         updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await db
-        .from('submitted_meta_templates')
-        .upsert(submittedRow)
-        .select()
-        .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    return upsertSingleRowSafely({ db, table: 'submitted_meta_templates', row: submittedRow });
 };
 
 const saveCampaignTemplateMirror = async ({ db, row }) => {
-    const { data, error } = await db
-        .from('whatsapp_templates')
-        .upsert(row)
-        .select()
-        .maybeSingle();
-
-    if (error) throw error;
-    return data;
+    return upsertSingleRowSafely({ db, table: 'whatsapp_templates', row });
 };
 
 const buildPremadeTemplateComponents = ({ bodyText, variableMapping, hasMedia, mediaType, mediaUrl }) => {
@@ -1799,13 +1820,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             created_at: new Date().toISOString()
         };
 
-        const { data: savedTemplate, error: saveError } = await db
-            .from('whatsapp_templates')
-            .upsert(row)
-            .select()
-            .maybeSingle();
-
-        if (saveError) throw saveError;
+        const savedTemplate = await saveCampaignTemplateMirror({ db, row });
 
         return res.status(200).json({
             success: true,
