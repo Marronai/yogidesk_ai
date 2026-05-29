@@ -17,6 +17,7 @@ const {
 const { getWalletBalance } = require('./controllers/adminController');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
+const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 
 const app = express();
 
@@ -560,6 +561,60 @@ const processTemplateStatusWebhook = async (payload = {}) => {
     }
 };
 
+const extractFailedDeliveryUpdates = (payload = {}) => {
+    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+    const updates = [];
+    for (const entry of payload.entry) {
+        if (!Array.isArray(entry.changes)) continue;
+
+        for (const change of entry.changes) {
+            if (change.field !== 'messages') continue;
+            const value = change.value || {};
+            const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+
+            for (const statusRow of statuses) {
+                const status = String(statusRow.status || '').toLowerCase();
+                if (status !== 'failed') continue;
+
+                const metadata = statusRow.metadata || value.metadata || {};
+                const template = statusRow.template || metadata.template || {};
+                const pricing = statusRow.pricing || {};
+                const conversation = statusRow.conversation || {};
+                const messageId = statusRow.id || statusRow.message_id || null;
+                if (!messageId) continue;
+
+                updates.push({
+                    userId: metadata.user_id || metadata.doctor_id || value.user_id || null,
+                    messageId,
+                    templateCategory: pricing.category || metadata.template_category || metadata.category || template.category || null,
+                    templateName: metadata.template_name || template.name || null,
+                    templateId: metadata.template_id || template.id || conversation.id || null,
+                    reason: statusRow.errors?.[0]?.title || statusRow.errors?.[0]?.message || 'Delivery Failed / Undelivered Number',
+                    status
+                });
+            }
+        }
+    }
+
+    return updates;
+};
+
+const processFailedDeliveryWebhook = async (payload = {}) => {
+    for (const update of extractFailedDeliveryUpdates(payload)) {
+        await processFailedDeliveryRefund({
+            userId: update.userId,
+            messageId: update.messageId,
+            templateCategory: update.templateCategory,
+            templateName: update.templateName,
+            templateId: update.templateId,
+            reason: update.reason,
+            source: 'meta_webhook',
+            rawStatus: update.status
+        });
+    }
+};
+
 const verifyWhatsAppWebhook = (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -579,7 +634,10 @@ const handleWhatsAppWebhook = (req, res) => {
 
     res.status(200).send('EVENT_RECEIVED');
     Promise.resolve()
-        .then(() => processTemplateStatusWebhook(req.body))
+        .then(async () => {
+            await processTemplateStatusWebhook(req.body);
+            await processFailedDeliveryWebhook(req.body);
+        })
         .catch((error) => {
             console.error('WhatsApp webhook background processing error:', error.message || error);
         });
@@ -2356,9 +2414,23 @@ app.post('/api/campaigns/send', async (req, res) => {
                 await upsertCampaignInboxMessage({ row, metaResult });
             } catch (sendError) {
                 failedCount += 1;
+                const failedMessageId = sendError.response?.data?.error?.fbtrace_id ||
+                    sendError.response?.data?.error?.message_id ||
+                    `immediate_failed_${campaignId}_${recipient.phone}`;
                 failures.push({
                     phone: recipient.phone,
+                    message_id: failedMessageId,
                     message: sendError.clientPayload?.msg || sendError.message || 'Meta send failed'
+                });
+                await processFailedDeliveryRefund({
+                    userId,
+                    messageId: failedMessageId,
+                    templateCategory: template.category || 'MARKETING',
+                    templateName: template.template_name || template.name || 'WhatsApp Template',
+                    templateId: template.id || null,
+                    reason: sendError.clientPayload?.msg || sendError.message || 'Meta send failed',
+                    source: 'immediate_campaign_dispatch',
+                    rawStatus: 'failed'
                 });
                 console.error('Immediate campaign send failed:', sendError.message || sendError);
             }
@@ -2765,7 +2837,28 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
     const db = supabaseAdmin || supabase;
 
     const nowIso = new Date().toISOString();
-    const recipientPhone = String(row.recipient_phone || row.phone || '').trim();
+    const recipientPhone = String(
+        row.recipient_phone ||
+        row.phone ||
+        row.payload?.recipient?.phone_number ||
+        row.payload?.recipient?.patientPhone ||
+        row.payload?.recipient?.phone ||
+        ''
+    ).trim();
+    const safeReceiverPhone = recipientPhone || 'UNKNOWN';
+    const safeSenderPhone = String(
+        row.sender_phone ||
+        row.phone_number_id ||
+        row.whatsapp_phone_number_id ||
+        row.meta_phone_number_id ||
+        row.payload?.sender_phone ||
+        row.payload?.template?.sender_phone ||
+        row.payload?.template?.whatsapp_phone_number_id ||
+        row.payload?.template?.meta_phone_number_id ||
+        metaResult?.phone_number_id ||
+        metaResult?.response?.metadata?.phone_number_id ||
+        'SYSTEM'
+    ).trim() || 'SYSTEM';
     const recipientName = String(row.recipient_name || row.payload?.recipient?.patientName || row.payload?.recipient?.name || 'Patient').trim();
     const userId = row.user_id || row.doctor_id || null;
     const messageBody = resolveCampaignMessagePreview(row);
@@ -2773,6 +2866,8 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         template_id: row.template_id || row.payload?.template?.id || null,
         template_name: row.template_name || row.payload?.template?.template_name || row.payload?.template?.name || 'WhatsApp Template',
         template_category: row.template_category || row.payload?.template?.category || 'UTILITY',
+        message_id: getMetaMessageId(metaResult),
+        meta_message_id: getMetaMessageId(metaResult),
         meta_result: metaResult,
         fallback_dispatch: fallbackDispatch,
     };
@@ -2787,7 +2882,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             doctor_id: userId,
             name: recipientName || 'Patient',
             patient_name: recipientName || 'Patient',
-            patient_phone: recipientPhone || 'unknown',
+            patient_phone: safeReceiverPhone,
             status: 'SENT',
             last_message: messageBody,
             updated_at: nowIso,
@@ -2802,8 +2897,8 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             doctor_id: userId,
             name: recipientName || 'Patient',
             patient_name: recipientName || 'Patient',
-            phone: recipientPhone || 'unknown',
-            patient_phone: recipientPhone || 'unknown',
+            phone: safeReceiverPhone,
+            patient_phone: safeReceiverPhone,
             status: 'SENT',
             last_message: messageBody,
             unread_count: 0,
@@ -2815,21 +2910,32 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
 
     if (!chatId) return;
 
-    const messageInsert = await safeInsertRows({ table: 'inbox_messages', rows: [{
+    const inboxPayload = {
         chat_id: chatId,
         workspace_id: userId,
+        sender_id: userId,
         sender: 'agent',
         from_me: true,
         type: 'template',
+        message_type: 'text',
+        status: 'SENT',
+        is_agent: true,
         body: messageBody,
         text: messageBody,
         message_body: messageBody,
-        sender_phone: row.phone_number_id || null,
-        receiver_phone: recipientPhone,
+        message_text: messageBody,
+        sender_phone: safeSenderPhone,
+        receiver_phone: safeReceiverPhone,
         is_private_note: false,
-        metadata,
+        metadata: {
+            ...metadata,
+            meta_response: 'SUCCESSFUL_DISPATCH',
+            campaign_triggered: true
+        },
         created_at: nowIso,
-    }] });
+    };
+
+    const messageInsert = await safeInsertRows({ table: 'inbox_messages', rows: [inboxPayload] });
 
     if (!messageInsert.success) console.error('Campaign inbox message insert failed for chat:', chatId);
 };

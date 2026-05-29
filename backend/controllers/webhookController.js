@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { supabase, supabaseAdmin } = require('../config/supabase');
+const { processFailedDeliveryRefund } = require('../services/refundService');
 
 const getVerifyToken = () => (
   process.env.META_WEBHOOK_VERIFY_TOKEN ||
@@ -56,6 +57,38 @@ const getTemplateUpdates = (payload = {}) => {
   ));
 };
 
+const getDeliveryStatusUpdates = (payload = {}) => {
+  if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+  return payload.entry.flatMap((entry) => (
+    Array.isArray(entry.changes)
+      ? entry.changes.flatMap((change) => {
+        if (change.field !== 'messages') return [];
+        const value = change.value || {};
+        const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+
+        return statuses.map((statusRow) => {
+          const conversation = statusRow.conversation || {};
+          const pricing = statusRow.pricing || {};
+          const metadata = statusRow.metadata || value.metadata || {};
+          const template = statusRow.template || metadata.template || {};
+          const rawStatus = String(statusRow.status || '').toLowerCase();
+
+          return {
+            status: rawStatus,
+            userId: metadata.user_id || metadata.doctor_id || value.user_id || null,
+            messageId: statusRow.id || statusRow.message_id || null,
+            templateCategory: pricing.category || metadata.template_category || metadata.category || template.category || null,
+            templateName: metadata.template_name || template.name || null,
+            templateId: metadata.template_id || template.id || conversation.id || null,
+            reason: statusRow.errors?.[0]?.title || statusRow.errors?.[0]?.message || 'Delivery Failed / Undelivered Number'
+          };
+        }).filter((update) => update.status === 'failed' && update.messageId);
+      })
+      : []
+  ));
+};
+
 const findClinic = async (businessAccountId) => {
   const db = supabaseAdmin || supabase;
   let result = await db.from('doctor_profiles').select('id').eq('meta_waba_id', businessAccountId).maybeSingle();
@@ -96,6 +129,19 @@ exports.handleWebhook = async (req, res) => {
         : query.eq('template_name', update.templateName);
       const { error } = await query;
       if (error) console.error('Webhook template status update failed:', error.message || error);
+    }
+
+    for (const update of getDeliveryStatusUpdates(req.body)) {
+      await processFailedDeliveryRefund({
+        userId: update.userId,
+        messageId: update.messageId,
+        templateCategory: update.templateCategory,
+        templateName: update.templateName,
+        templateId: update.templateId,
+        reason: update.reason,
+        source: 'meta_webhook',
+        rawStatus: update.status
+      });
     }
   } catch (error) {
     console.error('Webhook handler error:', error.message || error);

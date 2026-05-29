@@ -72,6 +72,8 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
         template_id: template.id || null,
         template_name: template.template_name || template.name || 'WhatsApp Template',
         template_category: template.category || 'UTILITY',
+        phone_number_id: template.phone_number_id || template.whatsapp_phone_number_id || template.meta_phone_number_id || null,
+        whatsapp_phone_number_id: template.whatsapp_phone_number_id || template.meta_phone_number_id || template.phone_number_id || null,
         language: template.language || 'en_US',
         recipient_name: String(recipient.patientName || recipient.name || recipient.recipient_name || 'Patient').trim(),
         recipient_phone: recipientPhone,

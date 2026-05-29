@@ -22,6 +22,7 @@ const Campaigns = () => {
   const [toast, setToast] = useState('');
   const [walletBalance, setWalletBalance] = useState(0);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [senderPhoneId, setSenderPhoneId] = useState('');
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(selectedTemplateId));
   const variableKeys = Array.from(new Set(
@@ -121,12 +122,14 @@ const Campaigns = () => {
   const fetchCampaignData = async () => {
     if (!userId) return;
     setLoading(true);
-    const [{ data: approvedTemplates }] = await Promise.all([
-      supabase.from('whatsapp_templates').select('id, template_name, category, language, body_content').eq('user_id', userId).eq('status', 'APPROVED').order('created_at', { ascending: false })
+    const [{ data: approvedTemplates }, { data: profile }] = await Promise.all([
+      supabase.from('whatsapp_templates').select('id, template_name, category, language, body_content').eq('user_id', userId).eq('status', 'APPROVED').order('created_at', { ascending: false }),
+      supabase.from('doctor_profiles').select('meta_phone_number_id, whatsapp_phone_number_id').eq('id', userId).maybeSingle()
     ]);
     setPatients([]);
     setLedgerMatches([]);
     setTemplates(Array.isArray(approvedTemplates) ? approvedTemplates : []);
+    setSenderPhoneId(profile?.meta_phone_number_id || profile?.whatsapp_phone_number_id || '');
     setSelectedTemplateId((current) => current || approvedTemplates?.[0]?.id || '');
     setLoading(false);
   };
@@ -176,11 +179,14 @@ const Campaigns = () => {
         userId,
         template: {
           ...selectedTemplate,
-          variables: templateVariables
+          variables: templateVariables,
+          sender_phone: senderPhoneId || 'SYSTEM',
+          whatsapp_phone_number_id: senderPhoneId || 'SYSTEM'
         },
         recipients: patients.map((p) => ({
           name: p.name,
           phone: p.phone,
+          phone_number: p.phone,
           appointment_time: p.appointment_time
         }))
       });
