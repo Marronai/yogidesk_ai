@@ -2729,30 +2729,94 @@ const sendCampaignMessageToMeta = async (queueItem) => {
 };
 
 const resolveCampaignMessagePreview = (row = {}) => {
-    const text = row.message_body || row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content;
+    const text = row.message_body || row.body_text || row.text || row.messageBody || row.payload?.text || row.payload?.body_text || row.payload?.messageBody || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_text || row.payload?.template?.messageBody || row.payload?.template?.body_content;
     return String(text || `Sent template: ${row.template_name || 'WhatsApp Template'}`).trim();
 };
 
-const selectInboxChatByPhone = async (db, recipientPhone) => {
-    let result = await db
+const selectInboxChatByPhone = async (db, recipientPhone, userId) => {
+    const safePhone = String(recipientPhone || '').trim();
+    if (!safePhone) return { data: null, error: null };
+
+    let query = db
         .from('inbox_chats')
         .select('id, metadata')
-        .eq('phone', recipientPhone)
+        .or(`phone.eq.${safePhone},patient_phone.eq.${safePhone}`)
         .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(1);
+
+    if (userId) {
+        query = query.or(`user_id.eq.${userId},doctor_id.eq.${userId}`);
+    }
+
+    let result = await query.maybeSingle();
 
     if (result.error && getMissingSchemaColumn(result.error) === 'metadata') {
-        result = await db
+        let fallbackQuery = db
             .from('inbox_chats')
             .select('id')
-            .eq('phone', recipientPhone)
+            .or(`phone.eq.${safePhone},patient_phone.eq.${safePhone}`)
             .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .limit(1);
+
+        if (userId) {
+            fallbackQuery = fallbackQuery.or(`user_id.eq.${userId},doctor_id.eq.${userId}`);
+        }
+
+        result = await fallbackQuery.maybeSingle();
     }
 
     return result;
+};
+
+const resolveCampaignConversationChatId = async ({ db, userId, recipientPhone, recipientName, messageBody, nowIso }) => {
+    const safePhone = String(recipientPhone || '').trim();
+    if (!db?.from || !userId || !safePhone) return null;
+
+    const isMissingChatsTable = (error) => {
+        const message = String(error?.message || error?.details || '').toLowerCase();
+        return error?.code === 'PGRST205' || message.includes("could not find the table") || message.includes("could not find table") || message.includes("schema cache");
+    };
+
+    try {
+        const { data: existingChat, error: chatFindError } = await db
+            .from('chats')
+            .select('id')
+            .eq('receiver_phone', safePhone)
+            .eq('user_id', userId)
+            .maybeSingle();
+
+        if (chatFindError) {
+            if (isMissingChatsTable(chatFindError)) return null;
+            console.error('Campaign chats lookup failed:', chatFindError.message || chatFindError);
+            return null;
+        }
+
+        if (existingChat?.id) return existingChat.id;
+
+        const { data: newChat, error: chatCreateError } = await db
+            .from('chats')
+            .insert({
+                user_id: userId,
+                receiver_phone: safePhone,
+                receiver_name: recipientName || 'Patient',
+                last_message: messageBody || 'Template Campaign Sent',
+                updated_at: nowIso
+            })
+            .select('id')
+            .maybeSingle();
+
+        if (chatCreateError) {
+            if (!isMissingChatsTable(chatCreateError)) {
+                console.error('Campaign chats create failed:', chatCreateError.message || chatCreateError);
+            }
+            return null;
+        }
+
+        return newChat?.id || null;
+    } catch (error) {
+        console.error('Campaign chats resolver failed:', error.message || error);
+        return null;
+    }
 };
 
 const writeInboxChatSafely = async ({ db, payload, chatId }) => {
@@ -2825,6 +2889,15 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         meta_result: metaResult,
         fallback_dispatch: fallbackDispatch,
     };
+    const conversationChatId = await resolveCampaignConversationChatId({
+        db,
+        userId,
+        recipientPhone: safeReceiverPhone,
+        recipientName,
+        messageBody,
+        nowIso
+    });
+
     const storedMessagePreview = {
         id: getMetaMessageId(metaResult) || `${nowIso}-${safeReceiverPhone}`,
         chat_id: null,
@@ -2845,7 +2918,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
     };
 
     let chatId = null;
-    const { data: existingChat } = await selectInboxChatByPhone(db, recipientPhone);
+    const { data: existingChat } = await selectInboxChatByPhone(db, safeReceiverPhone, userId);
 
     if (existingChat?.id) {
         chatId = existingChat.id;
@@ -2884,7 +2957,14 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         chatId = createdChat?.id || null;
     }
 
-    if (!chatId) return;
+    if (!chatId) {
+        console.error('Campaign inbox message skipped because no active chat id could be resolved.', {
+            user_id: userId,
+            receiver_phone: safeReceiverPhone,
+            conversation_chat_id: conversationChatId
+        });
+        return;
+    }
 
     const inboxPayload = {
         chat_id: chatId,
@@ -2905,6 +2985,9 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         is_private_note: false,
         metadata: {
             ...metadata,
+            campaign_name: row.campaign_name || row.payload?.campaign_name || null,
+            bulk_broadcast: true,
+            conversation_chat_id: conversationChatId,
             meta_response: 'SUCCESSFUL_DISPATCH',
             campaign_triggered: true
         },

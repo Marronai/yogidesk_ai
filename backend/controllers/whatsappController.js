@@ -63,7 +63,7 @@ const buildCampaignQueuePayload = ({ userId, doctorId: requestDoctorId, template
     const doctorId = requestDoctorId || userId || template.doctor_id || template.user_id || null;
     const resolvedUserId = userId || requestDoctorId || template.user_id || template.doctor_id || null;
     const variables = template.variables || template.variablesData || template.payload?.variables || {};
-    const templateText = template.templateText || template.bodyText || template.body_content || template.text || '';
+    const templateText = template.templateText || template.bodyText || template.body_text || template.messageBody || template.body_content || template.text || '';
     const recipientPhone = String(recipient.patientPhone || recipient.phone || recipient.recipient_phone || '').trim();
     const scheduledIso = resolveScheduledIso(scheduledFor, index);
     return {
@@ -99,10 +99,10 @@ const buildMinimalCampaignQueuePayload = (row = {}) => ({
     language: row.language || row.payload?.template?.language || 'en_US',
     recipient_phone: row.recipient_phone || row.phone || row.payload?.recipient?.phone || '',
     phone: row.phone || row.recipient_phone || row.payload?.recipient?.phone || '',
-    message_body: row.message_body || row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content || '',
+    message_body: row.message_body || row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_text || row.payload?.template?.messageBody || row.payload?.template?.body_content || '',
     payload: {
         variables: row.payload?.variables || row.payload?.template?.variables || row.payload?.template?.variablesData || {},
-        text: row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_content || ''
+        text: row.payload?.text || row.payload?.template?.templateText || row.payload?.template?.bodyText || row.payload?.template?.body_text || row.payload?.template?.messageBody || row.payload?.template?.body_content || ''
     }
 });
 
