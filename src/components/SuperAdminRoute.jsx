@@ -8,10 +8,30 @@ const SuperAdminRoute = () => {
 
   useEffect(() => {
     const checkRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      // Check metadata or custom claims for the super_admin role
-      const isSuper = user?.user_metadata?.role === 'super_admin' || user?.role === 'super_admin';
-      setAuth({ loading: false, isSuperAdmin: !!isSuper });
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user;
+        if (!user) {
+          return setAuth({ loading: false, isSuperAdmin: false });
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('doctor_profiles')
+          .select('user_role, role')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const roleValue = String(profile?.user_role || profile?.role || user?.user_metadata?.role || user?.role || '').toUpperCase();
+        const isSuper = roleValue === 'SUPER_ADMIN';
+        if (profileError) {
+          console.warn('Unable to validate super admin profile:', profileError.message || profileError);
+        }
+
+        setAuth({ loading: false, isSuperAdmin: !!isSuper });
+      } catch {
+        console.error('Super admin route validation failed.');
+        setAuth({ loading: false, isSuperAdmin: false });
+      }
     };
     checkRole();
   }, []);

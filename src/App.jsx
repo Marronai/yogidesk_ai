@@ -48,7 +48,7 @@ const AppContent = () => {
   const location = useLocation();
   
   // Comprehensive internal route exclusion array
-  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/yogi-core-control-center'];
+  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/admin-control-center', '/yogi-core-control-center'];
   
   // Check if current URL starts with any internal application route
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
@@ -123,6 +123,7 @@ const AppContent = () => {
           {/* 4. SUPER ADMIN (HIDDEN)        */}
           {/* ============================== */}
           <Route element={<SuperAdminRoute />}>
+            <Route path="/admin-control-center" element={<SuperAdminDashboard />} />
             <Route path="/yogi-core-control-center" element={<SuperAdminDashboard />} />
           </Route>
 

@@ -15,6 +15,7 @@ const {
     insertQueuedInboxChatRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
+const adminControlRoutes = require('./routes/adminControlRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
@@ -42,6 +43,7 @@ app.get('/', (req, res) => {
 // Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/payments', paymentRoutes);
+app.use('/api/admin', adminControlRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
@@ -127,6 +129,22 @@ const getSupabaseSessionUser = async (req) => {
 
     return data.user;
 };
+
+const getDoctorProfileById = async (userId) => {
+    if (!userId) return null;
+    const { data, error } = await supabase
+        .from('doctor_profiles')
+        .select('system_status')
+        .or(`id.eq.${userId},user_id.eq.${userId}`)
+        .maybeSingle();
+
+    if (error) {
+        console.error('Doctor profile lookup failed:', error.message || error);
+        return null;
+    }
+    return data;
+};
+
 const hasCompleteMetaCredentials = (row = {}) => Boolean(
     String(row.meta_phone_number_id || row.whatsapp_phone_number_id || '').trim() &&
     String(row.meta_waba_id || row.whatsapp_business_account_id || '').trim() &&
@@ -2668,6 +2686,11 @@ app.post('/api/campaigns/schedule', async (req, res) => {
                 return true;
             });
 
+        const doctorProfile = await getDoctorProfileById(userId);
+        if (doctorProfile?.system_status?.toUpperCase() === 'SUSPENDED') {
+            return res.status(403).json({ success: false, msg: 'Account Frozen' });
+        }
+
         const { data: wallet, error: walletError } = await supabase
             .from('wallets')
             .select('balance, plan_tier, lifetime_contacts_count')
@@ -3696,6 +3719,12 @@ const processCampaignQueue = async () => {
         if (!Array.isArray(dueRows) || dueRows.length === 0) return;
 
         for (const row of dueRows) {
+            const doctorProfile = await getDoctorProfileById(row.user_id);
+            if (doctorProfile?.system_status?.toUpperCase() === 'SUSPENDED') {
+                await supabase.from('campaign_queue').update({ status: 'FAILED', error_message: 'Account Frozen' }).eq('id', row.id);
+                continue;
+            }
+
             const unitCost = getUnitCost(row.template_category);
             const { data: wallet } = await supabase
                 .from('wallets')
