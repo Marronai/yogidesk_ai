@@ -39,7 +39,7 @@ const Login = () => {
 
   useEffect(() => {
     if (!authLoading && !loading && isAuthenticated && step === 'login' && !pendingCredentials) {
-      navigate('/dashboard', { replace: true });
+      navigate(localStorage.getItem('user_role') === 'STAFF' ? '/staff/dashboard' : '/dashboard', { replace: true });
       return undefined;
     }
 
@@ -134,6 +134,33 @@ const Login = () => {
   };
 
   // ✅ ENHANCED SUCCESS HANDLER (Saves session with fingerprint and persistence config)
+  const resolvePostLoginRoute = async (user) => {
+    try {
+      const response = await api.get('/team/session-role', {
+        params: {
+          userId: user?.id,
+          email: user?.email || formData.email.trim().toLowerCase(),
+        },
+      });
+
+      if (response.data?.role === 'STAFF') {
+        const member = response.data.member || {};
+        localStorage.setItem('user_role', 'STAFF');
+        sessionStorage.setItem('user_role', 'STAFF');
+        localStorage.setItem('staff_admin_id', member.admin_id || '');
+        sessionStorage.setItem('staff_admin_id', member.admin_id || '');
+        if (member.name) localStorage.setItem('user_name', member.name);
+        return response.data.redirectTo || '/staff/dashboard';
+      }
+    } catch (error) {
+      console.warn('Unable to resolve team role, using default dashboard.', error?.response?.data?.message || error.message || error);
+    }
+
+    localStorage.setItem('user_role', 'doctor');
+    sessionStorage.setItem('user_role', 'doctor');
+    return '/dashboard';
+  };
+
   const handleAuthSuccess = async (supabaseUser, authSession = null) => {
     try {
         if (!supabaseUser?.id) {
@@ -181,7 +208,8 @@ const Login = () => {
           throw new Error('Auth session could not be restored after OTP verification.');
         }
         await loadUserProfile(restoredUser.id, { force: true });
-        navigate('/dashboard', { replace: true });
+        const redirectTo = await resolvePostLoginRoute(restoredUser);
+        navigate(redirectTo, { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
         alert("Login completed with validation anomalies.");

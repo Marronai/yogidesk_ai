@@ -430,6 +430,182 @@ app.post('/api/team/dispatch-invite-email', async (req, res) => {
     }
 });
 
+const updateTeamMemberActivation = async ({ memberId, authUserId }) => {
+    const db = supabaseAdmin || supabase;
+    let payload = {
+        status: 'ACTIVE',
+        auth_user_id: authUserId,
+        user_id: authUserId,
+        accepted_at: new Date().toISOString()
+    };
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        const { data, error } = await db
+            .from('team_members')
+            .update(payload)
+            .eq('id', memberId)
+            .select('id, admin_id, name, email, status')
+            .maybeSingle();
+
+        if (!error) return data;
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        throw error;
+    }
+
+    throw new Error('Unable to activate team member.');
+};
+
+app.post('/api/team/setup-password', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from || !db?.auth?.admin?.createUser) {
+            return res.status(500).json({ success: false, message: 'Team setup service is unavailable.' });
+        }
+
+        const email = normalizeEmail(req.body?.email);
+        const password = String(req.body?.password || '');
+
+        if (!email) return res.status(400).json({ success: false, message: 'Invite email is required.' });
+        if (password.length < 8) return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+
+        const { data: member, error: memberError } = await db
+            .from('team_members')
+            .select('id, admin_id, name, email, status, invite_expires_at')
+            .eq('email', email)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (memberError) throw memberError;
+        if (!member) return res.status(404).json({ success: false, message: 'Invite not found for this email.' });
+
+        if (String(member.status || '').toUpperCase() !== 'PENDING') {
+            return res.status(409).json({ success: false, message: 'This invite is no longer pending.' });
+        }
+
+        if (member.invite_expires_at && new Date(member.invite_expires_at).getTime() <= Date.now()) {
+            await db.from('team_members').update({ status: 'EXPIRED' }).eq('id', member.id);
+            return res.status(410).json({ success: false, message: 'This invite has expired. Please ask your admin to send a new invite.' });
+        }
+
+        const { data: authUser, error: authError } = await db.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: {
+                role: 'STAFF',
+                account_role: 'STAFF',
+                staff_name: member.name || email,
+                name: member.name || email,
+                admin_id: member.admin_id || null
+            }
+        });
+
+        if (authError) {
+            const message = String(authError.message || '').toLowerCase();
+            if (message.includes('already') || message.includes('registered')) {
+                return res.status(409).json({ success: false, message: 'An account already exists for this email. Please use login or request a fresh invite.' });
+            }
+            throw authError;
+        }
+
+        const createdUserId = authUser?.user?.id;
+        if (!createdUserId) throw new Error('Supabase did not return a created auth user.');
+
+        const updatedMember = await updateTeamMemberActivation({
+            memberId: member.id,
+            authUserId: createdUserId
+        });
+
+        return res.status(200).json({
+            success: true,
+            userId: createdUserId,
+            member: updatedMember
+        });
+    } catch (error) {
+        console.error('Team setup password error:', error.message || error);
+        return res.status(500).json({ success: false, message: error.message || 'Unable to complete staff setup.' });
+    }
+});
+
+app.get('/api/team/session-role', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+
+        const userId = String(req.query.userId || '').trim();
+        const email = normalizeEmail(req.query.email);
+        if (!userId && !email) return res.status(400).json({ success: false, message: 'User id or email is required.' });
+
+        let member = null;
+        const selectColumns = 'id, admin_id, name, email, status, auth_user_id, user_id';
+
+        if (userId) {
+            let result = await db
+                .from('team_members')
+                .select(selectColumns)
+                .eq('auth_user_id', userId)
+                .eq('status', 'ACTIVE')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (result.error && getMissingSchemaColumn(result.error)) {
+                result = await db
+                    .from('team_members')
+                    .select('id, admin_id, name, email, status')
+                    .eq('email', email)
+                    .eq('status', 'ACTIVE')
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+            }
+            if (result.error && !getMissingSchemaColumn(result.error)) throw result.error;
+            member = result.data || null;
+        }
+
+        if (!member && email) {
+            const { data, error } = await db
+                .from('team_members')
+                .select('id, admin_id, name, email, status')
+                .eq('email', email)
+                .eq('status', 'ACTIVE')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (error) throw error;
+            member = data || null;
+        }
+
+        if (member?.id) {
+            return res.status(200).json({
+                success: true,
+                role: 'STAFF',
+                redirectTo: '/staff/dashboard',
+                member
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            role: 'DOCTOR',
+            redirectTo: '/dashboard'
+        });
+    } catch (error) {
+        console.error('Team session role lookup failed:', error.message || error);
+        return res.status(500).json({ success: false, message: 'Unable to resolve user role.' });
+    }
+});
+
 // ====== META WEBHOOK ENDPOINTS ======
 
 const getMetaWebhookVerifyToken = () => (

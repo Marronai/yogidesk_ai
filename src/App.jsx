@@ -48,7 +48,7 @@ const AppContent = () => {
   const location = useLocation();
   
   // Comprehensive internal route exclusion array
-  const internalDashboardPaths = ['/login', '/signup', '/dashboard', '/templates', '/settings', '/campaigns', '/yogi-core-control-center'];
+  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/yogi-core-control-center'];
   
   // Check if current URL starts with any internal application route
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
@@ -98,6 +98,7 @@ const AppContent = () => {
               {/* ✅ Main Dashboard Wrapper */}
               <Route element={<MainLayout />}>
                 <Route path="/dashboard" element={<DashboardHome />} />
+                <Route path="/staff/dashboard" element={<DashboardHome />} />
                 <Route path="/dashboard/inbox" element={<Inbox />} />
                 <Route path="/dashboard/contacts" element={<Contacts />} />
                 <Route path="/dashboard/support" element={<Support />} />
@@ -143,11 +144,4 @@ const App = () => {
     <BrowserRouter>
       <AuthProvider>
         <WalletProvider>
-          <AppContent />
-        </WalletProvider>
-      </AuthProvider>
-    </BrowserRouter>
-  );
-};
-
-export default App;
+          <AppCon

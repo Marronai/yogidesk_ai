@@ -1,133 +1,155 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, KeyRound, Lock, ShieldCheck } from 'lucide-react';
-import { supabase } from '../supabaseClient';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
+import { persistSupabaseSession } from '../utils/authSession';
+
+const validatePassword = (password) => {
+  if (password.length < 8) return 'Password must be at least 8 characters.';
+  if (!/[A-Z]/.test(password)) return 'Add at least one uppercase letter.';
+  if (!/[a-z]/.test(password)) return 'Add at least one lowercase letter.';
+  if (!/\d/.test(password)) return 'Add at least one number.';
+  return '';
+};
 
 const AcceptInvite = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ password: '', confirm: '' });
-  const [toast, setToast] = useState('');
+  const [searchParams] = useSearchParams();
+  const invitedEmail = useMemo(() => String(searchParams.get('email') || '').trim().toLowerCase(), [searchParams]);
+  const [form, setForm] = useState({ password: '', confirmPassword: '' });
+  const [notice, setNotice] = useState('');
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const tokenHint = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    return params.get('token_hash') || params.get('access_token') || hash.get('access_token') || '';
-  }, []);
+  const passwordError = validatePassword(form.password);
+  const confirmError = form.confirmPassword && form.password !== form.confirmPassword
+    ? 'Passwords do not match.'
+    : '';
 
-  const incomingUserEmailInputString = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-    return (params.get('email') || hash.get('email') || '').trim().toLowerCase();
-  }, []);
-
-  const activate = async (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    setToast('');
+    setNotice('');
+    setSuccess(false);
 
-    const newPasswordString = form.password.trim();
-    if (newPasswordString.length < 8) {
-      setToast('Password must be at least 8 characters.');
+    if (!invitedEmail) {
+      setNotice('Invite email is missing. Please open the link from your invitation email.');
       return;
     }
-    if (newPasswordString !== form.confirm.trim()) {
-      setToast('Passwords do not match.');
+    if (passwordError) {
+      setNotice(passwordError);
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setNotice('Passwords do not match.');
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password: newPasswordString });
-    if (error) {
-      setToast(error.message || 'Activation failed.');
+    try {
+      await api.post('/team/setup-password', {
+        email: invitedEmail,
+        password: form.password,
+      });
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: invitedEmail,
+        password: form.password,
+      });
+      if (error) throw error;
+
+      if (data?.user) {
+        persistSupabaseSession(data.user, {
+          email: invitedEmail,
+          name: data.user.user_metadata?.staff_name || data.user.user_metadata?.name || invitedEmail,
+          role: 'STAFF',
+        });
+        localStorage.setItem('user_role', 'STAFF');
+        sessionStorage.setItem('user_role', 'STAFF');
+      }
+
+      setSuccess(true);
+      setNotice('Password set successfully. Opening your staff dashboard...');
+      setTimeout(() => navigate('/staff/dashboard', { replace: true }), 500);
+    } catch (error) {
+      setNotice(error?.response?.data?.message || error.message || 'Unable to complete invite setup.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { data } = await supabase.auth.getUser();
-    const activeEmail = incomingUserEmailInputString || data?.user?.email;
-    if (activeEmail) {
-      const { data: invite, error: inviteError } = await supabase
-        .from('team_members')
-        .select('id,status,invite_expires_at')
-        .eq('email', activeEmail)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (inviteError || !invite) {
-        setToast('Invite not found. Please contact your admin.');
-        setLoading(false);
-        return;
-      }
-
-      if (String(invite.status || '').toUpperCase() !== 'PENDING') {
-        setToast('This invite is no longer active. Please contact your admin.');
-        setLoading(false);
-        return;
-      }
-
-      if (invite.invite_expires_at && new Date(invite.invite_expires_at).getTime() <= Date.now()) {
-        await supabase.from('team_members').update({ status: 'EXPIRED' }).eq('id', invite.id);
-        setToast('This invite has expired. Please ask your admin to send a new invite.');
-        setLoading(false);
-        return;
-      }
-
-      await supabase
-        .from('team_members')
-        .update({ status: 'ACTIVE', accepted_at: new Date().toISOString() })
-        .eq('id', invite.id);
-    }
-
-    setToast('Account activated successfully.');
-    setTimeout(() => navigate('/login', { replace: true }), 900);
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-10 font-sans">
-      <div className="w-full max-w-md rounded-3xl bg-white border border-slate-100 shadow-xl p-8">
-        <div className="w-14 h-14 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center mb-6">
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10 font-sans">
+      <div className="w-full max-w-lg rounded-3xl border border-slate-100 bg-white p-6 shadow-xl sm:p-8">
+        <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
           <ShieldCheck size={28} />
         </div>
         <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-500">Yogi Desk Invite</p>
-        <h1 className="mt-2 text-2xl font-black text-slate-900">Set Your Yogi Desk Account Password</h1>
-        <p className="mt-2 text-sm text-slate-500">Create your password to activate secure staff access.</p>
+        <h1 className="mt-2 text-2xl font-black text-slate-900">Complete Staff Account Setup</h1>
+        <p className="mt-2 text-sm font-medium leading-6 text-slate-500">
+          Create a password for the email your clinic admin invited. This email is locked to protect the workspace.
+        </p>
 
-        {toast && (
-          <div className={`mt-5 flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${toast.includes('success') ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
-            {toast.includes('success') ? <CheckCircle2 size={18} /> : <KeyRound size={18} />}
-            {toast}
+        {notice && (
+          <div className={`mt-5 flex items-start gap-2 rounded-2xl border px-4 py-3 text-sm font-bold ${
+            success ? 'border-emerald-100 bg-emerald-50 text-emerald-700' : 'border-amber-100 bg-amber-50 text-amber-800'
+          }`}>
+            {success ? <CheckCircle2 className="mt-0.5 shrink-0" size={18} /> : <KeyRound className="mt-0.5 shrink-0" size={18} />}
+            <span>{notice}</span>
           </div>
         )}
 
-        <form onSubmit={activate} className="mt-6 space-y-4">
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-              placeholder="New Password"
-              className="w-full rounded-2xl border border-slate-200 pl-12 pr-4 py-3 text-sm font-semibold outline-none focus:border-orange-400"
-            />
-          </div>
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="password"
-              value={form.confirm}
-              onChange={(e) => setForm((prev) => ({ ...prev, confirm: e.target.value }))}
-              placeholder="Confirm Password"
-              className="w-full rounded-2xl border border-slate-200 pl-12 pr-4 py-3 text-sm font-semibold outline-none focus:border-orange-400"
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <label className="block">
+            <span className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-400">Invited Email</span>
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="email"
+                value={invitedEmail}
+                disabled
+                readOnly
+                className="w-full rounded-2xl border border-slate-200 bg-slate-100 py-3 pl-12 pr-4 text-sm font-bold text-slate-600 outline-none"
+              />
+            </div>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-400">Create Password</span>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="password"
+                value={form.password}
+                onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+                placeholder="Create Password"
+                className="w-full rounded-2xl border border-slate-200 py-3 pl-12 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
+              />
+            </div>
+            {form.password && passwordError && <p className="mt-2 text-xs font-bold text-amber-700">{passwordError}</p>}
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-xs font-black uppercase tracking-widest text-slate-400">Confirm Password</span>
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                type="password"
+                value={form.confirmPassword}
+                onChange={(event) => setForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+                placeholder="Confirm Password"
+                className="w-full rounded-2xl border border-slate-200 py-3 pl-12 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
+              />
+            </div>
+            {confirmError && <p className="mt-2 text-xs font-bold text-amber-700">{confirmError}</p>}
+          </label>
 
           <button
             type="submit"
-            disabled={loading || !tokenHint}
-            className="w-full rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+            disabled={loading || !invitedEmail || Boolean(passwordError) || form.password !== form.confirmPassword}
+            className="w-full rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
           >
-            {loading ? 'Activating...' : 'Activate Account'}
+            {loading ? 'Setting Password...' : 'Set Password & Complete Setup'}
           </button>
         </form>
       </div>

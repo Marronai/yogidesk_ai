@@ -72,7 +72,7 @@ const Sidebar = () => {
   `;
 
   const mainLinks = [
-    { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
+    { name: 'Dashboard', path: isStaff ? '/staff/dashboard' : '/dashboard', icon: LayoutDashboard },
     { name: 'Campaigns', path: '/campaigns', icon: Send },
     !isStaff && { name: 'WA Template', path: '/templates', icon: LayoutTemplate },
     { name: 'Inbox', path: '/dashboard/inbox', icon: MessageSquare },
