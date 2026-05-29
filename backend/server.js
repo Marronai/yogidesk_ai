@@ -1215,6 +1215,57 @@ const getRawMetaCredentialsForUser = async (userId) => {
     return { ...config, meta_configured: false, accessToken: '' };
 };
 
+const getFreshTemplateSubmitCredentials = async (userId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !userId) {
+        console.error('Template submit credentials missing database or user context.', { userId: Boolean(userId) });
+        return { accessToken: '', businessAccountId: '', phoneNumberId: '' };
+    }
+
+    const lookups = [
+        {
+            table: 'doctor_profiles',
+            select: 'system_user_token,meta_waba_id,meta_phone_number_id',
+            map: (row) => ({
+                accessToken: row?.system_user_token || '',
+                businessAccountId: row?.meta_waba_id || '',
+                phoneNumberId: row?.meta_phone_number_id || ''
+            })
+        },
+        {
+            table: 'doctor_profiles',
+            select: 'whatsapp_access_token,whatsapp_business_account_id,whatsapp_phone_number_id',
+            map: (row) => ({
+                accessToken: row?.whatsapp_access_token || '',
+                businessAccountId: row?.whatsapp_business_account_id || '',
+                phoneNumberId: row?.whatsapp_phone_number_id || ''
+            })
+        }
+    ];
+
+    for (const lookup of lookups) {
+        const { data: credentials, error: credError } = await db
+            .from(lookup.table)
+            .select(lookup.select)
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (credError) {
+            if (isMissingColumnError(credError) || credError.code === 'PGRST205') continue;
+            console.error('Fresh Meta credential lookup failed:', credError.message || credError);
+            throw credError;
+        }
+
+        const mapped = lookup.map(credentials || {});
+        if (mapped.accessToken && mapped.businessAccountId) {
+            return mapped;
+        }
+    }
+
+    console.error('Fresh Meta credentials missing or empty for template submission.', { userId });
+    return { accessToken: '', businessAccountId: '', phoneNumberId: '' };
+};
+
 const languageToMetaLocale = (language) => {
     const normalized = String(language || '').trim().toLowerCase();
     if (normalized === 'hindi' || normalized === 'hi') return 'hi';
@@ -1351,10 +1402,7 @@ const uploadTemplateMedia = async ({ db, userId, file }) => {
 };
 
 const getTemplateSubmitCredentials = async (userId) => {
-    const config = await getRawMetaCredentialsForUser(userId);
-    const accessToken = config.accessToken || process.env.SYSTEM_USER_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || '';
-    const businessAccountId = config.whatsapp_business_account_id || process.env.META_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
-    return { accessToken, businessAccountId };
+    return getFreshTemplateSubmitCredentials(userId);
 };
 
 const normalizeTemplateCategory = (category) => {
@@ -1595,7 +1643,7 @@ app.post('/api/templates/submit-to-meta', async (req, res) => {
             mediaUrl
         });
 
-        const { accessToken, businessAccountId } = await getTemplateSubmitCredentials(userId);
+        const { accessToken, businessAccountId, phoneNumberId } = await getTemplateSubmitCredentials(userId);
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
@@ -1628,6 +1676,8 @@ app.post('/api/templates/submit-to-meta', async (req, res) => {
             header_url: mediaUrl || null,
             buttons: [],
             meta_template_id: metaTemplateId,
+            whatsapp_business_account_id: businessAccountId,
+            whatsapp_phone_number_id: phoneNumberId || null,
             created_at: now,
             updated_at: now
         };
@@ -1687,29 +1737,8 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             return res.status(404).json({ success: false, message: 'Template not available for this specialization.' });
         }
 
-        let { data: userMeta, error: credentialError } = await db
-            .from('doctor_profiles')
-            .select('system_user_token,meta_waba_id')
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (credentialError && isMissingColumnError(credentialError)) {
-            const fallback = await db
-                .from('doctor_profiles')
-                .select('whatsapp_access_token,whatsapp_business_account_id')
-                .eq('id', userId)
-                .maybeSingle();
-            userMeta = fallback.data
-                ? {
-                    system_user_token: fallback.data.whatsapp_access_token,
-                    meta_waba_id: fallback.data.whatsapp_business_account_id
-                }
-                : null;
-            credentialError = fallback.error;
-        }
-
-        if (credentialError) throw credentialError;
-        if (!userMeta?.meta_waba_id || !userMeta?.system_user_token) {
+        const freshCredentials = await getFreshTemplateSubmitCredentials(userId);
+        if (!freshCredentials.businessAccountId || !freshCredentials.accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials.' });
         }
 
@@ -1738,7 +1767,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             mediaUrl
         });
 
-        const graphUrl = `https://graph.facebook.com/v20.0/${userMeta.meta_waba_id}/message_templates`;
+        const graphUrl = `https://graph.facebook.com/v20.0/${freshCredentials.businessAccountId}/message_templates`;
         const response = await axios.post(graphUrl, {
             messaging_product: 'whatsapp',
             name: formattedName,
@@ -1748,7 +1777,7 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             components
         }, {
             headers: {
-                Authorization: `Bearer ${userMeta.system_user_token}`,
+                Authorization: `Bearer ${freshCredentials.accessToken}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -1765,6 +1794,8 @@ app.post('/api/templates/create-and-submit', async (req, res) => {
             header_url: mediaUrl || null,
             buttons: [],
             meta_template_id: metaTemplateId,
+            whatsapp_business_account_id: freshCredentials.businessAccountId,
+            whatsapp_phone_number_id: freshCredentials.phoneNumberId || null,
             created_at: new Date().toISOString()
         };
 
@@ -1799,7 +1830,6 @@ app.post('/api/templates', async (req, res) => {
         }
 
         const {
-            userId,
             name,
             bodyText,
             language = 'en_US',
@@ -1809,12 +1839,18 @@ app.post('/api/templates', async (req, res) => {
             footerText = '',
             buttons = [],
             components = [],
-            messaging_product: messagingProduct = 'whatsapp',
-            whatsapp_business_account_id: requestBusinessAccountId
+            messaging_product: messagingProduct = 'whatsapp'
         } = req.body;
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = sessionUser?.id || req.body.userId;
 
         if (!userId) {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
+        }
+
+        if (sessionUser?.id && req.body.userId && req.body.userId !== sessionUser.id) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
         }
 
         const formattedName = formatTemplateName(name);
@@ -1827,18 +1863,9 @@ app.post('/api/templates', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Template body text is required.' });
         }
 
-        const { data: userMeta, error: credentialError } = await supabase
-            .from('doctor_profiles')
-            .select('system_user_token,meta_phone_number_id,meta_waba_id')
-            .eq('id', userId)
-            .maybeSingle();
-
-        if (credentialError || !userMeta) {
-            console.warn('Unable to fetch Meta credentials for user:', credentialError?.message || 'missing data');
-        }
-
-        const businessAccountId = userMeta?.meta_waba_id || requestBusinessAccountId || null;
-        const accessToken = userMeta?.system_user_token || null;
+        const freshCredentials = await getFreshTemplateSubmitCredentials(userId);
+        const businessAccountId = freshCredentials.businessAccountId || null;
+        const accessToken = freshCredentials.accessToken || null;
 
         if (!businessAccountId || !accessToken) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp Business Account credentials. Please configure Meta WhatsApp credentials in settings.' });
@@ -1856,8 +1883,9 @@ app.post('/api/templates', async (req, res) => {
             category,
             components: graphComponents
         }, {
-            params: {
-                access_token: accessToken
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
             }
         });
 
@@ -1874,7 +1902,9 @@ app.post('/api/templates', async (req, res) => {
             footer_text: footerText ? footerText.trim() : null,
             buttons: sanitizedButtons,
             created_at: new Date().toISOString(),
-            meta_template_id: metaTemplateId
+            meta_template_id: metaTemplateId,
+            whatsapp_business_account_id: businessAccountId,
+            whatsapp_phone_number_id: freshCredentials.phoneNumberId || null
         };
 
         const { data: insertedTemplate, error: insertError } = await supabase

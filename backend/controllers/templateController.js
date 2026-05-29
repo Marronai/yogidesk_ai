@@ -193,45 +193,49 @@ const buildGraphComponents = ({ bodyText, headerType, headerText, footerText, bu
 };
 
 const getUserMetaCredentials = async (userId) => {
-  if (!supabase?.from || !userId) return {};
+  const db = getDb();
+  if (!db?.from || !userId) return {};
 
-  let result = await supabase
-    .from('doctor_profiles')
-    .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-    .eq('id', userId)
-    .maybeSingle();
+  const lookups = [
+    {
+      select: 'meta_phone_number_id,meta_waba_id,system_user_token',
+      map: (row) => ({
+        phoneNumberId: row?.meta_phone_number_id || null,
+        businessAccountId: row?.meta_waba_id || null,
+        accessToken: row?.system_user_token || null
+      })
+    },
+    {
+      select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token',
+      map: (row) => ({
+        phoneNumberId: row?.whatsapp_phone_number_id || null,
+        businessAccountId: row?.whatsapp_business_account_id || null,
+        accessToken: row?.whatsapp_access_token || null
+      })
+    }
+  ];
 
-  if (!result.error && result.data) {
-    return {
-      phoneNumberId: result.data.whatsapp_phone_number_id || null,
-      businessAccountId: result.data.whatsapp_business_account_id || null,
-      accessToken: result.data.whatsapp_access_token || null
-    };
+  for (const lookup of lookups) {
+    const result = await db
+      .from('doctor_profiles')
+      .select(lookup.select)
+      .eq('id', userId)
+      .maybeSingle();
+
+    const message = String(result.error?.message || result.error?.details || '').toLowerCase();
+    const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+    if (result.error) {
+      if (isMissingColumn) continue;
+      console.warn('Fresh Meta credential lookup failed:', result.error.message);
+      return {};
+    }
+
+    const credentials = lookup.map(result.data || {});
+    if (credentials.businessAccountId && credentials.accessToken) return credentials;
   }
 
-  const message = String(result.error?.message || result.error?.details || '').toLowerCase();
-  const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
-  if (result.error && !isMissingColumn) {
-    console.warn('Meta credential lookup failed:', result.error.message);
-    return {};
-  }
-
-  result = await supabase
-    .from('doctor_profiles')
-    .select('meta_phone_number_id,meta_waba_id,system_user_token')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (result.error || !result.data) {
-    if (result.error) console.warn('Meta credential lookup failed:', result.error.message);
-    return {};
-  }
-
-  return {
-    phoneNumberId: result.data.meta_phone_number_id || null,
-    businessAccountId: result.data.meta_waba_id || null,
-    accessToken: result.data.system_user_token || null
-  };
+  console.error('Fresh Meta credentials missing or empty for template submission.', { userId });
+  return {};
 };
 
 const normalizeMetaStatus = (status) => {
@@ -339,7 +343,6 @@ exports.createTemplate = async (req, res) => {
     }
 
     const {
-      userId,
       name,
       bodyText,
       headerType = 'NONE',
@@ -350,15 +353,20 @@ exports.createTemplate = async (req, res) => {
       components = [],
       language = 'en_US',
       messaging_product: messagingProduct = 'whatsapp',
-      whatsapp_business_account_id: requestBusinessAccountId,
-      whatsapp_access_token: requestAccessToken,
       bodyVariableParameters = [],
       customVariables = [],
       variablesData = {}
     } = req.body;
 
+    const authenticatedUserId = req.user?.id;
+    const userId = authenticatedUserId || req.body.userId;
+
     if (!userId) {
       return res.status(400).json({ success: false, message: 'userId is required.' });
+    }
+
+    if (authenticatedUserId && req.body.userId && req.body.userId !== authenticatedUserId) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
     const formattedName = formatTemplateName(name);
@@ -388,8 +396,8 @@ exports.createTemplate = async (req, res) => {
     const metaLanguage = normalizeTemplateLanguage(language);
 
     const credentials = await getUserMetaCredentials(userId);
-    const businessAccountId = requestBusinessAccountId || credentials.businessAccountId || process.env.META_PHONE_ID;
-    const accessToken = requestAccessToken || credentials.accessToken || process.env.META_ACCESS_TOKEN;
+    const businessAccountId = credentials.businessAccountId;
+    const accessToken = credentials.accessToken;
 
     if (!businessAccountId || !accessToken) {
       return res.status(400).json({ success: false, message: 'WhatsApp Meta credentials unavailable for this user.' });

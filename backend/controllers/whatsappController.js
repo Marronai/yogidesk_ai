@@ -335,49 +335,65 @@ const getDoctorMetaCredentials = async (doctorId) => {
     if (!supabase || !doctorId) return {};
 
     const lookupColumns = ['doctor_id', 'id', 'user_id'];
+    const credentialLookups = [
+        {
+            select: 'meta_phone_number_id,meta_waba_id,system_user_token',
+            map: (row) => ({
+                phoneNumberId: row?.meta_phone_number_id || null,
+                businessAccountId: row?.meta_waba_id || null,
+                accessToken: row?.system_user_token || null
+            })
+        },
+        {
+            select: 'whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token',
+            map: (row) => ({
+                phoneNumberId: row?.whatsapp_phone_number_id || null,
+                businessAccountId: row?.whatsapp_business_account_id || null,
+                accessToken: row?.whatsapp_access_token || null
+            })
+        }
+    ];
     let data = null;
     let lastError = null;
 
     for (const column of lookupColumns) {
-        let result = await supabase
-            .from('doctor_profiles')
-            .select('whatsapp_phone_number_id,whatsapp_business_account_id,whatsapp_access_token')
-            .eq(column, doctorId)
-            .maybeSingle();
+        for (const lookup of credentialLookups) {
+            const result = await supabase
+                .from('doctor_profiles')
+                .select(lookup.select)
+                .eq(column, doctorId)
+                .maybeSingle();
 
-        if (result.error) {
-            const message = String(result.error?.message || result.error?.details || '').toLowerCase();
-            const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
-            if (isMissingColumn) {
-                result = await supabase
-                    .from('doctor_profiles')
-                    .select('meta_phone_number_id,meta_waba_id,system_user_token')
-                    .eq(column, doctorId)
-                    .maybeSingle();
+            if (result.error) {
+                const message = String(result.error?.message || result.error?.details || '').toLowerCase();
+                const isMissingColumn = result.error?.code === '42703' || result.error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+                if (isMissingColumn) continue;
+                lastError = result.error;
+                continue;
+            }
+
+            const credentials = lookup.map(result.data || {});
+            if (credentials.phoneNumberId && credentials.businessAccountId && credentials.accessToken) {
+                data = credentials;
+                lastError = null;
+                break;
+            }
+
+            if (result.data) {
+                lastError = null;
             }
         }
 
-        if (result.data) {
-            data = result.data;
-            lastError = null;
-            break;
-        }
-
-        if (result.error) {
-            lastError = result.error;
-        }
+        if (data) break;
     }
 
     if (lastError || !data) {
         if (lastError) console.warn('Meta credential lookup failed:', lastError.message);
+        else console.error('Fresh Meta credentials missing or empty for template submission.', { doctorId });
         return {};
     }
 
-    return {
-        phoneNumberId: data.whatsapp_phone_number_id || data.meta_phone_number_id || null,
-        businessAccountId: data.whatsapp_business_account_id || data.meta_waba_id || null,
-        accessToken: data.whatsapp_access_token || data.system_user_token || process.env.META_ACCESS_TOKEN || process.env.WHATSAPP_ACCESS_TOKEN || null
-    };
+    return data;
 };
 
 /**
