@@ -74,6 +74,27 @@ const updateDeliveryStatus = async (update) => {
     if (!fallbackByPhone.error) messages = fallbackByPhone.data || [];
   }
 
+  if ((!messages || messages.length === 0) && update.recipientPhone) {
+    const { data: chat } = await supabase
+      .from('inbox_chats')
+      .select('id')
+      .or(`phone.eq.${update.recipientPhone},patient_phone.eq.${update.recipientPhone}`)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (chat?.id) {
+      const fallbackByChat = await supabase
+        .from('inbox_messages')
+        .select('id, chat_id, metadata')
+        .eq('chat_id', chat.id)
+        .eq('from_me', true)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (!fallbackByChat.error) messages = fallbackByChat.data || [];
+    }
+  }
+
   if (error) {
     console.error('delivery status lookup failed:', error);
     return;
@@ -120,18 +141,33 @@ const updateDeliveryStatus = async (update) => {
   }
 };
 
-const resolveWorkspaceId = async (clinicMetaId, fallbackId) => {
+const resolveWorkspaceId = async (clinicMetaId, fallbackId, patientPhone) => {
   if (fallbackId) return fallbackId;
-  if (!clinicMetaId) return null;
 
-  const { data } = await supabase
-    .from('doctor_profiles')
-    .select('id')
-    .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
-    .limit(1)
-    .maybeSingle();
+  if (clinicMetaId) {
+    const { data } = await supabase
+      .from('doctor_profiles')
+      .select('id')
+      .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
+      .limit(1)
+      .maybeSingle();
 
-  return data?.id || null;
+    if (data?.id) return data.id;
+  }
+
+  if (patientPhone) {
+    const { data } = await supabase
+      .from('inbox_chats')
+      .select('user_id, doctor_id')
+      .or(`phone.eq.${patientPhone},patient_phone.eq.${patientPhone}`)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return data?.user_id || data?.doctor_id || null;
+  }
+
+  return null;
 };
 
 const extractMessage = (payload) => {
@@ -176,7 +212,7 @@ serve(async (req) => {
 
     if (!fromPhone || !messageText) return json({ ok: true, skipped: true, statuses: statuses.length });
 
-    const workspaceId = await resolveWorkspaceId(clinicMetaId, currentAdminId);
+    const workspaceId = await resolveWorkspaceId(clinicMetaId, currentAdminId, fromPhone);
     if (!workspaceId) return json({ ok: true, skipped: true, reason: 'workspace_not_found' });
 
     const { data: existingPatient } = await supabase

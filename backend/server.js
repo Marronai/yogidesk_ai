@@ -966,6 +966,30 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                 }
             }
 
+            if ((!Array.isArray(messages) || messages.length === 0) && update.recipientPhone) {
+                const { data: chat } = await db
+                    .from('inbox_chats')
+                    .select('id')
+                    .or(`phone.eq.${update.recipientPhone},patient_phone.eq.${update.recipientPhone}`)
+                    .order('updated_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (chat?.id) {
+                    const fallbackByChat = await db
+                        .from('inbox_messages')
+                        .select('id, chat_id, metadata')
+                        .eq('chat_id', chat.id)
+                        .eq('from_me', true)
+                        .order('created_at', { ascending: false })
+                        .limit(1);
+
+                    if (!fallbackByChat.error) {
+                        messages = fallbackByChat.data || [];
+                    }
+                }
+            }
+
             for (const message of messages || []) {
                 const nextMetadata = {
                     ...(message.metadata || {}),
@@ -1043,16 +1067,36 @@ const extractIncomingInboxMessages = (payload = {}) => {
     return messages;
 };
 
-const resolveInboxOwnerByMetaPhoneId = async (clinicMetaId) => {
-    if (!clinicMetaId || !supabase?.from) return null;
+const resolveInboxOwnerForIncoming = async ({ clinicMetaId, patientPhone }) => {
+    if (!supabase?.from) return null;
     const db = supabaseAdmin || supabase;
-    const { data } = await db
-        .from('doctor_profiles')
-        .select('id')
-        .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
-        .limit(1)
-        .maybeSingle();
-    return data?.id || null;
+
+    if (clinicMetaId) {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id')
+            .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
+            .limit(1)
+            .maybeSingle();
+
+        if (data?.id) return data.id;
+        if (error) console.warn('Incoming webhook owner lookup by Meta phone failed:', error.message || error);
+    }
+
+    if (patientPhone) {
+        const { data, error } = await db
+            .from('inbox_chats')
+            .select('user_id, doctor_id')
+            .or(`phone.eq.${patientPhone},patient_phone.eq.${patientPhone}`)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (data?.user_id || data?.doctor_id) return data.user_id || data.doctor_id;
+        if (error) console.warn('Incoming webhook owner lookup by patient phone failed:', error.message || error);
+    }
+
+    return null;
 };
 
 const processIncomingInboxMessagesWebhook = async (payload = {}) => {
@@ -1061,8 +1105,17 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
 
     for (const incoming of extractIncomingInboxMessages(payload)) {
         try {
-            const userId = await resolveInboxOwnerByMetaPhoneId(incoming.clinicMetaId);
-            if (!userId) continue;
+            const userId = await resolveInboxOwnerForIncoming({
+                clinicMetaId: incoming.clinicMetaId,
+                patientPhone: incoming.fromPhone
+            });
+            if (!userId) {
+                console.warn('Incoming inbox webhook skipped: owner not found.', {
+                    clinicMetaId: incoming.clinicMetaId,
+                    fromPhone: incoming.fromPhone
+                });
+                continue;
+            }
 
             const nowIso = new Date().toISOString();
             const { data: existingChat } = await selectInboxChatByPhone(db, incoming.fromPhone, userId);
@@ -1160,12 +1213,18 @@ const verifyWhatsAppWebhook = (req, res) => {
 
 const handleWhatsAppWebhook = (req, res) => {
     if (!verifyMetaWebhookSignature(req)) {
+        console.warn('WhatsApp webhook rejected: invalid Meta signature.');
         return res.status(403).send('Invalid signature');
     }
 
     res.status(200).send('EVENT_RECEIVED');
     Promise.resolve()
         .then(async () => {
+            const statusCount = extractMessageStatusUpdates(req.body).length;
+            const incomingCount = extractIncomingInboxMessages(req.body).length;
+            if (statusCount || incomingCount) {
+                console.log('WhatsApp webhook received:', { statusCount, incomingCount });
+            }
             await processTemplateStatusWebhook(req.body);
             await updateInboxMessageDeliveryStatuses(req.body);
             await processIncomingInboxMessagesWebhook(req.body);
