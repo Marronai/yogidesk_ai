@@ -19,6 +19,7 @@ const getStoredAccount = () => {
 };
 
 const metaCacheKey = (userId) => `yogidesk_meta_connection_${userId || 'default'}`;
+const META_CACHE_TTL_MS = 60 * 1000;
 
 const readCachedMetaConnection = (userId) => {
   try {
@@ -37,6 +38,11 @@ const writeCachedMetaConnection = (userId, payload) => {
     isConnected: true,
     savedAt: new Date().toISOString(),
   }));
+};
+
+const isFreshMetaCache = (cache = {}) => {
+  const savedAt = new Date(cache.savedAt || 0).getTime();
+  return Boolean(savedAt && Date.now() - savedAt < META_CACHE_TTL_MS);
 };
 
 const Settings = () => {
@@ -94,14 +100,14 @@ const Settings = () => {
     };
   };
 
-  const hydrateProfile = async () => {
+  const hydrateProfile = async ({ force = false } = {}) => {
     if (hydratingMetaRef.current) return;
     hydratingMetaRef.current = true;
     setLoadingProfile(true);
 
     try {
       const { authUser, userId: activeUserId } = await getActiveAccount();
-      if (lastHydratedMetaRef.current === activeUserId) {
+      if (!force && lastHydratedMetaRef.current === activeUserId) {
         return;
       }
       const profile = userProfile?.id
@@ -115,8 +121,9 @@ const Settings = () => {
         cachedMeta.whatsappPhoneNumberId &&
         cachedMeta.whatsappBusinessAccountId
       );
+      const shouldFetchMeta = force || !hasUsableCachedMeta || !isFreshMetaCache(cachedMeta);
 
-      if (!hasUsableCachedMeta) {
+      if (shouldFetchMeta) {
         try {
           const res = await api.get(`${API_BASE_URL}/settings/meta-connection`);
           fetchedData = {
@@ -194,6 +201,18 @@ const Settings = () => {
     hydrateProfile();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userProfile]);
+
+  const refreshMetaConnection = async () => {
+    try {
+      const { userId } = await getActiveAccount();
+      localStorage.removeItem(metaCacheKey(userId));
+      lastHydratedMetaRef.current = '';
+      await hydrateProfile({ force: true });
+      showToast('success', 'Meta connection refreshed from database.');
+    } catch {
+      showToast('error', 'Unable to refresh Meta connection from database.');
+    }
+  };
 
   const updateField = (field, value) => {
     if (metaInputsLocked && ['whatsappPhoneNumberId', 'whatsappBusinessAccountId', 'whatsappAccessToken'].includes(field)) {
@@ -440,12 +459,22 @@ const Settings = () => {
                 <div>
                   <p className="text-sm font-black text-emerald-800">Credentials loaded from database</p>
                   <p className="mt-1 text-xs font-semibold text-emerald-700/80">
-                    Fields are locked permanently to prevent accidental clearing or invalid Meta IDs.
+                    Locked for safety. Contact Customer Support for changes.
                   </p>
                 </div>
-                <div className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 sm:w-auto">
-                  <Lock size={14} />
-                  Locked
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={refreshMetaConnection}
+                    disabled={loadingProfile}
+                    className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60 sm:w-auto"
+                  >
+                    Refresh from DB
+                  </button>
+                  <div className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 sm:w-auto">
+                    <Lock size={14} />
+                    Locked
+                  </div>
                 </div>
               </div>
             )}
@@ -503,9 +532,6 @@ const Settings = () => {
                       <Lock size={28} />
                     </div>
                     <p className="mt-3 text-sm font-black text-slate-900">Meta credentials locked</p>
-                    <p className="mt-1 max-w-xs text-xs font-semibold leading-5 text-slate-500">
-                      Only Customer Support can modify this saved Meta connection.
-                    </p>
                   </div>
                 </div>
               )}
@@ -522,11 +548,7 @@ const Settings = () => {
                 Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
               </div>
 
-              {metaInputsLocked ? (
-                <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800 sm:w-auto">
-                  Integration active. Contact Customer Support to update Meta IDs.
-                </div>
-              ) : (
+              {!metaInputsLocked && (
                 <button
                   type="button"
                   onClick={handleSaveConnection}
@@ -538,10 +560,6 @@ const Settings = () => {
                 </button>
               )}
             </div>
-
-            {metaInputsLocked && (
-              <p className="text-xs text-slate-400 mt-2">Your API connection is locked securely to protect the saved Meta configuration from accidental edits.</p>
-            )}
           </section>
 
           <div className="sticky bottom-4 z-10 rounded-3xl border border-slate-100 bg-white/95 p-4 shadow-xl shadow-slate-200/60 backdrop-blur">

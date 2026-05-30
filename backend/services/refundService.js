@@ -17,13 +17,16 @@ const normalizeCategory = (category) => {
 
 const getRefundAmount = (category) => RATE_CARD[normalizeCategory(category)];
 
-const getMetaMessageId = (metaResult = {}) => (
-  metaResult.message_id ||
-  metaResult.messages?.[0]?.id ||
-  metaResult.response?.messages?.[0]?.id ||
-  metaResult.response?.messages?.[0]?.message_id ||
-  null
-);
+const getMetaMessageId = (metaResult = {}) => {
+  const result = metaResult || {};
+  return (
+    result.message_id ||
+    result.messages?.[0]?.id ||
+    result.response?.messages?.[0]?.id ||
+    result.response?.messages?.[0]?.message_id ||
+    null
+  );
+};
 
 const getDb = () => supabaseAdmin || supabase;
 
