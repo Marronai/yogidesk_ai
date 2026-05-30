@@ -1217,14 +1217,26 @@ const handleWhatsAppWebhook = (req, res) => {
         return res.status(403).send('Invalid signature');
     }
 
+    const webhookFields = [];
+    if (Array.isArray(req.body?.entry)) {
+        for (const entry of req.body.entry) {
+            for (const change of entry?.changes || []) {
+                if (change?.field) webhookFields.push(change.field);
+            }
+        }
+    }
+    const statusCount = extractMessageStatusUpdates(req.body).length;
+    const incomingCount = extractIncomingInboxMessages(req.body).length;
+    console.log('WhatsApp webhook POST hit:', {
+        object: req.body?.object || null,
+        fields: [...new Set(webhookFields)],
+        statusCount,
+        incomingCount
+    });
+
     res.status(200).send('EVENT_RECEIVED');
     Promise.resolve()
         .then(async () => {
-            const statusCount = extractMessageStatusUpdates(req.body).length;
-            const incomingCount = extractIncomingInboxMessages(req.body).length;
-            if (statusCount || incomingCount) {
-                console.log('WhatsApp webhook received:', { statusCount, incomingCount });
-            }
             await processTemplateStatusWebhook(req.body);
             await updateInboxMessageDeliveryStatuses(req.body);
             await processIncomingInboxMessagesWebhook(req.body);
@@ -1237,6 +1249,20 @@ const handleWhatsAppWebhook = (req, res) => {
 
 app.get('/api/webhooks/whatsapp', verifyWhatsAppWebhook);
 app.post('/api/webhooks/whatsapp', handleWhatsAppWebhook);
+app.get('/api/webhooks/whatsapp/diagnostics', (req, res) => {
+    return res.status(200).json({
+        success: true,
+        service: 'Yogi Desk WhatsApp webhook',
+        expectedCallbackUrls: [
+            'https://api.yogidesk-ai.com/api/webhooks/whatsapp',
+            'https://api.yogidesk-ai.com/api/whatsapp-webhook',
+            'https://api.yogidesk-ai.com/api/webhook/meta'
+        ],
+        verifyTokenConfigured: Boolean(getMetaWebhookVerifyToken()),
+        appSecretConfigured: Boolean(getMetaWebhookAppSecret()),
+        requiredMetaSubscriptionField: 'messages'
+    });
+});
 app.get('/api/whatsapp-webhook', verifyWhatsAppWebhook);
 app.post('/api/whatsapp-webhook', handleWhatsAppWebhook);
 app.get('/api/webhook/meta', verifyWhatsAppWebhook);
