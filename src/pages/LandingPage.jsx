@@ -81,12 +81,17 @@ const LandingPage = () => {
           ======================================================== */}
       <nav className="fixed w-full z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex justify-between items-center">
-          <div className="flex items-center cursor-pointer" onClick={() => window.scrollTo(0,0)}>
-            <img
-              src="/assets/yogidesk-logo.png"
-              alt="YogiDesk AI"
-              className="h-14 w-40 sm:w-48 object-contain rounded-xl bg-white shadow-sm"
-            />
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo(0,0)}>
+            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-white border border-orange-100 shadow-lg shadow-orange-100">
+              <img
+                src="/assets/yogidesk-logo.png"
+                alt=""
+                className="absolute left-1/2 top-1/2 h-24 w-24 max-w-none -translate-x-1/2 -translate-y-[54%] object-contain"
+              />
+            </div>
+            <span className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 leading-none">
+              Yogi Desk <span className="text-[#2563eb]">AI</span>
+            </span>
           </div>
 
           <div className="hidden lg:flex gap-8 text-sm font-bold text-slate-600 items-center">
