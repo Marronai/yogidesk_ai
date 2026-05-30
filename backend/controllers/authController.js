@@ -153,7 +153,7 @@ exports.register = async (req, res) => {
 
     res.once('finish', () => {
       setImmediate(() => {
-        void sendDirectBrandMail(email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
+        void sendDirectBrandMail(email, "Welcome to Yogi Desk AI - Your Premium Growth Trial is Active", welcomeHTML, 'onboarding');
       });
     });
 
@@ -288,7 +288,7 @@ exports.verifySignupOTP = async (req, res) => {
 
     res.once('finish', () => {
       setImmediate(() => {
-        void sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI! 🚀", welcomeHTML, 'onboarding');
+        void sendDirectBrandMail(user.email, "Welcome to Yogi Desk AI - Your Premium Growth Trial is Active", welcomeHTML, 'onboarding');
       });
     });
 

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
 
 const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const DEFAULT_FROM_EMAIL = process.env.BREVO_FROM_EMAIL || process.env.BREVO_SENDER_EMAIL || 'info@vyaparwallah.com';
@@ -8,6 +9,12 @@ const REPLY_TO_EMAIL = process.env.BREVO_REPLY_TO_EMAIL || ONBOARDING_FROM_EMAIL
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeRecipientEmail = (email) => String(email || '').trim().toLowerCase();
+const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 
 const sendBrevoEmail = async ({ to, subject, htmlContent, senderType = 'system' }) => {
     const apiKey = process.env.BREVO_API_KEY;
@@ -65,26 +72,10 @@ const getBaseTemplate = (content) => `
 `;
 
 exports.sendWelcomeEmail = async (email, name, businessName) => {
-    const content = `
-        <h2 style="color: #111827; margin-top: 0;">Welcome to our Family!</h2>
-        <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">Dear ${name},</p>
-        <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">Thank you for joining <strong>YogiDesk AI</strong>. We are thrilled to have ${businessName} on board. Our premium tools are designed to streamline your practice and elevate your patient experience to the highest standards.</p>
-        <div style="margin: 30px 0; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-            <div style="background-color: #ff6b00; color: #fff; padding: 12px 20px; font-weight: bold; text-align: center;">
-                🌟 Driving Growth in Healthcare
-            </div>
-            <div style="padding: 20px; background-color: #fffaf5; text-align: center;">
-                <p style="margin: 0; font-size: 16px; color: #333; line-height: 1.5;">
-                    Join <strong>10,000+ Doctors</strong> who successfully increased their clinic's patient footfall by up to <strong>40% last month</strong> using YogiDesk AI's intelligent patient engagement and automated reminder systems.
-                </p>
-            </div>
-        </div>
-        <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">If you need any assistance, our dedicated enterprise support team is always here for you.</p>
-    `;
     return sendBrevoEmail({
         to: email,
-        subject: "Welcome to our Family - YogiDesk AI",
-        htmlContent: getBaseTemplate(content),
+        subject: "Welcome to Yogi Desk AI - Your Premium Growth Trial is Active",
+        htmlContent: getWelcomeEmailHTML(name || businessName || 'Doctor'),
         senderType: 'onboarding',
     });
 };
@@ -110,19 +101,69 @@ exports.sendLoginAlert = async (email, name, deviceInfo, ipAddress) => {
 };
 
 exports.sendOTP = async (email, name, otp) => {
-    const content = `
-        <h2 style="color: #111827; margin-top: 0;">Your Security Code</h2>
-        <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">Dear ${name},</p>
-        <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">Please use the following One-Time Password (OTP) to complete your secure verification:</p>
-        <div style="text-align: center; margin: 30px 0;">
-            <span style="display: inline-block; font-size: 32px; font-weight: bold; color: #ff6b00; padding: 15px 30px; background-color: #fff5eb; border: 2px dashed #ff6b00; border-radius: 8px; letter-spacing: 4px;">${otp}</span>
+    const otpCode = escapeHtml(otp);
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yogi Desk AI - Verification Code</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Fira Sans', Arial, sans-serif; -webkit-text-size-adjust: none; text-size-adjust: none; }
+        .email-container { max-width: 550px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03); }
+        .brand-header { background-color: #ff6a00; padding: 30px; text-align: center; }
+        .brand-name { margin: 12px 0 0 0; color: #ffffff; font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+        .content-body { padding: 40px 35px; color: #334155; line-height: 1.6; }
+        .main-title { margin: 0 0 15px 0; color: #0f172a; font-size: 22px; font-weight: 700; text-align: center; }
+        .text-desc { font-size: 15px; color: #64748b; text-align: center; margin-bottom: 30px; }
+        .otp-container { background-color: #fff7ed; border: 2px dashed #ff6a00; border-radius: 12px; padding: 20px; text-align: center; margin: 25px 0; }
+        .otp-code { font-size: 36px; font-weight: 700; color: #ff6a00; letter-spacing: 6px; margin: 0; font-family: monospace, sans-serif; }
+        .security-note { font-size: 13px; color: #94a3b8; text-align: center; margin-top: 25px; border-top: 1px solid #f1f5f9; padding-top: 20px; }
+        .footer { background-color: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #edf2f7; }
+        @media (max-width: 620px) {
+            .email-container { margin: 0; width: 100%; border-radius: 0; }
+            .content-body { padding: 32px 22px; }
+            .otp-code { font-size: 32px; letter-spacing: 4px; }
+        }
+    </style>
+</head>
+<body>
+    <div style="display:none;font-size:1px;color:#f8fafc;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+        Your Yogi Desk AI verification code is ${otpCode}. It expires in 10 minutes.
+    </div>
+    <div class="email-container">
+        <div class="brand-header">
+            <img src="https://yogidesk-ai.com/assets/logo.png" alt="Yogi Desk AI" width="160" style="display: block; margin: 0 auto; border: 0;">
+            <p class="brand-name">Yogi Desk AI</p>
         </div>
-        <p style="color: #4b5563; font-size: 14px; line-height: 1.6;">This code will expire in 10 minutes. Please do not share it with anyone.</p>
-    `;
+        <div class="content-body">
+            <h2 class="main-title">Verify Your Account</h2>
+            <p class="text-desc">Use the secure One-Time Password (OTP) below to complete your authentication. This code is valid for the next 10 minutes.</p>
+            <div class="otp-container">
+                <h1 class="otp-code">${otpCode}</h1>
+            </div>
+            <p style="font-size: 14px; color: #475569; text-align: center; margin: 20px 0 0 0;">
+                If you did not request this verification, please ignore this email or contact support.
+            </p>
+            <div class="security-note">
+                Security Reminder: Yogi Desk staff will never ask for your passwords or private API keys over call or chat.
+            </div>
+        </div>
+        <div class="footer">
+            <p style="margin: 0;">&copy; 2026 Yogi Desk AI. Powered by Vyapar Wallah.</p>
+            <p style="margin: 5px 0 0 0;">Patna, Bihar, India.</p>
+        </div>
+    </div>
+</body>
+</html>
+`;
+
     return sendBrevoEmail({
         to: email,
-        subject: "Your OTP Code - YogiDesk AI",
-        htmlContent: getBaseTemplate(content),
+        subject: "Yogi Desk AI Verification Code",
+        htmlContent,
     });
 };
 
@@ -131,3 +172,4 @@ exports.sendDirectEmail = async (email, subject, htmlContent, senderType = 'syst
 };
 
 exports.verifyConnection = async () => Boolean(process.env.BREVO_API_KEY);
+
