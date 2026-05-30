@@ -135,7 +135,7 @@ exports.sendOTP = async (email, name, otp) => {
     </div>
     <div class="email-container">
         <div class="brand-header">
-            <img src="https://yogidesk-ai.com/assets/logo.png" alt="Yogi Desk AI" width="160" style="display: block; margin: 0 auto; border: 0;">
+            <img src="https://yogidesk-ai.com/assets/yogidesk-logo.png" alt="" width="96" style="display: block; height: auto; margin: 0 auto; border: 0;">
             <p class="brand-name">Yogi Desk AI</p>
         </div>
         <div class="content-body">
