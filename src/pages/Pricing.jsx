@@ -5,18 +5,19 @@ import {
   Calculator,
   CheckCircle2,
   ChevronDown,
+  Database,
   FileText,
+  Lock,
   Menu,
+  MessageCircle,
   QrCode,
   Settings,
   ShieldCheck,
+  Stethoscope,
   X,
 } from 'lucide-react';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
-
-const ORANGE = '#FF6A00';
-const SUCCESS = '#00A389';
 
 const resourceLinks = [
   { name: 'ROI Calculator', icon: <Calculator size={16} />, link: '/calculator' },
@@ -62,10 +63,54 @@ const PLANS = [
 const COMPARISON_ROWS = [
   ['Platform subscription', '₹2,499/mo', 'API only', 'From ₹139/mo'],
   ['Utility reminders cost', '~₹1.50 - ₹2.50/msg', '~₹1.80 - ₹2.20/msg', '₹0.20/msg'],
-  ['Marketing broadcast cost', '~₹1.50 - ₹2.50/msg', '~₹1.80 - ₹2.20/msg', '₹0.90/msg'],
+  ['Marketing broadcast cost', '~₹1.50 - ₹2.50/msg', '~₹1.80 - ₹2.20/msg', '₹1.30/msg'],
   ['Setup ease', 'Complex', 'Developer required', '1-click doctor workspace'],
   ['Clinic support', 'Generic queue', 'Engineering-led', 'Healthcare-focused onboarding'],
+  ['Official Green Tick Support', 'Extra Fees / Setup Help Missing', 'Self-managed API', 'Guided Application Included'],
+  ['Staff Seat Concurrency', 'Charges Per Additional Agent', 'Developer-built custom routing', 'Multi-Agent Dashboard Access'],
+  ['Clinic AI Flow Bot Setup', 'Complex Flow-builder Coding', 'No Native Bot Layer', '1-Click Patient Smart Assistant'],
 ];
+
+const FAQS = [
+  {
+    question: 'Can I reuse my existing clinic clinic number?',
+    answer: 'Yes. If your number is eligible for WhatsApp Business API migration, our onboarding team guides the Meta verification and number connection steps without disturbing your patient records.',
+  },
+  {
+    question: 'How does the Meta approval loop work?',
+    answer: 'You create or select medical templates inside Yogi Desk, submit them to Meta for review, and track approval status from the workspace. Approved templates can then be used for reminders, lab reports, and campaigns.',
+  },
+  {
+    question: 'Is my data completely secure?',
+    answer: 'Patient databases, campaign logs, wallet records, and Meta credentials remain separated by workspace. Subscription upgrades only update access limits and never wipe operational rows.',
+  },
+];
+
+const TRUST_BADGES = [
+  { icon: Lock, title: 'HIPAA Compliant Storage Layouts' },
+  { icon: Database, title: '100% Patient Database Separation' },
+  { icon: ShieldCheck, title: 'End-to-End Meta API Encryption' },
+];
+
+const SETUP_STEPS = [
+  { title: 'Choose Your Duration Plan', detail: 'Select the plan and tenure that fits your clinic workflow.' },
+  { title: 'Connect Your Verified WhatsApp Number', detail: 'Link Meta credentials with guided setup support.' },
+  { title: 'Run Automated Reminders', detail: 'Launch appointment, lab report, and follow-up journeys.' },
+];
+
+const loadRazorpayScript = () => new Promise((resolve, reject) => {
+  if (window.Razorpay) {
+    resolve(true);
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.async = true;
+  script.onload = () => resolve(true);
+  script.onerror = () => reject(new Error('Unable to load Razorpay checkout.'));
+  document.body.appendChild(script);
+});
 
 function MarketingHeader() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -161,6 +206,7 @@ export default function Pricing() {
   const [sliderValue, setSliderValue] = useState(2000);
   const [doctorName, setDoctorName] = useState('Doctor');
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState(0);
 
   const duration = useMemo(() => DURATIONS.find((d) => d.id === durationId) || DURATIONS[0], [durationId]);
   const prices = useMemo(() => BASE_PRICES[durationId] || BASE_PRICES['12m'], [durationId]);
@@ -176,56 +222,89 @@ export default function Pricing() {
   const periodLabel = months === 12 ? '1 Year' : `${months} Months`;
   const displayName = doctorName.trim() || 'Doctor';
   const selectedPlanLabel = PLANS.find((plan) => plan.id === selectedPlan)?.name || 'Growth Clinic';
-  const selectedTier = selectedPlan === 'multi' ? 'MULTI_SPECIALTY' : selectedPlan === 'starter' ? 'STARTER' : 'GROWTH';
-  const selectedPlanTotal = selectedPlanPrice * months;
 
-  const openSubscriptionCheckout = async () => {
+  const getPlanMeta = (planId = selectedPlan) => {
+    const plan = PLANS.find((item) => item.id === planId) || PLANS[1];
+    const tier = plan.id === 'multi' ? 'MULTI_SPECIALTY' : plan.id === 'starter' ? 'STARTER' : 'GROWTH';
+    const monthlyPrice = prices[plan.id] || prices.growth;
+    return {
+      plan,
+      tier,
+      total: monthlyPrice * months,
+    };
+  };
+
+  const verifySubscriptionPayment = async ({ response, userId, tier, amount }) => {
+    const { data } = await api.post('/payments/verify-razorpay-subscription', {
+      userId,
+      tier,
+      amount,
+      razorpay_order_id: response.razorpay_order_id,
+      razorpay_payment_id: response.razorpay_payment_id,
+      razorpay_signature: response.razorpay_signature,
+    });
+    return data;
+  };
+
+  const openSubscriptionCheckout = async (planId = selectedPlan) => {
     try {
       setCheckoutLoading(true);
+      setSelectedPlan(planId);
       const { data } = await supabase.auth.getUser();
       const user = data?.user;
       const userId = user?.id || localStorage.getItem('user_id');
       const email = user?.email || localStorage.getItem('user_email') || '';
       const firstname = user?.user_metadata?.full_name || localStorage.getItem('user_name') || 'Yogi Desk User';
       const phone = user?.user_metadata?.phone || localStorage.getItem('user_phone') || '';
+      const { plan, tier, total } = getPlanMeta(planId);
+      const amountPaise = Math.round(total * 100);
 
       if (!userId || !email) {
         window.location.href = '/signup';
         return;
       }
 
-      const response = await api.post('/payments/initiate-payu', {
+      await loadRazorpayScript();
+
+      const response = await api.post('/payments/razorpay-subscription-session', {
         userId,
-        amount: selectedPlanTotal,
-        firstname,
+        tier,
+        planName: plan.name,
+        amountPaise,
         email,
-        phone,
-        purpose: 'subscription',
-        tier: selectedTier,
       });
 
-      const payuPayload = response.data?.payload;
-      if (!response.data?.success || !payuPayload?.hash) throw new Error(response.data?.msg || 'Unable to open subscription checkout.');
+      if (!response.data?.success || !response.data?.order?.id) {
+        throw new Error(response.data?.msg || 'Unable to open Razorpay checkout.');
+      }
 
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = response.data.checkoutUrl;
-      form.target = '_self';
-      form.style.display = 'none';
+      const razorpayOptions = {
+        key: response.data.key,
+        amount: amountPaise,
+        currency: 'INR',
+        name: 'Yogi Desk AI',
+        description: `Upgrading to ${plan.name} Package`,
+        order_id: response.data.order.id,
+        prefill: { email, name: firstname, contact: phone },
+        theme: { color: '#FF6A00' },
+        handler: async function (razorpayResponse) {
+          const updateStatus = await verifySubscriptionPayment({
+            response: razorpayResponse,
+            userId,
+            tier,
+            amount: total,
+          });
+          if (updateStatus.success) window.location.reload();
+        },
+        modal: {
+          ondismiss: () => setCheckoutLoading(false),
+        },
+      };
 
-      Object.entries(payuPayload).forEach(([key, value]) => {
-        if (value === undefined || value === null) return;
-        const field = document.createElement('input');
-        field.type = 'hidden';
-        field.name = key;
-        field.value = String(value);
-        form.appendChild(field);
-      });
-
-      document.body.appendChild(form);
-      form.submit();
+      const paymentWindow = new window.Razorpay(razorpayOptions);
+      paymentWindow.open();
     } catch (error) {
-      alert(error.message || 'Unable to start subscription checkout.');
+      alert(error.message || 'Unable to start Razorpay subscription checkout.');
       setCheckoutLoading(false);
     }
   };
@@ -297,7 +376,7 @@ export default function Pricing() {
                     <ul className="mt-6 space-y-3">
                       {plan.features.map((feature) => (
                         <li key={feature} className="flex items-start gap-3 text-sm font-semibold text-slate-700">
-                          <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#00A389]" />
+                          <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#FF6A00]" />
                           <span>{feature}</span>
                         </li>
                       ))}
@@ -305,7 +384,7 @@ export default function Pricing() {
 
                     <button
                       type="button"
-                      onClick={() => setSelectedPlan(plan.id)}
+                      onClick={() => openSubscriptionCheckout(plan.id)}
                       className={`mt-7 w-full rounded-xl px-4 py-3 text-sm font-black transition ${selected ? 'bg-[#FF6A00] text-white shadow-lg shadow-orange-200' : 'bg-slate-900 text-white hover:bg-[#FF6A00]'}`}
                     >
                       {selected ? 'Selected Plan' : 'Choose Plan'}
@@ -321,11 +400,11 @@ export default function Pricing() {
           <div className="max-w-7xl mx-auto">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
               <div>
-                <span className="text-xs font-black uppercase tracking-widest text-[#00A389]">Market comparison</span>
+                <span className="text-xs font-black uppercase tracking-widest text-[#1E3A5F]">Market comparison</span>
                 <h2 className="mt-2 text-3xl font-black text-slate-900">Yogi Desk against common alternatives</h2>
               </div>
               <p className="max-w-xl text-sm text-slate-500 font-medium">
-                Scroll horizontally on smaller screens. The Yogi Desk column stays visually active with success accents.
+                Scroll horizontally on smaller screens. The Yogi Desk column uses a premium slate highlight with orange confirmation markers.
               </p>
             </div>
 
@@ -336,7 +415,7 @@ export default function Pricing() {
                     <th className="px-5 py-4 font-black">Feature</th>
                     <th className="px-5 py-4 font-black">Wati / Interakt</th>
                     <th className="px-5 py-4 font-black">Twilio</th>
-                    <th className="px-5 py-4 font-black bg-[#00A389]">Yogi Desk</th>
+                    <th className="px-5 py-4 font-black bg-[#1E3A5F]">Yogi Desk</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
@@ -345,9 +424,9 @@ export default function Pricing() {
                       <td className="px-5 py-4 font-black text-slate-900">{feature}</td>
                       <td className="px-5 py-4 text-slate-500 font-semibold">{wati}</td>
                       <td className="px-5 py-4 text-slate-500 font-semibold">{twilio}</td>
-                      <td className="px-5 py-4 bg-emerald-50 text-slate-900 font-black border-l-4 border-[#00A389]">
+                      <td className="px-5 py-4 bg-slate-100 text-slate-950 font-black border-l-4 border-[#1E3A5F]">
                         <span className="inline-flex items-center gap-2">
-                          <CheckCircle2 size={17} className="text-[#00A389] shrink-0" />
+                          <CheckCircle2 size={17} className="text-[#FF6A00] shrink-0" />
                           {yogi}
                         </span>
                       </td>
@@ -408,9 +487,9 @@ export default function Pricing() {
                   <div className="mt-2 text-3xl font-black text-rose-600">₹{competitorCost.toLocaleString()}</div>
                   <div className="mt-1 text-xs font-semibold text-slate-400">for {periodLabel}</div>
                 </div>
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
-                  <div className="text-xs font-black uppercase tracking-widest text-[#00A389]">Yogi Desk cost</div>
-                  <div className="mt-2 text-3xl font-black text-[#00A389]">₹{yogiCost.toLocaleString()}</div>
+                <div className="rounded-xl border border-slate-200 bg-slate-100 p-4">
+                  <div className="text-xs font-black uppercase tracking-widest text-[#1E3A5F]">Yogi Desk cost</div>
+                  <div className="mt-2 text-3xl font-black text-[#1E3A5F]">₹{yogiCost.toLocaleString()}</div>
                   <div className="mt-1 text-xs font-semibold text-slate-400">{selectedPlan.toUpperCase()} plan</div>
                 </div>
                 <div className="rounded-xl border border-orange-100 bg-orange-50 p-4">
@@ -420,11 +499,11 @@ export default function Pricing() {
                 </div>
               </div>
 
-              <div className="mt-7 rounded-2xl bg-[#00A389] p-5 sm:p-6 text-white">
+              <div className="mt-7 rounded-2xl bg-[#14213D] p-5 sm:p-6 text-white ring-4 ring-slate-100">
                 <div className="text-2xl sm:text-3xl font-black leading-tight">
                   Dr. {displayName}, you save ₹{savings.toLocaleString()} using Yogi Desk over {periodLabel}
                 </div>
-                <p className="mt-3 text-sm font-semibold text-emerald-50">
+                <p className="mt-3 text-sm font-semibold text-slate-200">
                   Based on {sliderValue.toLocaleString()} messages per month, the {duration.label} billing duration, and the selected {selectedPlan.replace('-', ' ')} tier.
                 </p>
               </div>
@@ -472,6 +551,83 @@ export default function Pricing() {
                 {checkoutLoading ? 'Opening checkout...' : `Upgrade to ${selectedPlanLabel}`} <ArrowRight size={16} />
               </button>
             </aside>
+          </div>
+        </section>
+
+        <section className="px-4 sm:px-6 pb-16">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-[#1E3A5F]">
+                  <MessageCircle size={22} />
+                </div>
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-[#1E3A5F]">Doctor Questions</p>
+                  <h2 className="text-2xl font-black text-slate-950">Pricing FAQ</h2>
+                </div>
+              </div>
+
+              <div className="mt-6 divide-y divide-slate-100">
+                {FAQS.map((faq, index) => {
+                  const isOpen = openFaqIndex === index;
+                  return (
+                    <div key={faq.question} className="py-4">
+                      <button
+                        type="button"
+                        onClick={() => setOpenFaqIndex(isOpen ? -1 : index)}
+                        className="flex w-full items-center justify-between gap-4 text-left"
+                      >
+                        <span className="text-base font-black text-slate-900">{faq.question}</span>
+                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-sm font-black transition ${isOpen ? 'border-[#FF6A00] bg-orange-50 text-[#FF6A00]' : 'border-slate-200 text-slate-500'}`}>
+                          {isOpen ? '-' : '+'}
+                        </span>
+                      </button>
+                      {isOpen && <p className="mt-3 max-w-3xl text-sm font-semibold leading-6 text-slate-500">{faq.answer}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-950 p-5 text-white shadow-sm sm:p-6">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-orange-300">
+                <ShieldCheck size={22} />
+              </div>
+              <h2 className="mt-4 text-2xl font-black">Medical Security & Compliance</h2>
+              <div className="mt-5 grid gap-3">
+                {TRUST_BADGES.map(({ icon, title }) => (
+                  <div key={title} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                    {React.createElement(icon, { size: 18, className: 'shrink-0 text-orange-300' })}
+                    <span className="text-sm font-bold text-slate-100">{title}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm sm:p-6 lg:col-span-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-widest text-[#1E3A5F]">Setup Path</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-950">Go live in three guided steps</h2>
+                </div>
+                <Stethoscope className="hidden text-[#1E3A5F] sm:block" size={30} />
+              </div>
+
+              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+                {SETUP_STEPS.map((step, index) => (
+                  <div key={step.title} className="relative rounded-2xl border border-slate-200 bg-white p-5">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#14213D] text-sm font-black text-white">
+                      {index + 1}
+                    </div>
+                    <h3 className="mt-4 text-lg font-black text-slate-950">{step.title}</h3>
+                    <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{step.detail}</p>
+                    {index < SETUP_STEPS.length - 1 && (
+                      <ArrowRight className="absolute right-5 top-6 hidden text-[#FF6A00] md:block" size={20} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       </main>

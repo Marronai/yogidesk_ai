@@ -1605,6 +1605,31 @@ const specializationSlugToSearchValue = (slug) => ({
     general_physician: 'general physician'
 }[slug] || 'general physician');
 
+const STATIC_PREMADE_TEMPLATES = {
+    dentist: [
+        { id: 'dent_static_1', specialization: 'Dentist', category: 'UTILITY', language: 'English', template_name: 'Dental Routine Check-up Reminder', body_text: 'Hello {{1}}, this is a reminder for your dental routine check-up at {{2}} on {{3}} at {{4}}. Reply CONFIRM to secure your chair time.', has_media: false },
+        { id: 'dent_static_2', specialization: 'Dentist', category: 'UTILITY', language: 'English', template_name: 'Root Canal Care Follow-up', body_text: 'Hello {{1}}, Dr. {{2}} recommends a root canal care follow-up after your recent procedure. Please book your review here: {{3}}', has_media: false },
+        { id: 'dent_static_3', specialization: 'Dentist', category: 'UTILITY', language: 'English', template_name: 'Braces Adjustment Appointment Notice', body_text: 'Hello {{1}}, your braces adjustment appointment is scheduled at {{2}} on {{3}}. Please arrive 10 minutes early for check-in.', has_media: false },
+        { id: 'dent_static_4', specialization: 'Dentist', category: 'UTILITY', language: 'English', template_name: 'Dental Cleaning Recall', body_text: 'Hello {{1}}, it is time for your dental cleaning recall at {{2}}. Reserve a convenient slot here: {{3}}', has_media: false },
+        { id: 'dent_static_5', specialization: 'Dentist', category: 'MARKETING', language: 'English', template_name: 'Smile Makeover Camp Invite', body_text: 'Dear {{1}}, {{2}} is hosting a smile makeover consultation camp this week. Reply BOOK to reserve your dental consultation slot.', has_media: false }
+    ],
+    general_physician: [
+        { id: 'gp_static_1', specialization: 'General Physician', category: 'UTILITY', language: 'English', template_name: 'Chronic Care Follow-up', body_text: 'Hello {{1}}, this is a follow-up reminder from Dr. {{2}} for your chronic care review. Book your next consultation here: {{3}}', has_media: false },
+        { id: 'gp_static_2', specialization: 'General Physician', category: 'UTILITY', language: 'English', template_name: 'Consultation Review Reminder', body_text: 'Hello {{1}}, your consultation review is due on {{2}} at {{3}}. Please bring your previous prescription and reports.', has_media: false },
+        { id: 'gp_static_3', specialization: 'General Physician', category: 'UTILITY', language: 'English', template_name: 'Medication Adherence Check', body_text: 'Hello {{1}}, Dr. {{2}} is checking in on your medication schedule. Reply DONE if doses are on track or HELP for support.', has_media: false },
+        { id: 'gp_static_4', specialization: 'General Physician', category: 'UTILITY', language: 'English', template_name: 'Lab Report Consultation', body_text: 'Hello {{1}}, your reports are ready for review. Please schedule a consultation with Dr. {{2}} using this link: {{3}}', has_media: false },
+        { id: 'gp_static_5', specialization: 'General Physician', category: 'MARKETING', language: 'English', template_name: 'Preventive Health Check-up Invite', body_text: 'Dear {{1}}, {{2}} is running a preventive health check-up drive. Reply BOOK to reserve your consultation.', has_media: false }
+    ]
+};
+
+const getStaticPremadeTemplates = (specializationQuery, language) => {
+    const templates = STATIC_PREMADE_TEMPLATES[specializationQuery] || STATIC_PREMADE_TEMPLATES.general_physician;
+    const normalizedLanguage = String(language || '').trim().toLowerCase();
+    if (!normalizedLanguage || normalizedLanguage === 'all') return templates;
+    const filtered = templates.filter((template) => String(template.language || '').toLowerCase().includes(normalizedLanguage));
+    return filtered.length ? filtered : templates;
+};
+
 const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, language }) => {
     const selectColumns = 'id,specialization,category,language,template_name,body_text,has_media';
     const runQuery = async (specializationPattern) => {
@@ -1627,16 +1652,20 @@ const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, 
     let { data, error } = await runQuery(humanPattern);
     if (error) {
         console.warn('Pre-made template lookup failed:', error.message || error);
-        return [];
+        return getStaticPremadeTemplates(specializationQuery, language);
     }
 
     if (!Array.isArray(data) || data.length === 0) {
         const fallbackResult = await runQuery(specializationQuery);
         if (fallbackResult.error) {
             console.warn('Pre-made template fallback lookup failed:', fallbackResult.error.message || fallbackResult.error);
-            return [];
+            return getStaticPremadeTemplates(specializationQuery, language);
         }
         data = fallbackResult.data;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+        data = getStaticPremadeTemplates(specializationQuery, language);
     }
 
     return Array.isArray(data)
@@ -1679,8 +1708,8 @@ const getDoctorTemplateProfile = async (userId) => {
     if (!db?.from || !userId) return {};
 
     const profileLookups = [
-        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_booking_link,booking_link,website' },
-        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,business_category,industry,booking_link' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_category,business_category,clinic_booking_link,booking_link,website' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_category,business_category,industry,booking_link' },
         { table: 'users', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
         { table: 'clinics', select: 'id,name,specialization,clinic_booking_link,booking_link,website' }
     ];
@@ -1693,7 +1722,7 @@ const getDoctorTemplateProfile = async (userId) => {
         });
 
         if (!error && data) {
-            const rawSpecialization = data.specialization || data.business_category || data.industry || '';
+            const rawSpecialization = data.clinic_category || data.specialization || data.business_category || data.industry || '';
             const specialization = normalizeSpecialization(rawSpecialization);
             return {
                 ...data,
@@ -2212,6 +2241,7 @@ app.get('/api/profile/context', async (req, res) => {
                 email: sessionUser.email || '',
                 clinic_name: profile.clinicName || profile.clinic_name || profile.business_name || '',
                 specialization,
+                clinic_category: specialization,
                 booking_link: profile.bookingLink || `https://yogidesk-ai.com/book/${userId}`,
                 ...metaConfig
             }

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, X, Upload, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
-import { BASELINE_MEDICAL_TEMPLATES, calculateCampaignCost, MEDICAL_SPECIALTIES } from '../constants/templateLibrary';
+import { calculateCampaignCost, getBaselineTemplatesForSpecialty, MEDICAL_SPECIALTIES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 import { useAuth } from '../context/AuthContext';
 
@@ -89,15 +89,18 @@ const TemplateManager = () => {
         ...(activeLang.toLowerCase() !== 'all' && { language: activeLang })
       };
       const response = await api.get('/templates/dashboard', { params });
+      const specialization = response.data?.sourceSpecialization || response.data?.metadata?.sourceSpecialization || response.data?.specialization || userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || 'General Physician';
       const templates = Array.isArray(response.data?.templates) ? response.data.templates : [];
-      setDashboardTemplates(templates.length ? templates : BASELINE_MEDICAL_TEMPLATES);
-      setDashboardSpecialization(response.data?.specialization || userProfile?.specialization || '');
+      setDashboardTemplates(templates.length ? templates : getBaselineTemplatesForSpecialty(specialization));
+      setDashboardSpecialization(specialization);
       setBookingLink(response.data?.bookingLink || userProfile?.booking_link || '');
       setError('');
     } catch (err) {
       console.error('Dashboard template library failed:', err);
       setError(err?.response?.data?.message || 'Unable to load specialization templates.');
-      setDashboardTemplates(BASELINE_MEDICAL_TEMPLATES);
+      const specialization = userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || 'General Physician';
+      setDashboardTemplates(getBaselineTemplatesForSpecialty(specialization));
+      setDashboardSpecialization(specialization);
     } finally {
       setLibraryLoading(false);
     }

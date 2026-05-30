@@ -15,6 +15,7 @@ const FRONTEND_WALLET_URL = 'https://yogidesk-ai.com/dashboard/wallet';
 const FRONTEND_PRICING_URL = 'https://yogidesk-ai.com/pricing';
 const API_BASE_URL = 'https://api.yogidesk-ai.com';
 const { activateSubscriptionTier } = require('../services/trialService');
+const RAZORPAY_ORDERS_URL = 'https://api.razorpay.com/v1/orders';
 
 const sha512 = (value) => crypto.createHash('sha512').update(value).digest('hex');
 const getPayuCredentials = () => ({
@@ -26,6 +27,110 @@ const normalizeAmount = (value) => {
   const amount = parseFloat(value);
   return Number.isFinite(amount) ? amount.toFixed(2) : null;
 };
+
+const normalizePaise = (value) => {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 100 ? Math.round(amount) : null;
+};
+
+const getRazorpayCredentials = () => ({
+  keyId: String(process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim(),
+  keySecret: String(process.env.RAZORPAY_KEY_SECRET || '').trim(),
+});
+
+router.post('/razorpay-subscription-session', async (req, res) => {
+  try {
+    const { keyId, keySecret } = getRazorpayCredentials();
+    if (!keyId || !keySecret) {
+      return res.status(500).json({ success: false, msg: 'Razorpay credentials are not configured.' });
+    }
+
+    const userId = String(req.body?.userId || '').trim();
+    const tier = String(req.body?.tier || 'GROWTH').trim();
+    const planName = String(req.body?.planName || tier).trim();
+    const amountPaise = normalizePaise(req.body?.amountPaise);
+    const email = String(req.body?.email || '').trim();
+
+    if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
+    if (!amountPaise) return res.status(400).json({ success: false, msg: 'Valid subscription amount is required.' });
+
+    const receipt = `sub_${Date.now()}_${userId.slice(0, 8)}`;
+    const { data } = await axios.post(
+      RAZORPAY_ORDERS_URL,
+      {
+        amount: amountPaise,
+        currency: 'INR',
+        receipt,
+        notes: {
+          userId,
+          tier,
+          planName,
+          email,
+          purpose: 'subscription',
+        },
+      },
+      {
+        auth: { username: keyId, password: keySecret },
+        timeout: 12000,
+      }
+    );
+
+    return res.status(200).json({ success: true, key: keyId, order: data });
+  } catch (error) {
+    console.error('Razorpay subscription session failed:', error.response?.data || error.message || error);
+    return res.status(500).json({ success: false, msg: 'Unable to initialize Razorpay checkout.' });
+  }
+});
+
+router.post('/verify-razorpay-subscription', async (req, res) => {
+  try {
+    const { keySecret } = getRazorpayCredentials();
+    if (!keySecret) return res.status(500).json({ success: false, msg: 'Razorpay secret is not configured.' });
+
+    const userId = String(req.body?.userId || '').trim();
+    const tier = String(req.body?.tier || 'GROWTH').trim();
+    const razorpayOrderId = String(req.body?.razorpay_order_id || '').trim();
+    const razorpayPaymentId = String(req.body?.razorpay_payment_id || '').trim();
+    const razorpaySignature = String(req.body?.razorpay_signature || '').trim();
+
+    if (!userId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      return res.status(400).json({ success: false, msg: 'Missing Razorpay verification fields.' });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest('hex');
+
+    if (expectedSignature !== razorpaySignature) {
+      return res.status(400).json({ success: false, msg: 'Invalid Razorpay signature.' });
+    }
+
+    const paymentReference = `${razorpayOrderId}:${razorpayPaymentId}`;
+    const profile = await activateSubscriptionTier({ db, userId, tier, paymentReference });
+
+    await db.from('wallet_transactions').insert([{
+      user_id: userId,
+      amount: Number(req.body?.amount || 0),
+      transaction_type: 'SUBSCRIPTION',
+      description: `Razorpay subscription activation successful: ${razorpayPaymentId}`,
+      metadata: {
+        provider: 'razorpay',
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+        tier,
+      },
+      created_at: new Date().toISOString(),
+    }]).then(({ error }) => {
+      if (error) console.error('Razorpay subscription transaction log failed:', error.message || error);
+    });
+
+    return res.status(200).json({ success: true, profile });
+  } catch (error) {
+    console.error('Razorpay subscription verification failed:', error.message || error);
+    return res.status(500).json({ success: false, msg: 'Unable to verify Razorpay subscription payment.' });
+  }
+});
 
 router.post('/initiate-payu', async (req, res) => {
   try {

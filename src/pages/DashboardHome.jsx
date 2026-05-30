@@ -185,6 +185,7 @@ const DashboardHome = () => {
   const [templateStats, setTemplateStats] = useState({ approved: 0, pending: 0, rejected: 0 });
   const [messageHistory, setMessageHistory] = useState(() => buildSevenDayWindow());
   const [guidedTour, setGuidedTour] = useState({ open: false, step: 0 });
+  const [trialState, setTrialState] = useState({ active: false, daysRemaining: 7 });
 
   useEffect(() => {
     const storageKey = 'dashboard_greeting_shown';
@@ -348,8 +349,17 @@ const DashboardHome = () => {
       }
 
       const tourCompleted = trialProfileResult?.data?.profile?.onboarding_tour_completed;
+      const remainingHours = Number(trialProfileResult?.data?.remainingHours ?? 168);
+      const subscriptionStatus = String(trialProfileResult?.data?.profile?.subscription_status || '').toLowerCase();
+      const subscriptionTier = String(trialProfileResult?.data?.profile?.subscription_tier || '').toUpperCase();
+      setTrialState({
+        active: ['trialing', 'trial'].includes(subscriptionStatus) && subscriptionTier === 'GROWTH',
+        daysRemaining: Math.max(0, Math.ceil(remainingHours / 24)),
+      });
+
+      const globalTourCompleted = localStorage.getItem('yogidesk_onboarding_completed') === 'true';
       const localTourCompleted = localStorage.getItem(`onboarding_tour_completed_${userId}`) === 'true';
-      if (tourCompleted === false && !localTourCompleted) {
+      if (!globalTourCompleted && !localTourCompleted && tourCompleted !== true) {
         setGuidedTour({ open: true, step: 0 });
       }
 
@@ -413,19 +423,19 @@ const DashboardHome = () => {
   const chartTotal = useMemo(() => messageHistory.reduce((total, item) => total + Number(item.total || 0), 0), [messageHistory]);
   const tourSteps = [
     {
-      title: 'Connect Meta configurations',
-      body: 'Add your WhatsApp phone number ID, WABA ID, and system token so Yogi Desk can send approved clinical messages.',
+      title: 'Step 1: Meta WhatsApp Number connection block',
+      body: 'Connect your verified WhatsApp number, WABA ID, and system token so Yogi Desk can send approved clinical messages.',
       action: 'Open Settings',
       path: '/dashboard/settings',
     },
     {
-      title: 'Append a recipient',
+      title: 'Step 2: Add New Patient interface gateway',
       body: 'Add one patient contact to your workspace. This gives your clinic a real test recipient before larger broadcasts.',
       action: 'Add Patient',
       path: '/dashboard/contacts',
     },
     {
-      title: 'Hit a quick test transmission',
+      title: 'Step 3: Automated template broadcast testing module',
       body: 'Use a pre-approved template and send a controlled test message before inviting the rest of your team.',
       action: 'Open Templates',
       path: '/templates',
@@ -435,7 +445,10 @@ const DashboardHome = () => {
     const { data } = await supabase.auth.getUser().catch(() => ({ data: null }));
     const userId = normalizeSupabaseId(data?.user?.id || localStorage.getItem('user_id'));
     if (isCleanFilterValue(userId)) {
-      localStorage.setItem(`onboarding_tour_completed_${userId}`, String(completed));
+      if (completed) {
+        localStorage.setItem('yogidesk_onboarding_completed', 'true');
+        localStorage.setItem(`onboarding_tour_completed_${userId}`, 'true');
+      }
       if (completed) {
         api.post(backendPath('/api/profile/onboarding-tour-complete'), { userId }).catch(() => {});
       }
@@ -496,13 +509,16 @@ const DashboardHome = () => {
               </div>
               <button
                 type="button"
-                onClick={() => closeGuidedTour({ completed: false })}
+                onClick={() => closeGuidedTour({ completed: true })}
                 className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-50"
               >
-                Skip
+                Dismiss
               </button>
             </div>
             <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">{tourSteps[guidedTour.step].body}</p>
+            <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-orange-700">
+              Highlight: {tourSteps[guidedTour.step].title.replace(/^Step \d:\s*/, '')}
+            </div>
             <div className="mt-5 flex gap-2">
               {tourSteps.map((step, index) => (
                 <div key={step.title} className={`h-2 flex-1 rounded-full ${index <= guidedTour.step ? 'bg-orange-600' : 'bg-slate-100'}`} />
@@ -530,10 +546,27 @@ const DashboardHome = () => {
                 }}
                 className="rounded-2xl bg-[#FF6A00] px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-600"
               >
-                {guidedTour.step >= tourSteps.length - 1 ? 'Finish Tour' : 'Next Step'}
+                {guidedTour.step >= tourSteps.length - 1 ? 'Got it' : 'Next Step'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {trialState.active && !isStaff && (
+        <div className="flex flex-col gap-4 rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 via-white to-slate-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-white">
+              <Zap size={22} />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-950">Your Premium Growth Plan Trial is Active. {trialState.daysRemaining} Days Remaining.</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-500">Growth features, multi-agent access, and premium automation slots are unlocked during your trial.</p>
+            </div>
+          </div>
+          <Link to="/pricing" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#FF6A00] px-5 text-sm font-black text-white shadow-lg shadow-orange-100 transition hover:bg-orange-600">
+            Upgrade Now
+          </Link>
         </div>
       )}
 

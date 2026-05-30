@@ -1,5 +1,6 @@
 alter table if exists public.doctor_profiles
   add column if not exists email text,
+  add column if not exists clinic_category text,
   add column if not exists subscription_tier text default 'GROWTH',
   add column if not exists subscription_status text default 'trialing',
   add column if not exists trial_start_at timestamptz default now(),

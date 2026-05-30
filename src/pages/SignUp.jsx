@@ -104,6 +104,8 @@ const SignUp = () => {
       clinic_name: formData.businessName.trim(),
       business_name: formData.businessName.trim(),
       business_category: formData.businessCategory,
+      clinic_category: formData.businessCategory,
+      specialization: formData.businessCategory,
       phone_number: formData.phone.replace(/\D/g, '').slice(-10),
       subscription_tier: 'GROWTH',
       subscription_status: 'trialing',
@@ -117,7 +119,7 @@ const SignUp = () => {
 
     const { error } = await supabase
       .from('doctor_profiles')
-      .upsert(profilePayload, { onConflict: 'id', ignoreDuplicates: true });
+      .upsert(profilePayload, { onConflict: 'id' });
 
     if (error) console.warn('Premium trial profile seed deferred to backend:', error.message);
   };

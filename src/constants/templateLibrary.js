@@ -54,6 +54,98 @@ export const BASELINE_MEDICAL_TEMPLATES = [
   },
 ];
 
+export const DENTAL_PREMADE_TEMPLATES = [
+  {
+    id: 'dent_static_1',
+    specialization: 'Dentist',
+    template_name: 'Dental Routine Check-up Reminder',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, this is a reminder for your dental routine check-up at {{2}} on {{3}} at {{4}}. Reply CONFIRM to secure your chair time.',
+  },
+  {
+    id: 'dent_static_2',
+    specialization: 'Dentist',
+    template_name: 'Root Canal Care Follow-up',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, Dr. {{2}} recommends a root canal care follow-up after your recent procedure. Please book your review here: {{3}}',
+  },
+  {
+    id: 'dent_static_3',
+    specialization: 'Dentist',
+    template_name: 'Braces Adjustment Appointment Notice',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, your braces adjustment appointment is scheduled at {{2}} on {{3}}. Please arrive 10 minutes early for check-in.',
+  },
+  {
+    id: 'dent_static_4',
+    specialization: 'Dentist',
+    template_name: 'Dental Cleaning Recall',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, it is time for your dental cleaning recall at {{2}}. Reserve a convenient slot here: {{3}}',
+  },
+  {
+    id: 'dent_static_5',
+    specialization: 'Dentist',
+    template_name: 'Smile Makeover Camp Invite',
+    category: 'MARKETING',
+    language: 'English',
+    body_text: 'Dear {{1}}, {{2}} is hosting a smile makeover consultation camp this week. Reply BOOK to reserve your dental consultation slot.',
+  },
+];
+
+export const GENERAL_PHYSICIAN_PREMADE_TEMPLATES = [
+  {
+    id: 'gp_static_1',
+    specialization: 'General Physician',
+    template_name: 'Chronic Care Follow-up',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, this is a follow-up reminder from Dr. {{2}} for your chronic care review. Book your next consultation here: {{3}}',
+  },
+  {
+    id: 'gp_static_2',
+    specialization: 'General Physician',
+    template_name: 'Consultation Review Reminder',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, your consultation review is due on {{2}} at {{3}}. Please bring your previous prescription and reports.',
+  },
+  {
+    id: 'gp_static_3',
+    specialization: 'General Physician',
+    template_name: 'Medication Adherence Check',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, Dr. {{2}} is checking in on your medication schedule. Reply DONE if doses are on track or HELP for support.',
+  },
+  {
+    id: 'gp_static_4',
+    specialization: 'General Physician',
+    template_name: 'Lab Report Consultation',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, your reports are ready for review. Please schedule a consultation with Dr. {{2}} using this link: {{3}}',
+  },
+  {
+    id: 'gp_static_5',
+    specialization: 'General Physician',
+    template_name: 'Preventive Health Check-up Invite',
+    category: 'MARKETING',
+    language: 'English',
+    body_text: 'Dear {{1}}, {{2}} is running a preventive health check-up drive. Reply BOOK to reserve your consultation.',
+  },
+];
+
+export const getBaselineTemplatesForSpecialty = (specialty) => (
+  String(specialty || '').toLowerCase().includes('dent')
+    ? DENTAL_PREMADE_TEMPLATES
+    : GENERAL_PHYSICIAN_PREMADE_TEMPLATES
+);
+
 export const TEMPLATE_DATA = {
   Dentist: [
     {

@@ -32,6 +32,8 @@ const buildTrialProfilePayload = ({
     clinic_name: businessName || null,
     business_name: businessName || null,
     business_category: businessCategory || null,
+    clinic_category: businessCategory || null,
+    specialization: businessCategory || null,
     phone_number: phone || null,
     subscription_tier: 'GROWTH',
     subscription_status: 'trialing',
@@ -51,7 +53,7 @@ const ensurePremiumTrialProfile = async (db, payload) => {
   const row = buildTrialProfilePayload(payload);
   const result = await db
     .from('doctor_profiles')
-    .upsert(row, { onConflict: 'id', ignoreDuplicates: true })
+    .upsert(row, { onConflict: 'id' })
     .select('*')
     .maybeSingle();
 
