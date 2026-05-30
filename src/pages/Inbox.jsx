@@ -226,7 +226,7 @@ const InboxContent = () => {
       if (chatData.length === 0) {
         let messageResult = await supabase
           .from('inbox_messages')
-          .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, created_at')
+          .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, status, metadata, created_at')
           .eq('workspace_id', user.id)
           .order('created_at', { ascending: false })
           .limit(50);
@@ -234,7 +234,7 @@ const InboxContent = () => {
         if (messageResult.error || !messageResult.data?.length) {
           messageResult = await supabase
             .from('inbox_messages')
-            .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, created_at')
+            .select('chat_id, message_text, message_body, body, text, sender, from_me, type, message_type, receiver_phone, sender_phone, workspace_id, sender_id, status, metadata, created_at')
             .eq('sender_id', user.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -243,7 +243,7 @@ const InboxContent = () => {
         if (messageResult.error) {
           messageResult = await supabase
             .from('inbox_messages')
-            .select('chat_id, message_body, body, text, sender, from_me, type, receiver_phone, sender_phone, workspace_id, created_at')
+            .select('chat_id, message_body, body, text, sender, from_me, type, receiver_phone, sender_phone, workspace_id, status, metadata, created_at')
             .eq('workspace_id', user.id)
             .order('created_at', { ascending: false })
             .limit(50);
@@ -262,7 +262,7 @@ const InboxContent = () => {
               phone,
               last_message: item.message_text || item.message_body || item.body || item.text || '',
               updated_at: item.created_at,
-              status: 'SENT',
+              status: item.status || item.metadata?.delivery_status || 'SENT',
               unread_count: 0,
               metadata: { messages: [item], source_chat_id: item.chat_id || null },
             });

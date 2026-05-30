@@ -17,6 +17,122 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 });
 
 const normalizePhone = (value = '') => String(value).replace(/[^\d]/g, '');
+const normalizeDeliveryStatus = (value = '') => {
+  const status = String(value || '').trim().toUpperCase();
+  return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status : '';
+};
+
+const extractStatuses = (payload) => {
+  const updates = [];
+  for (const entry of payload?.entry || []) {
+    for (const change of entry?.changes || []) {
+      if (change?.field !== 'messages') continue;
+      const value = change?.value || {};
+      for (const row of value?.statuses || []) {
+        const messageId = row?.id || row?.message_id || '';
+        const status = normalizeDeliveryStatus(row?.status);
+        if (!messageId || !status) continue;
+        updates.push({
+          messageId,
+          status,
+          timestamp: row?.timestamp || null,
+          recipientPhone: normalizePhone(row?.recipient_id || ''),
+          error: row?.errors?.[0] || null,
+          raw: row,
+        });
+      }
+    }
+  }
+  return updates;
+};
+
+const updateDeliveryStatus = async (update) => {
+  let { data: messages, error } = await supabase
+    .from('inbox_messages')
+    .select('id, chat_id, metadata')
+    .eq('metadata->>meta_message_id', update.messageId)
+    .limit(10);
+
+  if (error || !messages?.length) {
+    const fallback = await supabase
+      .from('inbox_messages')
+      .select('id, chat_id, metadata')
+      .eq('metadata->>message_id', update.messageId)
+      .limit(10);
+    messages = fallback.data || [];
+    error = fallback.error;
+  }
+
+  if ((!messages || messages.length === 0) && update.recipientPhone) {
+    const fallbackByPhone = await supabase
+      .from('inbox_messages')
+      .select('id, chat_id, metadata')
+      .eq('receiver_phone', update.recipientPhone)
+      .eq('from_me', true)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (!fallbackByPhone.error) messages = fallbackByPhone.data || [];
+  }
+
+  if (error) {
+    console.error('delivery status lookup failed:', error);
+    return;
+  }
+
+  for (const message of messages || []) {
+    const metadata = {
+      ...(message.metadata || {}),
+      delivery_status: update.status,
+      delivery_status_at: update.timestamp,
+      delivery_error: update.error,
+      last_meta_status: update.raw,
+    };
+
+    await supabase
+      .from('inbox_messages')
+      .update({ status: update.status, metadata })
+      .eq('id', message.id);
+
+    if (message.chat_id) {
+      const { data: chat } = await supabase
+        .from('inbox_chats')
+        .select('metadata')
+        .eq('id', message.chat_id)
+        .maybeSingle();
+      const chatMetadata = chat?.metadata || {};
+      const lastTemplate = chatMetadata.last_template
+        ? {
+            ...chatMetadata.last_template,
+            delivery_status: update.status,
+            delivery_status_at: update.timestamp,
+            delivery_error: update.error,
+          }
+        : chatMetadata.last_template;
+
+      await supabase
+        .from('inbox_chats')
+        .update({
+          status: update.status,
+          metadata: { ...chatMetadata, ...(lastTemplate ? { last_template: lastTemplate } : {}) },
+        })
+        .eq('id', message.chat_id);
+    }
+  }
+};
+
+const resolveWorkspaceId = async (clinicMetaId, fallbackId) => {
+  if (fallbackId) return fallbackId;
+  if (!clinicMetaId) return null;
+
+  const { data } = await supabase
+    .from('doctor_profiles')
+    .select('id')
+    .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
+    .limit(1)
+    .maybeSingle();
+
+  return data?.id || null;
+};
 
 const extractMessage = (payload) => {
   const value = payload?.entry?.[0]?.changes?.[0]?.value || {};
@@ -33,6 +149,7 @@ const extractMessage = (payload) => {
     messageText: String(text).trim(),
     patientName: contact?.profile?.name || 'WhatsApp Patient',
     currentAdminId: metadata?.workspace_id || metadata?.admin_id || Deno.env.get('DEFAULT_WORKSPACE_ID') || null,
+    messageId: message?.id || null,
   };
 };
 
@@ -52,9 +169,15 @@ serve(async (req) => {
 
   try {
     const payload = await req.json();
-    const { fromPhone, clinicMetaId, messageText, patientName, currentAdminId } = extractMessage(payload);
+    const statuses = extractStatuses(payload);
+    for (const status of statuses) await updateDeliveryStatus(status);
 
-    if (!fromPhone || !messageText) return json({ ok: true, skipped: true });
+    const { fromPhone, clinicMetaId, messageText, patientName, currentAdminId, messageId } = extractMessage(payload);
+
+    if (!fromPhone || !messageText) return json({ ok: true, skipped: true, statuses: statuses.length });
+
+    const workspaceId = await resolveWorkspaceId(clinicMetaId, currentAdminId);
+    if (!workspaceId) return json({ ok: true, skipped: true, reason: 'workspace_not_found' });
 
     const { data: existingPatient } = await supabase
       .from('patients_ledger')
@@ -64,7 +187,7 @@ serve(async (req) => {
 
     if (!existingPatient) {
       await supabase.from('patients_ledger').insert([{
-        user_id: currentAdminId,
+        user_id: workspaceId,
         name: patientName,
         phone: fromPhone,
         appointment_time: null,
@@ -84,8 +207,8 @@ serve(async (req) => {
       await supabase
         .from('inbox_chats')
         .update({
-          user_id: currentAdminId,
-          doctor_id: currentAdminId,
+          user_id: workspaceId,
+          doctor_id: workspaceId,
           name: patientName,
           patient_name: patientName,
           patient_phone: fromPhone,
@@ -105,8 +228,8 @@ serve(async (req) => {
       const { data: createdChat } = await supabase
         .from('inbox_chats')
         .insert([{
-          user_id: currentAdminId,
-          doctor_id: currentAdminId,
+          user_id: workspaceId,
+          doctor_id: workspaceId,
           name: patientName,
           patient_name: patientName,
           phone: fromPhone,
@@ -128,7 +251,7 @@ serve(async (req) => {
 
     await supabase.from('inbox_messages').insert([{
       chat_id: chatId,
-      workspace_id: currentAdminId,
+      workspace_id: workspaceId,
       sender_phone: fromPhone,
       receiver_phone: clinicMetaId,
       sender: 'user',
@@ -141,7 +264,7 @@ serve(async (req) => {
       message_text: messageText,
       message_body: messageText,
       is_private_note: false,
-      metadata: { inbound: true },
+      metadata: { inbound: true, meta_message_id: messageId },
     }]);
 
     return json({ ok: true });
