@@ -86,7 +86,7 @@ const LandingPage = () => {
               <img
                 src="/assets/yogidesk-logo.png"
                 alt=""
-                className="absolute left-1/2 top-1/2 h-24 w-24 max-w-none -translate-x-1/2 -translate-y-[54%] object-contain"
+                className="absolute left-1/2 top-1/2 h-24 w-24 max-w-none -translate-x-1/2 -translate-y-[35%] object-contain"
               />
             </div>
             <span className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 leading-none">
