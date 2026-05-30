@@ -138,11 +138,11 @@ const Sidebar = () => {
   return (
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0 z-40 flex-shrink-0 font-sans">
       <div className="p-6 flex items-center gap-3 flex-shrink-0 border-b border-gray-50">
-        <Link to={isStaff ? '/staff/dashboard' : '/dashboard'} className="flex h-11 md:h-12 lg:h-14 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
+        <Link to={isStaff ? '/staff/dashboard' : '/dashboard'} className="flex h-14 md:h-16 lg:h-20 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
           <img
             src="/assets/yogidesk-logo.png"
             alt="Yogi Desk AI"
-            className="h-11 md:h-12 lg:h-14 w-auto object-contain"
+            className="h-14 md:h-16 lg:h-20 w-auto object-contain"
           />
         </Link>
         <div className="min-w-0">

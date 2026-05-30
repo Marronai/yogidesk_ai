@@ -75,11 +75,11 @@ const MainLayout = () => {
       <div className="w-full lg:hidden bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <Link to="/dashboard" className="flex h-11 md:h-12 lg:h-14 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
+            <Link to="/dashboard" className="flex h-14 md:h-16 lg:h-20 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
               <img
                 src="/assets/yogidesk-logo.png"
                 alt="Yogi Desk AI"
-                className="h-11 md:h-12 lg:h-14 w-auto object-contain"
+                className="h-14 md:h-16 lg:h-20 w-auto object-contain"
               />
             </Link>
             <div>
