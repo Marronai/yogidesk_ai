@@ -1,15 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  ArrowRight, CheckCircle2, Users, Rocket, Globe, Menu, X, Heart, 
+  CheckCircle2, Users, Rocket, Globe, X, Heart, 
   Target, ShieldCheck, Zap, Smile, Building, GraduationCap, ShoppingBag, 
   Briefcase, TrendingUp, Clock, MessageCircle, DollarSign, Smartphone
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import PublicNavbar from '../components/PublicNavbar';
 
 const About = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-
   const stats = [
     { label: 'WhatsApp Messages Sent', val: '10M+' },
     { label: 'Happy Clients', val: '500+' },
@@ -36,41 +35,7 @@ const About = () => {
   return (
     <div className="bg-white min-h-screen font-sans text-slate-900 selection:bg-[#FF6B00] selection:text-white">
       
-      {/* 1. NAVBAR */}
-      <nav className="fixed w-full z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">Y</div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Yogi Desk AI</span>
-          </Link>
-          <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
-            <Link to="/" className="hover:text-[#FF6B00] transition">Home</Link>
-            <Link to="/about" className="text-[#FF6B00] transition">About Us</Link>
-            <Link to="/pricing" className="hover:text-[#FF6B00] transition">Pricing</Link>
-            <Link to="/contact" className="hover:text-[#FF6B00] transition">Contact</Link>
-          </div>
-          <div className="hidden md:flex gap-4">
-             <Link to="/login" className="text-sm font-bold text-slate-600 hover:text-[#FF6B00] py-2">Log In</Link>
-             <Link to="/signup" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2 transform hover:-translate-y-0.5 transition">Get Started <ArrowRight size={16}/></Link>
-          </div>
-          <button className="md:hidden text-slate-900" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
-        </div>
-
-        {/* Mobile Navigation Menu */}
-        {isMenuOpen && (
-          <div className="md:hidden bg-white border-b border-gray-100 px-6 pt-4 pb-6 space-y-4 flex flex-col font-bold text-slate-700">
-            <Link to="/" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00]">Home</Link>
-            <Link to="/about" onClick={() => setIsMenuOpen(false)} className="text-[#FF6B00]">About Us</Link>
-            <Link to="/pricing" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00]">Pricing</Link>
-            <Link to="/contact" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00]">Contact</Link>
-            <hr className="border-gray-100" />
-            <Link to="/login" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00] py-2">Log In</Link>
-            <Link to="/signup" onClick={() => setIsMenuOpen(false)} className="bg-[#FF6B00] text-white text-center py-3 rounded-xl">Get Started</Link>
-          </div>
-        )}
-      </nav>
+      <PublicNavbar />
 
       {/* 2. HERO SECTION */}
       <section className="pt-32 md:pt-40 pb-12 md:pb-20 lg:pb-24 px-4 md:px-6 bg-gradient-to-b from-orange-50 to-white">

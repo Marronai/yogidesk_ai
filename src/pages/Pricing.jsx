@@ -2,29 +2,16 @@ import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
-  Calculator,
   CheckCircle2,
-  ChevronDown,
   Database,
-  FileText,
   Lock,
-  Menu,
   MessageCircle,
-  QrCode,
-  Settings,
   ShieldCheck,
   Stethoscope,
-  X,
 } from 'lucide-react';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
-
-const resourceLinks = [
-  { name: 'ROI Calculator', icon: <Calculator size={16} />, link: '/calculator' },
-  { name: 'API Docs', icon: <FileText size={16} />, link: '/docs' },
-  { name: 'QR Generator', icon: <QrCode size={16} />, link: '/qr-generator' },
-  { name: 'Setup Docs', icon: <Settings size={16} />, link: '/setup' },
-];
+import PublicNavbar from '../components/PublicNavbar';
 
 const DURATIONS = [
   { id: '3m', label: '3 Months', saving: 'Starter cycle', months: 3 },
@@ -111,94 +98,6 @@ const loadRazorpayScript = () => new Promise((resolve, reject) => {
   script.onerror = () => reject(new Error('Unable to load Razorpay checkout.'));
   document.body.appendChild(script);
 });
-
-function MarketingHeader() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isResourceOpen, setIsResourceOpen] = useState(false);
-
-  const closeMenu = () => setIsMenuOpen(false);
-
-  return (
-    <nav className="fixed w-full z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex justify-between items-center">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-[#FF6A00] rounded-xl flex items-center justify-center shadow-lg shadow-orange-200 text-white font-extrabold text-xl">
-            Y
-          </div>
-          <span className="text-xl font-black tracking-tight text-slate-900">
-            Yogi Desk <span className="text-blue-600">AI</span>
-          </span>
-        </Link>
-
-        <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
-          <Link to="/" className="hover:text-[#FF6A00] transition">Home</Link>
-          <Link to="/about" className="hover:text-[#FF6A00] transition">About Us</Link>
-          <div
-            className="relative"
-            onMouseEnter={() => setIsResourceOpen(true)}
-            onMouseLeave={() => setIsResourceOpen(false)}
-          >
-            <button className="flex items-center gap-1 hover:text-[#FF6A00] transition py-4">
-              Resources <ChevronDown size={14} />
-            </button>
-            <div className={`absolute top-full left-0 w-56 bg-white border border-gray-100 shadow-xl rounded-xl p-2 transition-all duration-200 origin-top ${isResourceOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'}`}>
-              {resourceLinks.map((item) => (
-                <Link key={item.name} to={item.link} className="flex items-center gap-3 p-3 hover:bg-orange-50 rounded-lg text-slate-600 hover:text-[#FF6A00] transition">
-                  {item.icon}
-                  <span className="font-semibold">{item.name}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-          <Link to="/pricing" className="text-[#FF6A00] transition">Pricing</Link>
-          <Link to="/contact" className="hover:text-[#FF6A00] transition">Contact Us</Link>
-        </div>
-
-        <div className="hidden md:flex gap-4 items-center">
-          <Link to="/login" className="text-sm font-bold text-slate-600 hover:text-[#FF6A00] transition">Log In</Link>
-          <Link to="/signup" className="bg-[#FF6A00] hover:bg-orange-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition shadow-lg shadow-orange-200 flex items-center gap-2 transform hover:-translate-y-0.5">
-            Get Started <ArrowRight size={16} />
-          </Link>
-        </div>
-
-        <button
-          type="button"
-          className="md:hidden p-2 text-slate-900 hover:text-[#FF6A00]"
-          onClick={() => setIsMenuOpen((open) => !open)}
-          aria-label="Toggle navigation"
-          aria-expanded={isMenuOpen}
-        >
-          {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
-      </div>
-
-      {isMenuOpen && (
-        <div className="md:hidden bg-white border-b border-gray-100 px-6 py-4 space-y-3 flex flex-col font-bold text-slate-600 text-sm">
-          <Link to="/" onClick={closeMenu} className="hover:text-[#FF6A00] py-2">Home</Link>
-          <Link to="/about" onClick={closeMenu} className="hover:text-[#FF6A00] py-2">About Us</Link>
-          <div className="pt-2">
-            <div className="text-xs uppercase tracking-widest text-slate-400 mb-2">Resources</div>
-            <div className="grid grid-cols-1 gap-1">
-              {resourceLinks.map((item) => (
-                <Link key={item.name} to={item.link} onClick={closeMenu} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-orange-50 hover:text-[#FF6A00]">
-                  {item.icon}
-                  {item.name}
-                </Link>
-              ))}
-            </div>
-          </div>
-          <Link to="/pricing" onClick={closeMenu} className="text-[#FF6A00] py-2">Pricing</Link>
-          <Link to="/contact" onClick={closeMenu} className="hover:text-[#FF6A00] py-2">Contact Us</Link>
-          <hr className="border-gray-100" />
-          <Link to="/login" onClick={closeMenu} className="hover:text-[#FF6A00] py-2">Log In</Link>
-          <Link to="/signup" onClick={closeMenu} className="bg-[#FF6A00] text-white text-center py-3 rounded-xl shadow-md">
-            Get Started
-          </Link>
-        </div>
-      )}
-    </nav>
-  );
-}
 
 export default function Pricing() {
   const [durationId, setDurationId] = useState('12m');
@@ -311,7 +210,7 @@ export default function Pricing() {
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-[#FF6A00] selection:text-white antialiased">
-      <MarketingHeader />
+      <PublicNavbar />
 
       <main className="pt-32 sm:pt-36">
         <section className="px-4 sm:px-6 pb-10">

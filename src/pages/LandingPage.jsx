@@ -2,22 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   MessageSquare, Smartphone, MousePointer2, BarChart3, Mail, Users, 
-  EyeOff, UserCog, ShieldAlert, Clock, Send, Menu, X, CheckCircle2, 
-  Calculator, Play, Rocket, ChevronDown, ChevronUp, ArrowRight,
-  FileText, QrCode, Settings, Facebook, Stethoscope, GraduationCap, Store,
+  EyeOff, UserCog, ShieldAlert, Clock, Send, CheckCircle2, 
+  Play, Rocket, ArrowRight,
+  FileText, Facebook, Stethoscope, GraduationCap, Store,
   Star, ShieldCheck, Heart, Search, Sparkles, Filter, Copy, Layers, Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Footer from '../components/Footer';
+import PublicNavbar from '../components/PublicNavbar';
 
 // 🔒 STATIC HEALTHCARE RESOURCE LEDGER
-const resourceLinks = [
-  { name: "ROI Calculator", icon: <Calculator size={16}/>, link: "/calculator" },
-  { name: "API Docs", icon: <FileText size={16}/>, link: "/docs" },
-  { name: "QR Generator", icon: <QrCode size={16}/>, link: "/qr-generator" },
-  { name: "Setup Docs", icon: <Settings size={16}/>, link: "/setup" },
-];
-
 const medicalServices = [
   { icon: <Smartphone />, title: "Live Preview Dashboard", desc: "Real-time preview on custom iPhone & Android nodes while creating clinical templates." },
   { icon: <MousePointer2 />, title: "Interactive CTA Buttons", desc: "Add single-tap Quick Reply & Call-to-Action nodes to maximize appointment conversion ratios." },
@@ -69,68 +63,12 @@ const mockTemplates = {
 };
 
 const LandingPage = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isResourceOpen, setIsResourceOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dental');
 
   return (
     <div className="bg-white min-h-screen font-sans text-slate-900 selection:bg-[#FF6B00] selection:text-white antialiased">
       
-      {/* ========================================================
-          1. NAVIGATION BAR (RESPONSIVE ALL DEVICE MATRIX)
-          ======================================================== */}
-      <nav className="fixed w-full z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex justify-between items-center">
-          <Link to="/" className="flex h-9 md:h-10 lg:h-11 items-center shrink-0" aria-label="Yogi Desk AI home">
-            <img
-              src="/assets/yogidesk-logo.png"
-              alt="Yogi Desk AI"
-              className="h-9 md:h-10 lg:h-11 w-auto object-contain"
-            />
-          </Link>
-
-          <div className="hidden lg:flex gap-8 text-sm font-bold text-slate-600 items-center">
-            <Link to="/" className="hover:text-[#FF6B00] transition">Home</Link>
-            <Link to="/about" className="hover:text-[#FF6B00] transition">About Us</Link>
-            <div className="relative group">
-              <button className="flex items-center gap-1 hover:text-[#FF6B00] transition py-4" onMouseEnter={() => setIsResourceOpen(true)} onMouseLeave={() => setIsResourceOpen(false)}>
-                Resources <ChevronDown size={14}/>
-              </button>
-              <div className={`absolute top-full left-0 w-56 bg-white border border-gray-100 shadow-xl rounded-xl p-2 transition-all duration-200 transform origin-top ${isResourceOpen ? 'opacity-100 scale-100 visible' : 'opacity-0 scale-95 invisible'}`} onMouseEnter={() => setIsResourceOpen(true)} onMouseLeave={() => setIsResourceOpen(false)}>
-                 {resourceLinks.map((item, i) => (
-                    <Link key={i} to={item.link} className="flex items-center gap-3 p-3 hover:bg-orange-50 rounded-lg text-slate-600 hover:text-[#FF6B00] transition">
-                       {item.icon}<span className="font-semibold">{item.name}</span>
-                    </Link>
-                 ))}
-              </div>
-            </div>
-            <Link to="/pricing" className="hover:text-[#FF6B00] transition">Pricing</Link>
-            <Link to="/contact" className="hover:text-[#FF6B00] transition">Contact Us</Link>
-          </div>
-
-          <div className="hidden lg:flex gap-4 items-center">
-             <Link to="/login" className="text-sm font-bold text-slate-600 hover:text-[#FF6B00] transition">Log In</Link>
-             <Link to="/signup" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition shadow-lg shadow-orange-200 flex items-center gap-2 transform hover:-translate-y-0.5">
-                Get Started <ArrowRight size={16}/>
-            </Link>
-          </div>
-          <button className="lg:hidden p-2 text-slate-900 hover:text-[#FF6B00]" onClick={() => setIsMenuOpen(!isMenuOpen)}>{isMenuOpen ? <X size={24} /> : <Menu size={24} />}</button>
-        </div>
-
-        {/* MOBILE SIDEBAR MENU CONTAINER */}
-        <AnimatePresence>
-          {isMenuOpen && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="lg:hidden bg-white border-b border-gray-100 px-6 py-4 space-y-3 flex flex-col font-bold text-slate-600 text-sm">
-              <Link to="/" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00] py-2">Home</Link>
-              <Link to="/pricing" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00] py-2">Pricing</Link>
-              <Link to="/contact" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00] py-2">Contact Us</Link>
-              <hr className="border-gray-100" />
-              <Link to="/login" onClick={() => setIsMenuOpen(false)} className="hover:text-[#FF6B00] py-2">Log In</Link>
-              <Link to="/signup" onClick={() => setIsMenuOpen(false)} className="bg-[#FF6B00] text-white text-center py-3 rounded-xl shadow-md">Get Started</Link>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </nav>
+      <PublicNavbar />
 
       {/* ========================================================
           2. HERO HERO HERO PANEL (₹50 CAP VALUE INJECTED)

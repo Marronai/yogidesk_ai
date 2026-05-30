@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, MapPin, Phone, MessageSquare, Menu, X, ArrowRight, Send, Check } from 'lucide-react';
+import { Mail, MapPin, Phone, MessageSquare, ArrowRight, Send, Check } from 'lucide-react';
+import PublicNavbar from '../components/PublicNavbar';
 
 const Contact = () => {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const handleSubmit = (e) => {
@@ -15,26 +15,7 @@ const Contact = () => {
   return (
     <div className="bg-white min-h-screen font-sans text-slate-900 selection:bg-[#FF6B00] selection:text-white">
       
-      {/* NAVBAR */}
-      <nav className="fixed w-full z-50 bg-white/90 backdrop-blur-lg border-b border-gray-100">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex justify-between items-center">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 bg-[#FF6B00] rounded-xl flex items-center justify-center shadow-lg text-white font-bold text-xl">Y</div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">Yogi Desk AI</span>
-          </Link>
-          <div className="hidden md:flex gap-8 text-sm font-bold text-slate-600 items-center">
-            <Link to="/" className="hover:text-[#FF6B00]">Home</Link>
-            <Link to="/about" className="hover:text-[#FF6B00]">About Us</Link>
-            <Link to="/pricing" className="hover:text-[#FF6B00]">Pricing</Link>
-            <Link to="/contact" className="text-[#FF6B00]">Contact</Link>
-          </div>
-          <div className="hidden md:flex gap-4">
-             <Link to="/login" className="text-sm font-bold text-slate-600 hover:text-[#FF6B00] py-2">Log In</Link>
-             <Link to="/signup" className="bg-[#FF6B00] hover:bg-orange-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2">Get Started <ArrowRight size={16}/></Link>
-          </div>
-          <button className="md:hidden" onClick={() => setIsMenuOpen(!isMenuOpen)}>{isMenuOpen ? <X /> : <Menu />}</button>
-        </div>
-      </nav>
+      <PublicNavbar />
 
       <section className="pt-32 pb-20 px-6">
          <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-start">
