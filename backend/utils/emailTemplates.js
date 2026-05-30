@@ -62,12 +62,10 @@ const getWelcomeEmailHTML = (doctorName = 'Doctor') => {
                           <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                             <tr>
                               <td class="col-pad" style="padding-top:5px;">
-                                <table class="image_block block-2" width="100%" border="0" cellpadding="10" cellspacing="0" role="presentation">
+                                <table class="brand_header block-2" width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                                   <tr>
-                                    <td class="pad" style="width:100%;" align="center">
-                                      <div style="max-width: 180px;">
-                                        <img src="https://yogidesk-ai.com/assets/logo.png" style="display: block; height: auto; border: 0; width: 100%;" width="180" alt="Yogi Desk AI" title="Yogi Desk AI">
-                                      </div>
+                                    <td class="pad" style="background-color:#ff6a00; padding: 24px 16px; width:100%; text-align:center;" align="center">
+                                      <div style="color:#ffffff; font-family:Fira Sans, Arial, sans-serif; font-size:24px; font-weight:700; line-height:1.2; letter-spacing:0.02em;">YogiDesk AI</div>
                                     </td>
                                   </tr>
                                 </table>

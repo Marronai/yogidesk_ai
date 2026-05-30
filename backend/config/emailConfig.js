@@ -114,7 +114,7 @@ exports.sendOTP = async (email, name, otp) => {
         body { margin: 0; padding: 0; background-color: #f8fafc; font-family: 'Fira Sans', Arial, sans-serif; -webkit-text-size-adjust: none; text-size-adjust: none; }
         .email-container { max-width: 550px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03); }
         .brand-header { background-color: #ff6a00; padding: 30px; text-align: center; }
-        .brand-name { margin: 12px 0 0 0; color: #ffffff; font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+        .brand-name { margin: 0; color: #ffffff; font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
         .content-body { padding: 40px 35px; color: #334155; line-height: 1.6; }
         .main-title { margin: 0 0 15px 0; color: #0f172a; font-size: 22px; font-weight: 700; text-align: center; }
         .text-desc { font-size: 15px; color: #64748b; text-align: center; margin-bottom: 30px; }
@@ -135,8 +135,7 @@ exports.sendOTP = async (email, name, otp) => {
     </div>
     <div class="email-container">
         <div class="brand-header">
-            <img src="https://yogidesk-ai.com/assets/yogidesk-logo.png" alt="" width="96" style="display: block; height: auto; margin: 0 auto; border: 0;">
-            <p class="brand-name">Yogi Desk AI</p>
+            <p class="brand-name">YogiDesk AI</p>
         </div>
         <div class="content-body">
             <h2 class="main-title">Verify Your Account</h2>
