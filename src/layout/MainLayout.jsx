@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import ErrorBoundary from '../components/ErrorBoundary';
 import api from '../utils/api';
@@ -74,10 +74,15 @@ const MainLayout = () => {
 
       <div className="w-full lg:hidden bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center text-white font-bold text-lg">Y</div>
+          <div className="flex items-center gap-3 min-w-0">
+            <Link to="/dashboard" className="flex h-9 md:h-10 lg:h-11 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
+              <img
+                src="/assets/yogidesk-logo.png"
+                alt="Yogi Desk AI"
+                className="h-9 md:h-10 lg:h-11 w-auto object-contain"
+              />
+            </Link>
             <div>
-              <p className="text-sm font-semibold text-slate-900">Yogi Desk</p>
               <p className="text-xs text-slate-500">Dashboard</p>
             </div>
           </div>

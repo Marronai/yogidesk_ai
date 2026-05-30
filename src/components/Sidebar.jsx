@@ -138,9 +138,14 @@ const Sidebar = () => {
   return (
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0 z-40 flex-shrink-0 font-sans">
       <div className="p-6 flex items-center gap-3 flex-shrink-0 border-b border-gray-50">
-        <div className="w-10 h-10 bg-orange-600 rounded-xl flex items-center justify-center font-bold text-white text-xl shadow-lg shadow-orange-500/20">Y</div>
+        <Link to={isStaff ? '/staff/dashboard' : '/dashboard'} className="flex h-9 md:h-10 lg:h-11 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
+          <img
+            src="/assets/yogidesk-logo.png"
+            alt="Yogi Desk AI"
+            className="h-9 md:h-10 lg:h-11 w-auto object-contain"
+          />
+        </Link>
         <div className="min-w-0">
-          <span className="block text-xl font-bold text-gray-800 tracking-wide">Yogi Desk</span>
           <span className="block truncate text-[11px] font-bold tracking-wider text-gray-400">{profile.clinicName}</span>
         </div>
       </div>
