@@ -478,6 +478,15 @@ exports.saveMetaConnection = async (req, res) => {
         const client = supabaseAdmin || supabase;
         if (!client?.from) throw new Error('Supabase admin client unavailable.');
 
+        const existingMetaConfig = await getExistingMetaCredentialState(client, sessionUser.id);
+        if (hasCompleteMetaCredentials(existingMetaConfig)) {
+            return res.status(403).json({
+                success: false,
+                message: META_CONFIGURATION_LOCKED_MESSAGE,
+                is_locked: true
+            });
+        }
+
         const profilePayload = {
             meta_phone_number_id: phoneNumberId,
             meta_waba_id: businessAccountId,

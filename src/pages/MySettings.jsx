@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, Lock, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import api, { API_BASE_URL } from '../utils/api';
@@ -45,16 +45,17 @@ const Settings = () => {
   const [savingConnection, setSavingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
-  const [credentialsUnlocked, setCredentialsUnlocked] = useState(false);
   const [metaValidationError, setMetaValidationError] = useState('');
   const [connectionAnimation, setConnectionAnimation] = useState(null);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const { userProfile, loadUserProfile } = useAuth();
   const lastSavedMetaRef = useRef(null);
+  const lastHydratedMetaRef = useRef('');
+  const hydratingMetaRef = useRef(false);
   const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
   const isConfigured = isMetaActive || hasExistingConnection;
-  const metaInputsLocked = isConfigured && !credentialsUnlocked;
+  const metaInputsLocked = isConfigured;
 
   const isNumericMetaId = (value) => /^\d+$/.test(String(value || '').trim());
 
@@ -94,25 +95,37 @@ const Settings = () => {
   };
 
   const hydrateProfile = async () => {
+    if (hydratingMetaRef.current) return;
+    hydratingMetaRef.current = true;
     setLoadingProfile(true);
 
     try {
       const { authUser, userId: activeUserId } = await getActiveAccount();
+      if (lastHydratedMetaRef.current === activeUserId) {
+        return;
+      }
       const profile = userProfile?.id
         ? userProfile
         : await loadUserProfile(activeUserId, { force: false });
       let fetchedData = profile || {};
       const cachedMeta = readCachedMetaConnection(activeUserId);
       const lastSavedMeta = lastSavedMetaRef.current || {};
+      const hasUsableCachedMeta = Boolean(
+        cachedMeta.isConnected &&
+        cachedMeta.whatsappPhoneNumberId &&
+        cachedMeta.whatsappBusinessAccountId
+      );
 
-      try {
-        const res = await api.get(`${API_BASE_URL}/settings/meta-connection`);
-        fetchedData = {
-          ...fetchedData,
-          ...(res.data?.data || res.data || {}),
-        };
-      } catch (metaFetchError) {
-        console.warn('Meta settings prefill fetch skipped:', metaFetchError?.message || metaFetchError);
+      if (!hasUsableCachedMeta) {
+        try {
+          const res = await api.get(`${API_BASE_URL}/settings/meta-connection`);
+          fetchedData = {
+            ...fetchedData,
+            ...(res.data?.data || res.data || {}),
+          };
+        } catch (metaFetchError) {
+          console.warn('Meta settings prefill fetch skipped:', metaFetchError?.message || metaFetchError);
+        }
       }
 
       const metaPhoneNumberId = fetchedData.whatsapp_phone_number_id
@@ -158,13 +171,21 @@ const Settings = () => {
         whatsappAccessToken: nextForm.whatsappAccessToken || current.whatsappAccessToken,
       }));
       setHasExistingConnection(connectionExists);
-      setCredentialsUnlocked(false);
       setConnectionStatus(
         connectionExists ? 'connected' : 'disconnected'
       );
+      if (connectionExists) {
+        writeCachedMetaConnection(activeUserId, {
+          whatsappPhoneNumberId: metaPhoneNumberId,
+          whatsappBusinessAccountId: metaWabaId,
+          whatsappAccessToken: systemUserToken || cachedMeta.whatsappAccessToken || 'CONFIGURED',
+        });
+      }
+      lastHydratedMetaRef.current = activeUserId;
     } catch {
       showToast('error', 'Failed to update connection settings. Please try again.');
     } finally {
+      hydratingMetaRef.current = false;
       setLoadingProfile(false);
     }
   };
@@ -175,6 +196,10 @@ const Settings = () => {
   }, [userProfile]);
 
   const updateField = (field, value) => {
+    if (metaInputsLocked && ['whatsappPhoneNumberId', 'whatsappBusinessAccountId', 'whatsappAccessToken'].includes(field)) {
+      return;
+    }
+
     if (field === 'whatsappPhoneNumberId' || field === 'whatsappBusinessAccountId') {
       if (/[^\d]/.test(value)) {
         setMetaValidationError('Meta IDs must be numeric. Emails or names are not valid Meta IDs.');
@@ -213,8 +238,8 @@ const Settings = () => {
 
   const handleSaveConnection = async (event) => {
     event.preventDefault();
-    if (isMetaActive && !credentialsUnlocked) {
-      showToast('error', 'Integration Active. Contact support for modifications.');
+    if (isConfigured) {
+      showToast('error', 'Meta credentials are locked. Contact Customer Support to modify your integration.');
       return;
     }
     const validationError = validateMetaIds({
@@ -256,7 +281,6 @@ const Settings = () => {
         playConnectionAnimation('success');
         setConnectionStatus('connected');
         setHasExistingConnection(true);
-        setCredentialsUnlocked(false);
         setMetaValidationError('');
         setFormData((current) => ({
           ...current,
@@ -416,65 +440,75 @@ const Settings = () => {
                 <div>
                   <p className="text-sm font-black text-emerald-800">Credentials loaded from database</p>
                   <p className="mt-1 text-xs font-semibold text-emerald-700/80">
-                    Fields are locked to prevent accidental clearing or invalid Meta IDs.
+                    Fields are locked permanently to prevent accidental clearing or invalid Meta IDs.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCredentialsUnlocked((current) => !current);
-                    setMetaValidationError('');
-                  }}
-                  className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-100 sm:w-auto"
-                >
-                  {credentialsUnlocked ? 'Lock Credentials' : 'Edit Credentials'}
-                </button>
+                <div className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 sm:w-auto">
+                  <Lock size={14} />
+                  Locked
+                </div>
               </div>
             )}
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Phone Number ID</label>
-                <div className="relative">
-                  <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <div className="relative">
+              <div className={`grid gap-5 lg:grid-cols-2 ${metaInputsLocked ? 'pointer-events-none blur-[2px] select-none' : ''}`}>
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Phone Number ID</label>
+                  <div className="relative">
+                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={formData.whatsappPhoneNumberId}
+                      onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
+                      disabled={metaInputsLocked}
+                      placeholder="Enter your WhatsApp Phone Number ID"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Business Account ID</label>
                   <input
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    value={formData.whatsappPhoneNumberId}
-                    onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
+                    value={formData.whatsappBusinessAccountId}
+                    onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
                     disabled={metaInputsLocked}
-                    placeholder="Enter your WhatsApp Phone Number ID"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                    placeholder="Enter your WABA ID"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                </div>
+
+                <div className="space-y-2 lg:col-span-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">System User Access Token</label>
+                  <input
+                    type="password"
+                    value={formData.whatsappAccessToken}
+                    onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
+                    disabled={metaInputsLocked}
+                    placeholder="EAAMz..."
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Business Account ID</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={formData.whatsappBusinessAccountId}
-                  onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
-                  disabled={metaInputsLocked}
-                  placeholder="Enter your WABA ID"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                />
-              </div>
-
-              <div className="space-y-2 lg:col-span-2">
-                <label className="text-xs font-black uppercase tracking-widest text-slate-400">System User Access Token</label>
-                <input
-                  type="password"
-                  value={formData.whatsappAccessToken}
-                  onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
-                  disabled={metaInputsLocked}
-                  placeholder="EAAMz..."
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                />
-              </div>
+              {metaInputsLocked && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-white/45 backdrop-blur-[1px]">
+                  <div className="rounded-3xl border border-emerald-200 bg-white/95 px-6 py-5 text-center shadow-xl shadow-emerald-100">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                      <Lock size={28} />
+                    </div>
+                    <p className="mt-3 text-sm font-black text-slate-900">Meta credentials locked</p>
+                    <p className="mt-1 max-w-xs text-xs font-semibold leading-5 text-slate-500">
+                      Only Customer Support can modify this saved Meta connection.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {metaValidationError && (
@@ -490,7 +524,7 @@ const Settings = () => {
 
               {metaInputsLocked ? (
                 <div className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-black text-emerald-800 sm:w-auto">
-                  Integration active. Use Edit Credentials to update Meta IDs.
+                  Integration active. Contact Customer Support to update Meta IDs.
                 </div>
               ) : (
                 <button
