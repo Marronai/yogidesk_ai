@@ -568,18 +568,22 @@ exports.sendTestMessage = async (req, res) => {
 
         const response = await axios.post(url, data, config);
 
-        console.log("Message Sent ID:", response.data.messages[0].id);
+        const metaMessageId = response.data?.messages?.[0]?.id || null;
+        console.log("Message Sent ID:", metaMessageId);
 
         // --- REAL-TIME INBOX LOGGING ---
         try {
             const activePhone = String(req.body.patientPhone || req.body.phone || req.body.phoneNumber || '').replace(/\D/g, '');
             const activeName = req.body.patientName || req.body.name || 'Patient';
+            const ownerId = req.body.userId || req.body.doctorId || doctorId;
+            const nowIso = new Date().toISOString();
 
             // 1. Upsert into inbox_chats so the row definitely exists
-            const { data: chatRow, error: chatError } = await supabase
+            let chatResult = await supabase
                 .from('inbox_chats')
                 .upsert({
-                    doctor_id: req.body.doctorId || req.body.userId || doctorId,
+                    user_id: ownerId,
+                    doctor_id: ownerId,
                     phone: activePhone,
                     patient_phone: activePhone,
                     name: activeName,
@@ -587,10 +591,39 @@ exports.sendTestMessage = async (req, res) => {
                     last_message: req.body.templateText || 'Template Sent',
                     status: 'SENT',
                     unread_count: 0,
-                    updated_at: new Date().toISOString()
+                    updated_at: nowIso,
+                    metadata: {
+                        last_template: {
+                            message_id: metaMessageId,
+                            meta_message_id: metaMessageId,
+                            template_name: req.body.templateName || 'hello_world',
+                            delivery_status: 'SENT',
+                            sent_at: nowIso
+                        }
+                    }
                 }, { onConflict: 'phone' })
                 .select()
                 .single();
+
+            if (chatResult.error && isSchemaCacheError(chatResult.error)) {
+                chatResult = await supabase
+                    .from('inbox_chats')
+                    .upsert({
+                        doctor_id: ownerId,
+                        phone: activePhone,
+                        patient_phone: activePhone,
+                        name: activeName,
+                        patient_name: activeName,
+                        last_message: req.body.templateText || 'Template Sent',
+                        status: 'SENT',
+                        unread_count: 0,
+                        updated_at: nowIso
+                    }, { onConflict: 'phone' })
+                    .select()
+                    .single();
+            }
+
+            const chatRow = chatResult.data;
 
             // 2. Insert the outbound message directly into inbox_messages
             const absoluteMessageRow = {
@@ -601,9 +634,34 @@ exports.sendTestMessage = async (req, res) => {
                 sender: 'doctor',
                 from_me: true,
                 type: 'template',
-                created_at: new Date().toISOString()
+                message_type: 'text',
+                status: 'SENT',
+                workspace_id: ownerId,
+                sender_id: ownerId,
+                sender_phone: phoneId,
+                receiver_phone: activePhone,
+                metadata: {
+                    message_id: metaMessageId,
+                    meta_message_id: metaMessageId,
+                    delivery_status: 'SENT',
+                    template_name: req.body.templateName || 'hello_world',
+                    sent_at: nowIso
+                },
+                created_at: nowIso
             };
-            await supabase.from('inbox_messages').insert(absoluteMessageRow);
+            const messageInsert = await supabase.from('inbox_messages').insert(absoluteMessageRow);
+            if (messageInsert.error && isSchemaCacheError(messageInsert.error)) {
+                await supabase.from('inbox_messages').insert({
+                    chat_id: chatRow?.id,
+                    body: absoluteMessageRow.body,
+                    text: absoluteMessageRow.text,
+                    message_body: absoluteMessageRow.message_body,
+                    sender: 'doctor',
+                    from_me: true,
+                    type: 'template',
+                    created_at: nowIso
+                });
+            }
         } catch (dbError) {
             console.error("Database Backfill Failed:", dbError);
         }
