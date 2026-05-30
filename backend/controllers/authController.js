@@ -7,6 +7,7 @@ const { supabase } = require('../config/supabase');
 
 const { sendDirectBrandMail } = require('../services/mailService');
 const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
+const { ensurePremiumTrialProfile } = require('../services/trialService');
 
 const runSupabaseOperation = async (operationPromise) => {
   const timeoutPromise = new Promise((_, reject) => {
@@ -132,6 +133,17 @@ exports.register = async (req, res) => {
       otp,
       otpExpires
       // currentSessionId: crypto.randomBytes(16).toString('hex')
+    });
+
+    await ensurePremiumTrialProfile(supabase, {
+      userId: String(user._id),
+      email,
+      name,
+      businessName: businessName || `${name}'s Clinic`,
+      businessCategory: businessCategory || businessType || 'Clinic',
+      phone: phone || ''
+    }).then(({ error }) => {
+      if (error) console.error('Premium trial profile seed failed:', error.message || error);
     });
 
     const welcomeHTML = getWelcomeEmailHTML(name);
@@ -337,6 +349,16 @@ exports.googleLogin = async (req, res) => {
         wallet: { balance: 50, is_first_recharge: true },
         isVerified: true
         // currentSessionId: crypto.randomBytes(16).toString('hex')
+      });
+      await ensurePremiumTrialProfile(supabase, {
+        userId: String(user._id),
+        email,
+        name,
+        businessName: user.businessName || `${name}'s Clinic`,
+        businessCategory: user.businessCategory || 'Clinic',
+        phone: user.phone || ''
+      }).then(({ error }) => {
+        if (error) console.error('Google premium trial profile seed failed:', error.message || error);
       });
       sendWelcomeEmail(user.email, user.name, user.businessName);
     }

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, FileText, Trash2, ShieldCheck, AlertCircle, ExternalLink, Inbox, Globe, Copy, Wallet, Sparkles, Layers, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, X, Upload, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import api from '../utils/api';
-import { calculateCampaignCost, MEDICAL_SPECIALTIES } from '../constants/templateLibrary';
+import { BASELINE_MEDICAL_TEMPLATES, calculateCampaignCost, MEDICAL_SPECIALTIES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext'; // Import useWallet hook
 import { useAuth } from '../context/AuthContext';
 
@@ -89,14 +89,15 @@ const TemplateManager = () => {
         ...(activeLang.toLowerCase() !== 'all' && { language: activeLang })
       };
       const response = await api.get('/templates/dashboard', { params });
-      setDashboardTemplates(Array.isArray(response.data?.templates) ? response.data.templates : []);
+      const templates = Array.isArray(response.data?.templates) ? response.data.templates : [];
+      setDashboardTemplates(templates.length ? templates : BASELINE_MEDICAL_TEMPLATES);
       setDashboardSpecialization(response.data?.specialization || userProfile?.specialization || '');
       setBookingLink(response.data?.bookingLink || userProfile?.booking_link || '');
       setError('');
     } catch (err) {
       console.error('Dashboard template library failed:', err);
       setError(err?.response?.data?.message || 'Unable to load specialization templates.');
-      setDashboardTemplates([]);
+      setDashboardTemplates(BASELINE_MEDICAL_TEMPLATES);
     } finally {
       setLibraryLoading(false);
     }

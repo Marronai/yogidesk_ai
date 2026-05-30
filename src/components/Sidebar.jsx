@@ -12,6 +12,7 @@ import {
   Settings,
   Users,
   Wallet,
+  ChevronDown,
 } from 'lucide-react';
 import { getWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
@@ -28,6 +29,8 @@ const Sidebar = () => {
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
   const [lifetimeCount, setLifetimeCount] = useState(0);
+  const [quickRechargeOpen, setQuickRechargeOpen] = useState(false);
+  const [quickRechargeLoading, setQuickRechargeLoading] = useState(false);
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Team Member',
@@ -59,6 +62,7 @@ const Sidebar = () => {
   }, []);
 
   const isStaff = profile.role === 'STAFF';
+  const isWalletLow = Number(wallet.balance || 0) < 20;
   const isActive = (path) => {
     if (path === '/templates') return location.pathname === '/templates' || location.pathname === '/templates/create';
     return location.pathname === path;
@@ -85,6 +89,51 @@ const Sidebar = () => {
       icon: Users
     },
   ].filter(Boolean);
+
+  const openPayuRecharge = async (amount) => {
+    if (quickRechargeLoading) return;
+    try {
+      setQuickRechargeLoading(true);
+      const { data } = await supabase.auth.getUser();
+      const userId = data?.user?.id || localStorage.getItem('user_id');
+      const email = data?.user?.email || localStorage.getItem('user_email') || '';
+      const phone = data?.user?.user_metadata?.phone || localStorage.getItem('user_phone') || '';
+
+      if (!userId || !email) throw new Error('Please login again before recharging.');
+
+      const response = await api.post('/payments/initiate-payu', {
+        userId,
+        amount,
+        firstname: profile.name || 'Yogi Desk User',
+        email,
+        phone,
+      });
+
+      const payuPayload = response.data?.payload;
+      if (!response.data?.success || !payuPayload?.hash) throw new Error(response.data?.msg || 'Unable to open checkout.');
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = response.data.checkoutUrl;
+      form.target = '_self';
+      form.style.display = 'none';
+
+      Object.entries(payuPayload).forEach(([key, value]) => {
+        if (value === undefined || value === null) return;
+        const field = document.createElement('input');
+        field.type = 'hidden';
+        field.name = key;
+        field.value = String(value);
+        form.appendChild(field);
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+    } catch (error) {
+      alert(error.message || 'Unable to start quick recharge.');
+      setQuickRechargeLoading(false);
+    }
+  };
 
   return (
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0 z-40 flex-shrink-0 font-sans">
@@ -117,14 +166,41 @@ const Sidebar = () => {
               Recharge Credits
               <span aria-hidden="true">&gt;</span>
             </Link>
+            {isWalletLow && (
+              <div className="mt-3 rounded-xl border border-orange-200 bg-white p-3">
+                <button
+                  type="button"
+                  onClick={() => setQuickRechargeOpen((open) => !open)}
+                  className="flex w-full items-center justify-between text-left text-[11px] font-black uppercase tracking-widest text-orange-700"
+                >
+                  Quick Recharge
+                  <ChevronDown size={14} className={`transition ${quickRechargeOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {quickRechargeOpen && (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {[200, 500].map((amount) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        disabled={quickRechargeLoading}
+                        onClick={() => openPayuRecharge(amount)}
+                        className="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white transition hover:bg-orange-700 disabled:opacity-60"
+                      >
+                        Rs. {amount}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       <nav className="flex-1 px-4 py-2 overflow-y-auto custom-scrollbar">
         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">Main Menu</p>
-        {mainLinks.map(({ name, path, icon: Icon }) => (
-          <Link key={path} to={path} className={menuClass(path)}><Icon size={20} /><span>{name}</span></Link>
+        {mainLinks.map(({ name, path, icon }) => (
+          <Link key={path} to={path} className={menuClass(path)}>{React.createElement(icon, { size: 20 })}<span>{name}</span></Link>
         ))}
 
         {userIndustry === 'hospital' && (

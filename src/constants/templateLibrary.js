@@ -16,6 +16,44 @@ export const PRICING_RULES = {
   MARKETING: 1.30
 };
 
+export const BASELINE_MEDICAL_TEMPLATES = [
+  {
+    id: 'baseline_appointment_reminder',
+    template_name: 'Appointment Reminder',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, this is a reminder for your appointment with Dr. {{2}} on {{3}} at {{4}}. Please reply CONFIRM to secure your slot.',
+  },
+  {
+    id: 'baseline_followup_checkup',
+    template_name: 'Follow-up Check-up',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, Dr. {{2}} recommends a follow-up check-up after your recent visit. Book your convenient slot here: {{3}}',
+  },
+  {
+    id: 'baseline_lab_report_ready',
+    template_name: 'Lab Report Ready',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, your lab report from {{2}} is ready. Please visit the clinic desk or use this secure link: {{3}}',
+  },
+  {
+    id: 'baseline_medicine_reminder',
+    template_name: 'Medicine Reminder',
+    category: 'UTILITY',
+    language: 'English',
+    body_text: 'Hello {{1}}, this is your medicine reminder from {{2}}. Please take your prescribed dose at {{3}} and contact us if symptoms change.',
+  },
+  {
+    id: 'baseline_health_camp',
+    template_name: 'Health Camp Invite',
+    category: 'MARKETING',
+    language: 'English',
+    body_text: 'Dear {{1}}, {{2}} is hosting a preventive health check-up camp on {{3}}. Reply BOOK to reserve your consultation slot.',
+  },
+];
+
 export const TEMPLATE_DATA = {
   Dentist: [
     {

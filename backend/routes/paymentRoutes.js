@@ -12,7 +12,9 @@ const PAYU_TEST_MERCHANT_SALT = 'eCw7YixuWn';
 const isPayuSandbox = String(process.env.PAYU_SANDBOX_MODE || 'true').toLowerCase() !== 'false';
 const PAYU_CHECKOUT_URL = process.env.PAYU_CHECKOUT_URL || (isPayuSandbox ? 'https://test.payu.in/_payment' : 'https://secure.payu.in/_payment');
 const FRONTEND_WALLET_URL = 'https://yogidesk-ai.com/dashboard/wallet';
+const FRONTEND_PRICING_URL = 'https://yogidesk-ai.com/pricing';
 const API_BASE_URL = 'https://api.yogidesk-ai.com';
+const { activateSubscriptionTier } = require('../services/trialService');
 
 const sha512 = (value) => crypto.createHash('sha512').update(value).digest('hex');
 const getPayuCredentials = () => ({
@@ -37,8 +39,8 @@ router.post('/initiate-payu', async (req, res) => {
     const firstname = String(req.body?.firstname || 'Yogi Desk User').trim();
     const email = String(req.body?.email || '').trim();
     const phone = String(req.body?.phone || '').trim();
-    const udf1 = '';
-    const udf2 = '';
+    const udf1 = String(req.body?.purpose || '').trim();
+    const udf2 = String(req.body?.tier || '').trim();
     const udf3 = '';
     const udf4 = '';
     const udf5 = '';
@@ -92,10 +94,15 @@ router.post('/payu-success', async (req, res) => {
     const firstname = String(req.body?.firstname || '').trim();
     const email = String(req.body?.email || '').trim();
     const productinfo = String(req.body?.productinfo || '').trim();
+    const udf1 = String(req.body?.udf1 || '').trim();
+    const udf2 = String(req.body?.udf2 || '').trim();
+    const udf3 = String(req.body?.udf3 || '').trim();
+    const udf4 = String(req.body?.udf4 || '').trim();
+    const udf5 = String(req.body?.udf5 || '').trim();
     const incomingHash = String(req.body?.hash || '').trim();
     const userId = productinfo;
 
-    const reverseHashString = `${salt}|${status}|||||||||||${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
+    const reverseHashString = `${salt}|${status}||||||${udf5}|${udf4}|${udf3}|${udf2}|${udf1}|${email}|${firstname}|${productinfo}|${amount}|${txnid}|${key}`;
     const calculatedHash = sha512(reverseHashString);
 
     if (!incomingHash || calculatedHash !== incomingHash) {
@@ -128,6 +135,27 @@ router.post('/payu-success', async (req, res) => {
     }
     if (existingTransaction?.id) {
       return res.redirect(`${FRONTEND_WALLET_URL}?payment=success&amt=${encodeURIComponent(amount)}`);
+    }
+
+    if (udf1 === 'subscription') {
+      await activateSubscriptionTier({ db, userId, tier: udf2 || 'GROWTH', paymentReference: txnid });
+      await db.from('wallet_transactions').insert([{
+        user_id: userId,
+        amount: paidAmount,
+        transaction_type: 'SUBSCRIPTION',
+        description: `PayU subscription activation successful: ${txnid}`,
+        metadata: {
+          provider: 'payu',
+          txnid,
+          email,
+          firstname,
+          tier: udf2 || 'GROWTH',
+        },
+        created_at: new Date().toISOString(),
+      }]).then(({ error }) => {
+        if (error) console.error('PayU subscription transaction log failed:', error.message || error);
+      });
+      return res.redirect(`${FRONTEND_PRICING_URL}?subscription=success&tier=${encodeURIComponent(udf2 || 'GROWTH')}`);
     }
 
     const { data: walletRow, error: walletError } = await db

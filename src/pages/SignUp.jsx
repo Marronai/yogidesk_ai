@@ -4,7 +4,7 @@ import {
   User, Building, Mail, Lock, Phone, ArrowRight, Loader2, 
   Star, CheckCircle, Eye, EyeOff, Briefcase 
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import * as FramerMotion from 'framer-motion';
 import { getOAuthRedirectUrl, handleGoogleSignIn, supabase } from '../config/supabaseClient';
 
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
@@ -79,8 +79,8 @@ const SignUp = () => {
       balance: 50.00,
       is_first_recharge: true,
       welcome_gift_active: true,
-      current_plan: 'starter',
-      plan_tier: 'starter',
+      current_plan: 'growth',
+      plan_tier: 'Growth Clinic',
     };
     const walletConflictTarget = 'user_id';
 
@@ -92,11 +92,43 @@ const SignUp = () => {
 
   };
 
+  const ensurePremiumTrialProfile = async (userId, email = formData.email) => {
+    if (!userId) return;
+
+    const now = new Date();
+    const trialEndAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const profilePayload = {
+      id: userId,
+      email: email.trim().toLowerCase(),
+      name: formData.name.trim() || 'Doctor',
+      clinic_name: formData.businessName.trim(),
+      business_name: formData.businessName.trim(),
+      business_category: formData.businessCategory,
+      phone_number: formData.phone.replace(/\D/g, '').slice(-10),
+      subscription_tier: 'GROWTH',
+      subscription_status: 'trialing',
+      trial_start_at: now.toISOString(),
+      trial_end_at: trialEndAt.toISOString(),
+      wallet_balance: 50.00,
+      onboarding_tour_completed: false,
+      plan_limits: { patient_limit: 2000, staff_limit: 3, template_limit: 50 },
+      updated_at: now.toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('doctor_profiles')
+      .upsert(profilePayload, { onConflict: 'id', ignoreDuplicates: true });
+
+    if (error) console.warn('Premium trial profile seed deferred to backend:', error.message);
+  };
+
   const triggerWelcomeEmail = (email = formData.email, userId = pendingUser?.id) => {
     const payload = {
       email: email.trim().toLowerCase(),
       name: formData.name.trim(),
       businessName: formData.businessName.trim(),
+      businessCategory: formData.businessCategory,
+      phone: formData.phone.replace(/\D/g, '').slice(-10),
       userId,
       template: 'welcome'
     };
@@ -233,6 +265,7 @@ const SignUp = () => {
 
         if (pendingUser?.id) {
           await ensureSignupWallet(pendingUser.id);
+          await ensurePremiumTrialProfile(pendingUser.id, otpEmail);
           triggerWelcomeEmail(otpEmail, pendingUser.id);
           handleAuthSuccess(pendingUser);
           return;
@@ -257,6 +290,7 @@ const SignUp = () => {
         const verifiedUser = data?.session?.user || data?.user;
         if (verifiedUser?.id) {
           await ensureSignupWallet(verifiedUser.id);
+          await ensurePremiumTrialProfile(verifiedUser.id, cleanEmail);
           triggerWelcomeEmail(cleanEmail, verifiedUser.id);
         }
 
@@ -305,7 +339,7 @@ const SignUp = () => {
         <div className="absolute top-[-20%] left-[-20%] w-[600px] h-[600px] bg-[#FF6B00] rounded-full blur-[150px] opacity-20 animate-pulse"></div>
         <div className="absolute bottom-[-20%] right-[-20%] w-[600px] h-[600px] bg-blue-600 rounded-full blur-[150px] opacity-20"></div>
 
-        <motion.div 
+        <FramerMotion.motion.div 
           initial={{ opacity: 0, x: -30 }} 
           animate={{ opacity: 1, x: 0 }} 
           className="relative z-10 max-w-lg text-white"
@@ -327,12 +361,12 @@ const SignUp = () => {
                 </li>
              ))}
           </ul>
-        </motion.div>
+        </FramerMotion.motion.div>
       </div>
 
       {/* RIGHT SIDE: SIGNUP FORM */}
       <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-6 lg:p-12 bg-white overflow-y-auto">
-        <motion.div 
+        <FramerMotion.motion.div 
           initial={{ opacity: 0, y: 20 }} 
           animate={{ opacity: 1, y: 0 }} 
           className="w-full max-w-md z-10 py-10"
@@ -525,7 +559,7 @@ const SignUp = () => {
               Login
             </Link>
           </p>
-        </motion.div>
+        </FramerMotion.motion.div>
       </div>
     </div>
   );

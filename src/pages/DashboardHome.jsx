@@ -16,7 +16,7 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Bar,
   BarChart as RechartsBarChart,
@@ -162,6 +162,7 @@ const TemplateStatusRing = ({ approved, pending, rejected }) => {
 };
 
 const DashboardHome = () => {
+  const navigate = useNavigate();
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
   const [walletBalance, setWalletBalance] = useState(0);
@@ -183,6 +184,7 @@ const DashboardHome = () => {
   });
   const [templateStats, setTemplateStats] = useState({ approved: 0, pending: 0, rejected: 0 });
   const [messageHistory, setMessageHistory] = useState(() => buildSevenDayWindow());
+  const [guidedTour, setGuidedTour] = useState({ open: false, step: 0 });
 
   useEffect(() => {
     const storageKey = 'dashboard_greeting_shown';
@@ -190,7 +192,8 @@ const DashboardHome = () => {
     if (!isDashboardInitialized) return;
     if (localStorage.getItem(storageKey) === todayKey) return;
     localStorage.setItem(storageKey, todayKey);
-    setShowWelcome(true);
+    const timer = window.setTimeout(() => setShowWelcome(true), 0);
+    return () => window.clearTimeout(timer);
   }, [isDashboardInitialized]);
 
   useEffect(() => {
@@ -217,6 +220,7 @@ const DashboardHome = () => {
 
       const [
         walletResult,
+        trialProfileResult,
         usageResult,
         leadsTodayResult,
         currentCampaignRows,
@@ -231,6 +235,10 @@ const DashboardHome = () => {
       ] = await Promise.all([
         safeFetch(
           () => supabase.from('wallets').select('balance,is_first_recharge,welcome_gift_active').eq('user_id', userId).maybeSingle(),
+          { data: null }
+        ),
+        safeFetch(
+          () => api.get(backendPath('/api/profile/trial'), { params: { userId } }),
           { data: null }
         ),
         safeFetch(
@@ -339,6 +347,12 @@ const DashboardHome = () => {
         setWalletBalance(toMoneyNumber(savedWallet.balance));
       }
 
+      const tourCompleted = trialProfileResult?.data?.profile?.onboarding_tour_completed;
+      const localTourCompleted = localStorage.getItem(`onboarding_tour_completed_${userId}`) === 'true';
+      if (tourCompleted === false && !localTourCompleted) {
+        setGuidedTour({ open: true, step: 0 });
+      }
+
       const currentRows = Array.isArray(currentCampaignRows?.data) ? currentCampaignRows.data : [];
       const previousRows = Array.isArray(previousCampaignRows?.data) ? previousCampaignRows.data : [];
       const weeklyCampaignTotal = sumCampaignRows(currentRows);
@@ -397,6 +411,37 @@ const DashboardHome = () => {
   const weeklyTrendUp = stats.weeklySent >= stats.lastWeekSent;
   const totalTemplates = templateStats.approved + templateStats.pending + templateStats.rejected;
   const chartTotal = useMemo(() => messageHistory.reduce((total, item) => total + Number(item.total || 0), 0), [messageHistory]);
+  const tourSteps = [
+    {
+      title: 'Connect Meta configurations',
+      body: 'Add your WhatsApp phone number ID, WABA ID, and system token so Yogi Desk can send approved clinical messages.',
+      action: 'Open Settings',
+      path: '/dashboard/settings',
+    },
+    {
+      title: 'Append a recipient',
+      body: 'Add one patient contact to your workspace. This gives your clinic a real test recipient before larger broadcasts.',
+      action: 'Add Patient',
+      path: '/dashboard/contacts',
+    },
+    {
+      title: 'Hit a quick test transmission',
+      body: 'Use a pre-approved template and send a controlled test message before inviting the rest of your team.',
+      action: 'Open Templates',
+      path: '/templates',
+    },
+  ];
+  const closeGuidedTour = async ({ completed = false } = {}) => {
+    const { data } = await supabase.auth.getUser().catch(() => ({ data: null }));
+    const userId = normalizeSupabaseId(data?.user?.id || localStorage.getItem('user_id'));
+    if (isCleanFilterValue(userId)) {
+      localStorage.setItem(`onboarding_tour_completed_${userId}`, String(completed));
+      if (completed) {
+        api.post(backendPath('/api/profile/onboarding-tour-complete'), { userId }).catch(() => {});
+      }
+    }
+    setGuidedTour({ open: false, step: 0 });
+  };
 
   return (
     <div className="space-y-8 pb-10">
@@ -435,6 +480,57 @@ const DashboardHome = () => {
                 onClick={() => setShowWelcome(false)}
               >
                 Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {guidedTour.open && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/40 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+          <div className="w-full max-w-xl rounded-t-[2rem] border border-orange-100 bg-white p-6 shadow-2xl sm:rounded-[2rem]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-orange-600">Guided onboarding</p>
+                <h2 className="mt-2 text-2xl font-black text-slate-950">{tourSteps[guidedTour.step].title}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => closeGuidedTour({ completed: false })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 hover:bg-slate-50"
+              >
+                Skip
+              </button>
+            </div>
+            <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">{tourSteps[guidedTour.step].body}</p>
+            <div className="mt-5 flex gap-2">
+              {tourSteps.map((step, index) => (
+                <div key={step.title} className={`h-2 flex-1 rounded-full ${index <= guidedTour.step ? 'bg-orange-600' : 'bg-slate-100'}`} />
+              ))}
+            </div>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  const current = tourSteps[guidedTour.step];
+                  navigate(current.path);
+                }}
+                className="rounded-2xl border border-orange-200 bg-orange-50 px-5 py-3 text-sm font-black text-orange-700 hover:bg-orange-100"
+              >
+                {tourSteps[guidedTour.step].action}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (guidedTour.step >= tourSteps.length - 1) {
+                    closeGuidedTour({ completed: true });
+                    return;
+                  }
+                  setGuidedTour((current) => ({ ...current, step: current.step + 1 }));
+                }}
+                className="rounded-2xl bg-[#FF6A00] px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-600"
+              >
+                {guidedTour.step >= tourSteps.length - 1 ? 'Finish Tour' : 'Next Step'}
               </button>
             </div>
           </div>

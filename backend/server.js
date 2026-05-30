@@ -19,6 +19,11 @@ const adminControlRoutes = require('./routes/adminControlRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
+const {
+    activateSubscriptionTier,
+    ensurePremiumTrialProfile,
+    startTrialReminderJob
+} = require('./services/trialService');
 
 const app = express();
 
@@ -282,17 +287,28 @@ app.post('/api/patients/bulk', attachDoctorSession, addPatients);
 
 app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     try {
-        const { email, name, businessName, userId } = req.body || {};
+        const { email, name, businessName, businessCategory, phone, userId } = req.body || {};
         if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
 
         if (supabaseAdmin && userId) {
+            await ensurePremiumTrialProfile(supabaseAdmin, {
+                userId,
+                email,
+                name: name || 'Doctor',
+                businessName,
+                businessCategory,
+                phone
+            }).then(({ error }) => {
+                if (error) console.error('Premium trial profile seed failed:', error.message || error);
+            });
+
             await supabaseAdmin.from('wallets').upsert({
                 user_id: userId,
                 balance: 50.00,
                 is_first_recharge: true,
                 welcome_gift_active: true,
-                current_plan: 'starter',
-                plan_tier: 'starter',
+                current_plan: 'growth',
+                plan_tier: 'Growth Clinic',
                 lifetime_contacts_count: 0
             }, { onConflict: 'user_id', ignoreDuplicates: true });
         }
@@ -302,6 +318,88 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     } catch (error) {
         console.error('Welcome email dispatch error:', error.message);
         return res.status(202).json({ success: false });
+    }
+});
+
+app.get('/api/profile/trial', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = req.user?.id || req.query?.userId;
+        if (!db?.from || !userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
+
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id,email,name,subscription_tier,subscription_status,trial_start_at,trial_end_at,wallet_balance,onboarding_tour_completed,plan_limits')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (error) throw error;
+
+        const trialEnd = data?.trial_end_at ? new Date(data.trial_end_at) : null;
+        const remainingMs = trialEnd ? trialEnd.getTime() - Date.now() : null;
+        return res.status(200).json({
+            success: true,
+            profile: data || null,
+            remainingHours: remainingMs === null ? null : Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))),
+            shouldShowRetentionModal: Boolean(data && ['trialing', 'trial'].includes(String(data.subscription_status || '').toLowerCase()) && remainingMs !== null && remainingMs <= 48 * 60 * 60 * 1000 && remainingMs > 0)
+        });
+    } catch (error) {
+        console.error('Trial profile fetch failed:', error.message || error);
+        return res.status(500).json({ success: false, msg: 'Unable to load trial profile.' });
+    }
+});
+
+app.post('/api/profile/onboarding-tour-complete', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = req.user?.id || req.body?.userId;
+        if (!db?.from || !userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
+
+        const { error } = await db
+            .from('doctor_profiles')
+            .update({ onboarding_tour_completed: true, updated_at: new Date().toISOString() })
+            .eq('id', userId);
+        if (error) throw error;
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error('Onboarding completion failed:', error.message || error);
+        return res.status(202).json({ success: false });
+    }
+});
+
+app.post('/api/subscriptions/activate', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = req.user?.id || req.body?.userId;
+        const tier = req.body?.tier;
+        const paymentReference = String(req.body?.paymentReference || req.body?.txnid || '').trim();
+        const paymentValidated = req.body?.paymentValidated === true || String(req.body?.status || '').toLowerCase() === 'success';
+
+        if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
+        if (!paymentValidated && !paymentReference) {
+            return res.status(402).json({ success: false, msg: 'Payment validation is required before subscription activation.' });
+        }
+
+        if (paymentReference) {
+            const { data: paymentRecord, error: paymentLookupError } = await db
+                .from('wallet_transactions')
+                .select('id')
+                .eq('user_id', userId)
+                .or(`metadata->>txnid.eq.${paymentReference},id.eq.${paymentReference}`)
+                .maybeSingle();
+
+            if (paymentLookupError) console.warn('Subscription payment lookup skipped:', paymentLookupError.message || paymentLookupError);
+            if (!paymentValidated && !paymentRecord?.id) {
+                return res.status(402).json({ success: false, msg: 'Unable to validate this payment reference.' });
+            }
+        }
+
+        const profile = await activateSubscriptionTier({ db, userId, tier, paymentReference });
+        return res.status(200).json({ success: true, profile });
+    } catch (error) {
+        console.error('Subscription activation failed:', error.message || error);
+        return res.status(500).json({ success: false, msg: 'Unable to activate subscription.' });
     }
 });
 
@@ -3773,6 +3871,12 @@ const processCampaignQueue = async () => {
 };
 
 setInterval(processCampaignQueue, 10000);
+
+startTrialReminderJob({
+    db: supabaseAdmin || supabase,
+    sendDirectEmail,
+    intervalMs: Number(process.env.TRIAL_REMINDER_INTERVAL_MS || 24 * 60 * 60 * 1000)
+});
 
 if (process.env.DISABLE_META_SYNC_WORKER !== 'true') {
     startMetaSyncWorker({ supabase: supabaseAdmin || supabase });
