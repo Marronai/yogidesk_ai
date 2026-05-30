@@ -8,7 +8,13 @@ const corsHeaders = {
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') || '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  }
 );
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -223,7 +229,114 @@ const extractMessage = (payload) => {
   };
 };
 
-serve(async (req) => {
+const processWebhookPayload = async (payload) => {
+  const statuses = extractStatuses(payload);
+  for (const status of statuses) await updateDeliveryStatus(status);
+
+  const { fromPhone, clinicMetaId, messageText, patientName, currentAdminId, messageId } = extractMessage(payload);
+
+  if (!fromPhone || !messageText) return;
+
+  const workspaceId = await resolveWorkspaceId(clinicMetaId, currentAdminId, fromPhone);
+  if (!workspaceId) return;
+
+  const { data: existingPatient } = await supabase
+    .from('patients_ledger')
+    .select('id')
+    .eq('phone', fromPhone)
+    .maybeSingle();
+
+  if (!existingPatient) {
+    await supabase.from('patients_ledger').insert([{
+      user_id: workspaceId,
+      name: patientName,
+      phone: fromPhone,
+      appointment_time: null,
+    }]);
+  }
+
+  let chatId = null;
+  const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], fromPhone);
+  const { data: existingChat } = await supabase
+    .from('inbox_chats')
+    .select('id, unread_count, metadata')
+    .or(phoneFilter)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingChat?.id) {
+    chatId = existingChat.id;
+    const existingMetadata = existingChat.metadata || {};
+    await supabase
+      .from('inbox_chats')
+      .update({
+        user_id: workspaceId,
+        doctor_id: workspaceId,
+        name: patientName,
+        patient_name: patientName,
+        patient_phone: fromPhone,
+        last_message: messageText,
+        status: 'Active',
+        unread_count: Number(existingChat.unread_count || 0) + 1,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...existingMetadata,
+          meta_message_id: messageId,
+          subscription_status: 'ACTIVE',
+          last_customer_message_at: new Date().toISOString(),
+          last_inbound_at: new Date().toISOString(),
+          whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        },
+      })
+      .eq('id', chatId);
+  } else {
+    const { data: createdChat } = await supabase
+      .from('inbox_chats')
+      .insert([{
+        user_id: workspaceId,
+        doctor_id: workspaceId,
+        name: patientName,
+        patient_name: patientName,
+        phone: fromPhone,
+        patient_phone: fromPhone,
+        last_message: messageText,
+        status: 'Active',
+        unread_count: 1,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          meta_message_id: messageId,
+          subscription_status: 'ACTIVE',
+          last_customer_message_at: new Date().toISOString(),
+          last_inbound_at: new Date().toISOString(),
+          whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        },
+      }])
+      .select('id')
+      .maybeSingle();
+    chatId = createdChat?.id || null;
+  }
+
+  await supabase.from('inbox_messages').insert([{
+    chat_id: chatId,
+    workspace_id: workspaceId,
+    sender_phone: fromPhone,
+    receiver_phone: clinicMetaId,
+    sender: 'user',
+    from_me: false,
+    type: 'public',
+    message_type: 'text',
+    status: 'RECEIVED',
+    body: messageText,
+    text: messageText,
+    message_text: messageText,
+    message_body: messageText,
+    is_private_note: false,
+    metadata: { inbound: true, meta_message_id: messageId },
+  }]);
+};
+
+serve((req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   if (req.method === 'GET') {
@@ -238,112 +351,23 @@ serve(async (req) => {
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405);
 
   try {
-    const payload = await req.json();
-    const statuses = extractStatuses(payload);
-    for (const status of statuses) await updateDeliveryStatus(status);
-
-    const { fromPhone, clinicMetaId, messageText, patientName, currentAdminId, messageId } = extractMessage(payload);
-
-    if (!fromPhone || !messageText) return json({ ok: true, skipped: true, statuses: statuses.length });
-
-    const workspaceId = await resolveWorkspaceId(clinicMetaId, currentAdminId, fromPhone);
-    if (!workspaceId) return json({ ok: true, skipped: true, reason: 'workspace_not_found' });
-
-    const { data: existingPatient } = await supabase
-      .from('patients_ledger')
-      .select('id')
-      .eq('phone', fromPhone)
-      .maybeSingle();
-
-    if (!existingPatient) {
-      await supabase.from('patients_ledger').insert([{
-        user_id: workspaceId,
-        name: patientName,
-        phone: fromPhone,
-        appointment_time: null,
-      }]);
-    }
-
-    let chatId = null;
-    const { data: existingChat } = await supabase
-      .from('inbox_chats')
-      .select('id, unread_count, metadata')
-      .eq('phone', fromPhone)
-      .maybeSingle();
-
-    if (existingChat?.id) {
-      chatId = existingChat.id;
-      const existingMetadata = existingChat.metadata || {};
-      await supabase
-        .from('inbox_chats')
-        .update({
-          user_id: workspaceId,
-          doctor_id: workspaceId,
-          name: patientName,
-          patient_name: patientName,
-          patient_phone: fromPhone,
-          last_message: messageText,
-          status: 'Active',
-          unread_count: Number(existingChat.unread_count || 0) + 1,
-          updated_at: new Date().toISOString(),
-          metadata: {
-            ...existingMetadata,
-            meta_message_id: messageId,
-            subscription_status: 'ACTIVE',
-            last_customer_message_at: new Date().toISOString(),
-            last_inbound_at: new Date().toISOString(),
-            whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          },
-        })
-        .eq('id', chatId);
+    const processing = req.clone().json()
+      .then(processWebhookPayload)
+      .catch((error) => console.error('whatsapp-webhook error:', error));
+    if (globalThis.EdgeRuntime?.waitUntil) {
+      globalThis.EdgeRuntime.waitUntil(processing);
     } else {
-      const { data: createdChat } = await supabase
-        .from('inbox_chats')
-        .insert([{
-          user_id: workspaceId,
-          doctor_id: workspaceId,
-          name: patientName,
-          patient_name: patientName,
-          phone: fromPhone,
-          patient_phone: fromPhone,
-          last_message: messageText,
-          status: 'Active',
-          unread_count: 1,
-          updated_at: new Date().toISOString(),
-          metadata: {
-            meta_message_id: messageId,
-            subscription_status: 'ACTIVE',
-            last_customer_message_at: new Date().toISOString(),
-            last_inbound_at: new Date().toISOString(),
-            whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          },
-        }])
-        .select('id')
-        .maybeSingle();
-      chatId = createdChat?.id || null;
+      // processing already owns its error handler; this branch keeps Deno happy outside EdgeRuntime.
     }
-
-    await supabase.from('inbox_messages').insert([{
-      chat_id: chatId,
-      workspace_id: workspaceId,
-      sender_phone: fromPhone,
-      receiver_phone: clinicMetaId,
-      sender: 'user',
-      from_me: false,
-      type: 'public',
-      message_type: 'text',
-      status: 'RECEIVED',
-      body: messageText,
-      text: messageText,
-      message_text: messageText,
-      message_body: messageText,
-      is_private_note: false,
-      metadata: { inbound: true, meta_message_id: messageId },
-    }]);
-
-    return json({ ok: true });
+    return new Response('EVENT_RECEIVED', {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+    });
   } catch (error) {
     console.error('whatsapp-webhook error:', error);
-    return json({ ok: true, accepted: true });
+    return new Response('EVENT_RECEIVED', {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+    });
   }
 });

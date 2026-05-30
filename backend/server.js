@@ -950,8 +950,8 @@ const extractMessageStatusUpdates = (payload = {}) => {
 };
 
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
-    if (!supabase?.from) return;
     const db = supabaseAdmin || supabase;
+    if (!db?.from) return;
 
     for (const update of extractMessageStatusUpdates(payload)) {
         try {
@@ -1113,8 +1113,8 @@ const extractIncomingInboxMessages = (payload = {}) => {
 };
 
 const resolveInboxOwnerForIncoming = async ({ clinicMetaId, patientPhone }) => {
-    if (!supabase?.from) return null;
     const db = supabaseAdmin || supabase;
+    if (!db?.from) return null;
 
     if (clinicMetaId) {
         const { data, error } = await db
@@ -1146,8 +1146,8 @@ const resolveInboxOwnerForIncoming = async ({ clinicMetaId, patientPhone }) => {
 };
 
 const processIncomingInboxMessagesWebhook = async (payload = {}) => {
-    if (!supabase?.from) return;
     const db = supabaseAdmin || supabase;
+    if (!db?.from) return;
 
     for (const incoming of extractIncomingInboxMessages(payload)) {
         try {
@@ -1265,6 +1265,8 @@ const handleWhatsAppWebhook = (req, res) => {
         return res.status(403).send('Invalid signature');
     }
 
+    res.status(200).send('EVENT_RECEIVED');
+
     const webhookFields = [];
     if (Array.isArray(req.body?.entry)) {
         for (const entry of req.body.entry) {
@@ -1282,7 +1284,6 @@ const handleWhatsAppWebhook = (req, res) => {
         incomingCount
     });
 
-    res.status(200).send('EVENT_RECEIVED');
     Promise.resolve()
         .then(async () => {
             await processTemplateStatusWebhook(req.body);
