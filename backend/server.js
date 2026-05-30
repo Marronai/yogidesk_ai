@@ -54,6 +54,30 @@ const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
+const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
+const getPhoneMatchParts = (value) => {
+    const digits = phoneDigitsOnly(value);
+    const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+    const variants = new Set([digits]);
+    if (last10 && last10.length === 10) {
+        variants.add(last10);
+        variants.add(`91${last10}`);
+    }
+    return {
+        digits,
+        last10,
+        variants: Array.from(variants).filter(Boolean)
+    };
+};
+const buildPhoneOrFilter = (columns = [], value) => {
+    const { last10, variants } = getPhoneMatchParts(value);
+    const filters = [];
+    for (const column of columns) {
+        for (const variant of variants) filters.push(`${column}.eq.${variant}`);
+        if (last10 && last10.length === 10) filters.push(`${column}.ilike.%${last10}`);
+    }
+    return filters.join(',');
+};
 const resolveCampaignVariableValue = (value, recipient = {}) => {
     const rawValue = String(value || '').trim();
     const token = rawValue.replace(/^\[\[|\]\]$/g, '');
@@ -87,7 +111,7 @@ const normalizeTemplateLanguage = (language) => {
     return language || 'en_US';
 };
 const sanitizeMetaPhoneNumber = (value) => {
-    const digits = String(value || '').trim().replace(/^\+/, '').replace(/\D/g, '');
+    const digits = phoneDigitsOnly(value);
     return digits.length === 10 ? `91${digits}` : digits;
 };
 const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
@@ -953,10 +977,11 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
             }
 
             if ((!Array.isArray(messages) || messages.length === 0) && update.recipientPhone) {
+                const receiverPhoneFilter = buildPhoneOrFilter(['receiver_phone'], update.recipientPhone);
                 const fallbackByPhone = await db
                     .from('inbox_messages')
                     .select('id, chat_id, metadata')
-                    .eq('receiver_phone', update.recipientPhone)
+                    .or(receiverPhoneFilter)
                     .eq('from_me', true)
                     .order('created_at', { ascending: false })
                     .limit(1);
@@ -967,10 +992,11 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
             }
 
             if ((!Array.isArray(messages) || messages.length === 0) && update.recipientPhone) {
+                const chatPhoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], update.recipientPhone);
                 const { data: chat } = await db
                     .from('inbox_chats')
                     .select('id')
-                    .or(`phone.eq.${update.recipientPhone},patient_phone.eq.${update.recipientPhone}`)
+                    .or(chatPhoneFilter)
                     .order('updated_at', { ascending: false })
                     .limit(1)
                     .maybeSingle();
@@ -1013,10 +1039,29 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                 }
 
                 if (message.chat_id) {
+                    const { data: chat } = await db
+                        .from('inbox_chats')
+                        .select('metadata')
+                        .eq('id', message.chat_id)
+                        .maybeSingle();
+                    const chatMetadata = chat?.metadata || {};
                     await db
                         .from('inbox_chats')
                         .update({
-                            status: update.status
+                            status: update.status,
+                            metadata: {
+                                ...chatMetadata,
+                                meta_message_id: update.messageId,
+                                delivery_status: update.status,
+                                subscription_status: 'ACTIVE',
+                                last_template: {
+                                    ...(chatMetadata.last_template || {}),
+                                    meta_message_id: update.messageId,
+                                    message_id: update.messageId,
+                                    delivery_status: update.status,
+                                    delivery_status_at: update.timestamp
+                                }
+                            }
                         })
                         .eq('id', message.chat_id);
                 }
@@ -1084,10 +1129,11 @@ const resolveInboxOwnerForIncoming = async ({ clinicMetaId, patientPhone }) => {
     }
 
     if (patientPhone) {
+        const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], patientPhone);
         const { data, error } = await db
             .from('inbox_chats')
             .select('user_id, doctor_id')
-            .or(`phone.eq.${patientPhone},patient_phone.eq.${patientPhone}`)
+            .or(phoneFilter)
             .order('updated_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -1122,6 +1168,8 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             const existingMetadata = existingChat?.metadata || {};
             const nextMetadata = {
                 ...existingMetadata,
+                meta_message_id: incoming.messageId,
+                subscription_status: 'ACTIVE',
                 last_customer_message_at: nowIso,
                 last_inbound_at: nowIso,
                 whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
@@ -3586,11 +3634,12 @@ const resolveCampaignMessagePreview = (row = {}) => {
 const selectInboxChatByPhone = async (db, recipientPhone, userId) => {
     const safePhone = String(recipientPhone || '').trim();
     if (!safePhone) return { data: null, error: null };
+    const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], safePhone);
 
     let query = db
         .from('inbox_chats')
         .select('id, metadata')
-        .or(`phone.eq.${safePhone},patient_phone.eq.${safePhone}`)
+        .or(phoneFilter)
         .order('updated_at', { ascending: false })
         .limit(1);
 
@@ -3604,7 +3653,7 @@ const selectInboxChatByPhone = async (db, recipientPhone, userId) => {
         let fallbackQuery = db
             .from('inbox_chats')
             .select('id')
-            .or(`phone.eq.${safePhone},patient_phone.eq.${safePhone}`)
+            .or(phoneFilter)
             .order('updated_at', { ascending: false })
             .limit(1);
 

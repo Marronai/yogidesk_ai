@@ -17,6 +17,29 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 });
 
 const normalizePhone = (value = '') => String(value).replace(/[^\d]/g, '');
+const getPhoneMatchParts = (value = '') => {
+  const digits = normalizePhone(value);
+  const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+  const variants = new Set([digits]);
+  if (last10 && last10.length === 10) {
+    variants.add(last10);
+    variants.add(`91${last10}`);
+  }
+  return {
+    digits,
+    last10,
+    variants: Array.from(variants).filter(Boolean),
+  };
+};
+const buildPhoneOrFilter = (columns = [], value = '') => {
+  const { last10, variants } = getPhoneMatchParts(value);
+  const filters = [];
+  for (const column of columns) {
+    for (const variant of variants) filters.push(`${column}.eq.${variant}`);
+    if (last10 && last10.length === 10) filters.push(`${column}.ilike.%${last10}`);
+  }
+  return filters.join(',');
+};
 const normalizeDeliveryStatus = (value = '') => {
   const status = String(value || '').trim().toUpperCase();
   return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status : '';
@@ -64,10 +87,11 @@ const updateDeliveryStatus = async (update) => {
   }
 
   if ((!messages || messages.length === 0) && update.recipientPhone) {
+    const receiverPhoneFilter = buildPhoneOrFilter(['receiver_phone'], update.recipientPhone);
     const fallbackByPhone = await supabase
       .from('inbox_messages')
       .select('id, chat_id, metadata')
-      .eq('receiver_phone', update.recipientPhone)
+      .or(receiverPhoneFilter)
       .eq('from_me', true)
       .order('created_at', { ascending: false })
       .limit(1);
@@ -75,10 +99,11 @@ const updateDeliveryStatus = async (update) => {
   }
 
   if ((!messages || messages.length === 0) && update.recipientPhone) {
+    const chatPhoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], update.recipientPhone);
     const { data: chat } = await supabase
       .from('inbox_chats')
       .select('id')
-      .or(`phone.eq.${update.recipientPhone},patient_phone.eq.${update.recipientPhone}`)
+      .or(chatPhoneFilter)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -124,6 +149,8 @@ const updateDeliveryStatus = async (update) => {
       const lastTemplate = chatMetadata.last_template
         ? {
             ...chatMetadata.last_template,
+            meta_message_id: update.messageId,
+            message_id: update.messageId,
             delivery_status: update.status,
             delivery_status_at: update.timestamp,
             delivery_error: update.error,
@@ -134,7 +161,13 @@ const updateDeliveryStatus = async (update) => {
         .from('inbox_chats')
         .update({
           status: update.status,
-          metadata: { ...chatMetadata, ...(lastTemplate ? { last_template: lastTemplate } : {}) },
+          metadata: {
+            ...chatMetadata,
+            meta_message_id: update.messageId,
+            delivery_status: update.status,
+            subscription_status: 'ACTIVE',
+            ...(lastTemplate ? { last_template: lastTemplate } : {}),
+          },
         })
         .eq('id', message.chat_id);
     }
@@ -156,10 +189,11 @@ const resolveWorkspaceId = async (clinicMetaId, fallbackId, patientPhone) => {
   }
 
   if (patientPhone) {
+    const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], patientPhone);
     const { data } = await supabase
       .from('inbox_chats')
       .select('user_id, doctor_id')
-      .or(`phone.eq.${patientPhone},patient_phone.eq.${patientPhone}`)
+      .or(phoneFilter)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -254,6 +288,8 @@ serve(async (req) => {
           updated_at: new Date().toISOString(),
           metadata: {
             ...existingMetadata,
+            meta_message_id: messageId,
+            subscription_status: 'ACTIVE',
             last_customer_message_at: new Date().toISOString(),
             last_inbound_at: new Date().toISOString(),
             whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -275,6 +311,8 @@ serve(async (req) => {
           unread_count: 1,
           updated_at: new Date().toISOString(),
           metadata: {
+            meta_message_id: messageId,
+            subscription_status: 'ACTIVE',
             last_customer_message_at: new Date().toISOString(),
             last_inbound_at: new Date().toISOString(),
             whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
