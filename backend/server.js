@@ -1047,30 +1047,33 @@ const updateInboxMessagesByWamid = async (db, update) => {
         .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
         .select('id, chat_id, metadata');
 
-    if (!result.error) return result;
-    if (!isSchemaMismatchError(result.error)) return result;
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+    if (result.error && !isSchemaMismatchError(result.error)) return result;
 
-    console.warn('Inbox delivery status falling back to metadata WAMID match:', {
+    console.warn('Inbox delivery status falling back after direct WAMID no-match/error:', {
         messageId: update.messageId,
         status: update.status,
-        error: result.error.message || result.error
+        matched: Array.isArray(result.data) ? result.data.length : null,
+        error: result.error?.message || result.error || null
     });
 
-    result = await db
-        .from('inbox_messages')
-        .update(patch)
-        .eq('meta_message_id', update.messageId)
-        .select('id, chat_id, metadata');
+    if (result.error) {
+        result = await db
+            .from('inbox_messages')
+            .update(patch)
+            .eq('meta_message_id', update.messageId)
+            .select('id, chat_id, metadata');
 
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+        if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
 
-    result = await db
-        .from('inbox_messages')
-        .update(patch)
-        .eq('message_id', update.messageId)
-        .select('id, chat_id, metadata');
+        result = await db
+            .from('inbox_messages')
+            .update(patch)
+            .eq('message_id', update.messageId)
+            .select('id, chat_id, metadata');
 
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+        if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+    }
 
     result = await db
         .from('inbox_messages')

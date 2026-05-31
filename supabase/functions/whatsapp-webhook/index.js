@@ -109,47 +109,56 @@ const updateDeliveryStatus = async (update) => {
     .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
     .select('id, chat_id, metadata');
 
-  if (error) {
-    console.warn('delivery status direct WAMID update failed; falling back:', error);
+  if (error || !messages?.length) {
+    console.warn('delivery status direct WAMID update missed; falling back:', {
+      messageId: update.messageId,
+      status: update.status,
+      matched: messages?.length || 0,
+      error,
+    });
 
-    const metaFallback = await supabase
-      .from('inbox_messages')
-      .update(patch)
-      .eq('meta_message_id', update.messageId)
-      .select('id, chat_id, metadata');
-
-    if (!metaFallback.error && metaFallback.data?.length) {
-      messages = metaFallback.data;
-      error = null;
-    } else {
-      const messageFallback = await supabase
+    if (error) {
+      const metaFallback = await supabase
         .from('inbox_messages')
         .update(patch)
-        .eq('message_id', update.messageId)
+        .eq('meta_message_id', update.messageId)
         .select('id, chat_id, metadata');
 
-      if (!messageFallback.error && messageFallback.data?.length) {
-        messages = messageFallback.data;
+      if (!metaFallback.error && metaFallback.data?.length) {
+        messages = metaFallback.data;
         error = null;
       } else {
-        const metadataFallback = await supabase
+        const messageFallback = await supabase
           .from('inbox_messages')
           .update(patch)
-          .eq('metadata->>meta_message_id', update.messageId)
+          .eq('message_id', update.messageId)
           .select('id, chat_id, metadata');
 
-        if (!metadataFallback.error && metadataFallback.data?.length) {
-          messages = metadataFallback.data;
+        if (!messageFallback.error && messageFallback.data?.length) {
+          messages = messageFallback.data;
           error = null;
-        } else {
-          const metadataMessageFallback = await supabase
-            .from('inbox_messages')
-            .update(patch)
-            .eq('metadata->>message_id', update.messageId)
-            .select('id, chat_id, metadata');
-          messages = metadataMessageFallback.data || [];
-          error = metadataMessageFallback.error;
         }
+      }
+    }
+
+    if (!messages?.length) {
+      const metadataFallback = await supabase
+        .from('inbox_messages')
+        .update(patch)
+        .eq('metadata->>meta_message_id', update.messageId)
+        .select('id, chat_id, metadata');
+
+      if (!metadataFallback.error && metadataFallback.data?.length) {
+        messages = metadataFallback.data;
+        error = null;
+      } else {
+        const metadataMessageFallback = await supabase
+          .from('inbox_messages')
+          .update(patch)
+          .eq('metadata->>message_id', update.messageId)
+          .select('id, chat_id, metadata');
+        messages = metadataMessageFallback.data || [];
+        error = metadataMessageFallback.error;
       }
     }
   }
