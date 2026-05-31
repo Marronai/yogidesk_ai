@@ -33,13 +33,35 @@ const isMetaWebhookRequestPath = (url = '') => (
     String(url || '').startsWith('/api/webhook/meta')
 );
 
+const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
+const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-Hub-Signature-256';
+const CORS_ALLOWED_ORIGINS = new Set([
+    'https://yogidesk-ai.com',
+    'http://yogidesk-ai.com',
+    'http://localhost:5173'
+]);
+const resolveCorsOrigin = (origin) => (
+    origin && CORS_ALLOWED_ORIGINS.has(origin)
+        ? origin
+        : 'https://yogidesk-ai.com'
+);
 const corsOptions = {
-    origin: ['https://yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Hub-Signature-256'],
-    credentials: true
+    origin: (origin, callback) => callback(null, resolveCorsOrigin(origin)),
+    methods: CORS_ALLOWED_METHODS,
+    allowedHeaders: CORS_ALLOWED_HEADERS,
+    credentials: true,
+    optionsSuccessStatus: 204
 };
 
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(req.headers.origin));
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS);
+    res.setHeader('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    next();
+});
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({
@@ -1014,24 +1036,58 @@ const extractMessageStatusUpdates = (payload = {}) => {
     return updates;
 };
 
+const isSchemaMismatchError = (error) => Boolean(error && isMissingColumnError(error));
+
+const updateInboxMessagesByWamid = async (db, update) => {
+    const patch = { status: update.status };
+    let result = await db
+        .from('inbox_messages')
+        .update(patch)
+        .eq('meta_message_id', update.messageId)
+        .select('id, chat_id, metadata');
+
+    if (!result.error) return result;
+    if (!isSchemaMismatchError(result.error)) return result;
+
+    console.warn('Inbox delivery status falling back to metadata WAMID match:', {
+        messageId: update.messageId,
+        status: update.status,
+        error: result.error.message || result.error
+    });
+
+    result = await db
+        .from('inbox_messages')
+        .update(patch)
+        .filter('metadata->>meta_message_id', 'eq', update.messageId)
+        .select('id, chat_id, metadata');
+
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+
+    return db
+        .from('inbox_messages')
+        .update(patch)
+        .filter('metadata->>message_id', 'eq', update.messageId)
+        .select('id, chat_id, metadata');
+};
+
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return;
 
     for (const update of extractMessageStatusUpdates(payload)) {
         try {
-            const { data: messages, error } = await db
-                .from('inbox_messages')
-                .update({
-                    status: update.status,
-                    meta_message_id: update.messageId,
-                    message_id: update.messageId
-                })
-                .eq('meta_message_id', update.messageId)
-                .select('id, chat_id, metadata');
+            const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
 
             if (error) {
                 console.error('Inbox delivery status WAMID update failed:', error.message || error);
+                continue;
+            }
+
+            if (!Array.isArray(messages) || messages.length === 0) {
+                console.warn('Inbox delivery status WAMID update matched no rows:', {
+                    messageId: update.messageId,
+                    status: update.status
+                });
                 continue;
             }
 
@@ -1053,8 +1109,6 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                     .from('inbox_messages')
                     .update({
                         status: update.status,
-                        meta_message_id: update.messageId,
-                        message_id: update.messageId,
                         metadata: nextMetadata
                     })
                     .eq('id', message.id);
@@ -1075,6 +1129,7 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                         .from('inbox_chats')
                         .update({
                             status: update.status,
+                            updated_at: new Date().toISOString(),
                             metadata: {
                                 ...chatMetadata,
                                 meta_message_id: update.messageId,
