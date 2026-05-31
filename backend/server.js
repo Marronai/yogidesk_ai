@@ -1044,10 +1044,11 @@ const updateInboxMessagesByWamid = async (db, update) => {
     let result = await db
         .from('inbox_messages')
         .update(patch)
-        .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
+        .eq('meta_message_id', update.messageId)
         .select('id, chat_id, metadata');
 
     if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+
     if (result.error && !isSchemaMismatchError(result.error)) return result;
 
     console.warn('Inbox delivery status falling back after direct WAMID no-match/error:', {
@@ -1057,23 +1058,13 @@ const updateInboxMessagesByWamid = async (db, update) => {
         error: result.error?.message || result.error || null
     });
 
-    if (result.error) {
-        result = await db
-            .from('inbox_messages')
-            .update(patch)
-            .eq('meta_message_id', update.messageId)
-            .select('id, chat_id, metadata');
+    result = await db
+        .from('inbox_messages')
+        .update(patch)
+        .eq('message_id', update.messageId)
+        .select('id, chat_id, metadata');
 
-        if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
-
-        result = await db
-            .from('inbox_messages')
-            .update(patch)
-            .eq('message_id', update.messageId)
-            .select('id, chat_id, metadata');
-
-        if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
-    }
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
 
     result = await db
         .from('inbox_messages')

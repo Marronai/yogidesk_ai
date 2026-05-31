@@ -103,43 +103,37 @@ const extractStatuses = (payload) => {
 
 const updateDeliveryStatus = async (update) => {
   const patch = { status: update.status };
+  
+  // Try meta_message_id first
   let { data: messages, error } = await supabase
     .from('inbox_messages')
     .update(patch)
-    .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
+    .eq('meta_message_id', update.messageId)
     .select('id, chat_id, metadata');
 
+  // If not found by meta_message_id, try message_id
+  if (!error && !messages?.length) {
+    const fallback = await supabase
+      .from('inbox_messages')
+      .update(patch)
+      .eq('message_id', update.messageId)
+      .select('id, chat_id, metadata');
+
+    if (!fallback.error && fallback.data?.length) {
+      messages = fallback.data;
+      error = null;
+    } else {
+      error = fallback.error;
+    }
+  }
+
   if (error || !messages?.length) {
-    console.warn('delivery status direct WAMID update missed; falling back:', {
+    console.warn('delivery status direct WAMID update missed; falling back to metadata:', {
       messageId: update.messageId,
       status: update.status,
       matched: messages?.length || 0,
       error,
     });
-
-    if (error) {
-      const metaFallback = await supabase
-        .from('inbox_messages')
-        .update(patch)
-        .eq('meta_message_id', update.messageId)
-        .select('id, chat_id, metadata');
-
-      if (!metaFallback.error && metaFallback.data?.length) {
-        messages = metaFallback.data;
-        error = null;
-      } else {
-        const messageFallback = await supabase
-          .from('inbox_messages')
-          .update(patch)
-          .eq('message_id', update.messageId)
-          .select('id, chat_id, metadata');
-
-        if (!messageFallback.error && messageFallback.data?.length) {
-          messages = messageFallback.data;
-          error = null;
-        }
-      }
-    }
 
     if (!messages?.length) {
       const metadataFallback = await supabase
