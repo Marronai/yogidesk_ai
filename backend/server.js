@@ -66,23 +66,43 @@ const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
 const getPhoneMatchParts = (value) => {
     const digits = phoneDigitsOnly(value);
     const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
-    const variants = new Set([digits]);
+    const strippedCountryVariants = new Set([digits]);
+    if (digits.length === 12 && digits.startsWith('91')) strippedCountryVariants.add(digits.slice(2));
+    if (digits.length === 11 && digits.startsWith('1')) strippedCountryVariants.add(digits.slice(1));
+
+    const variants = new Set();
+    for (const variant of strippedCountryVariants) {
+        if (!variant) continue;
+        variants.add(variant);
+        variants.add(`+${variant}`);
+    }
     if (last10 && last10.length === 10) {
         variants.add(last10);
+        variants.add(`+${last10}`);
         variants.add(`91${last10}`);
+        variants.add(`+91${last10}`);
+        variants.add(`1${last10}`);
+        variants.add(`+1${last10}`);
     }
+    const suffixes = new Set();
+    for (const size of [12, 11, 10]) {
+        if (digits.length >= size) suffixes.add(digits.slice(-size));
+    }
+    if (last10 && last10.length === 10) suffixes.add(last10);
+
     return {
         digits,
         last10,
-        variants: Array.from(variants).filter(Boolean)
+        variants: Array.from(variants).filter(Boolean),
+        suffixes: Array.from(suffixes).filter(Boolean)
     };
 };
 const buildPhoneOrFilter = (columns = [], value) => {
-    const { last10, variants } = getPhoneMatchParts(value);
+    const { suffixes, variants } = getPhoneMatchParts(value);
     const filters = [];
     for (const column of columns) {
         for (const variant of variants) filters.push(`${column}.eq.${variant}`);
-        if (last10 && last10.length === 10) filters.push(`${column}.ilike.%${last10}`);
+        for (const suffix of suffixes) filters.push(`${column}.ilike.%${suffix}`);
     }
     return filters.join(',');
 };
@@ -122,6 +142,7 @@ const sanitizeMetaPhoneNumber = (value) => {
     const digits = phoneDigitsOnly(value);
     return digits.length === 10 ? `91${digits}` : digits;
 };
+const sanitizeMetaId = (value) => String(value || '').trim().replace(/[^\w.-]/g, '');
 const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/[<>]/g, '')
@@ -967,6 +988,7 @@ const extractMessageStatusUpdates = (payload = {}) => {
         for (const change of entry.changes) {
             if (change.field !== 'messages') continue;
             const value = change.value || {};
+            const valueMetadata = value.metadata || {};
             const statuses = Array.isArray(value.statuses) ? value.statuses : [];
 
             for (const statusRow of statuses) {
@@ -979,6 +1001,9 @@ const extractMessageStatusUpdates = (payload = {}) => {
                     status,
                     timestamp: statusRow.timestamp || null,
                     recipientPhone: sanitizeMetaPhoneNumber(statusRow.recipient_id || ''),
+                    businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
+                    phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
+                    displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
                     error: statusRow.errors?.[0] || null,
                     raw: statusRow
                 });
@@ -995,73 +1020,32 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
 
     for (const update of extractMessageStatusUpdates(payload)) {
         try {
-            let { data: messages, error } = await db
+            const { data: messages, error } = await db
                 .from('inbox_messages')
-                .select('id, chat_id, metadata')
-                .filter('metadata->>meta_message_id', 'eq', update.messageId)
-                .limit(10);
-
-            if (error || !Array.isArray(messages) || messages.length === 0) {
-                const fallback = await db
-                    .from('inbox_messages')
-                    .select('id, chat_id, metadata')
-                    .filter('metadata->>message_id', 'eq', update.messageId)
-                    .limit(10);
-                messages = fallback.data || [];
-                error = fallback.error;
-            }
+                .update({
+                    status: update.status,
+                    meta_message_id: update.messageId,
+                    message_id: update.messageId
+                })
+                .eq('meta_message_id', update.messageId)
+                .select('id, chat_id, metadata');
 
             if (error) {
-                console.error('Inbox delivery status lookup failed:', error.message || error);
+                console.error('Inbox delivery status WAMID update failed:', error.message || error);
                 continue;
-            }
-
-            if ((!Array.isArray(messages) || messages.length === 0) && update.recipientPhone) {
-                const receiverPhoneFilter = buildPhoneOrFilter(['receiver_phone'], update.recipientPhone);
-                const fallbackByPhone = await db
-                    .from('inbox_messages')
-                    .select('id, chat_id, metadata')
-                    .or(receiverPhoneFilter)
-                    .eq('from_me', true)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-
-                if (!fallbackByPhone.error) {
-                    messages = fallbackByPhone.data || [];
-                }
-            }
-
-            if ((!Array.isArray(messages) || messages.length === 0) && update.recipientPhone) {
-                const chatPhoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], update.recipientPhone);
-                const { data: chat } = await db
-                    .from('inbox_chats')
-                    .select('id')
-                    .or(chatPhoneFilter)
-                    .order('updated_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-
-                if (chat?.id) {
-                    const fallbackByChat = await db
-                        .from('inbox_messages')
-                        .select('id, chat_id, metadata')
-                        .eq('chat_id', chat.id)
-                        .eq('from_me', true)
-                        .order('created_at', { ascending: false })
-                        .limit(1);
-
-                    if (!fallbackByChat.error) {
-                        messages = fallbackByChat.data || [];
-                    }
-                }
             }
 
             for (const message of messages || []) {
                 const nextMetadata = {
                     ...(message.metadata || {}),
+                    meta_message_id: update.messageId,
+                    message_id: update.messageId,
                     delivery_status: update.status,
                     delivery_status_at: update.timestamp,
                     delivery_error: update.error,
+                    whatsapp_business_account_id: update.businessAccountId || message.metadata?.whatsapp_business_account_id || null,
+                    whatsapp_phone_number_id: update.phoneNumberId || message.metadata?.whatsapp_phone_number_id || null,
+                    display_phone_number: update.displayPhoneNumber || message.metadata?.display_phone_number || null,
                     last_meta_status: update.raw
                 };
 
@@ -1069,6 +1053,8 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                     .from('inbox_messages')
                     .update({
                         status: update.status,
+                        meta_message_id: update.messageId,
+                        message_id: update.messageId,
                         metadata: nextMetadata
                     })
                     .eq('id', message.id);
@@ -1093,13 +1079,15 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                                 ...chatMetadata,
                                 meta_message_id: update.messageId,
                                 delivery_status: update.status,
+                                whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
                                 subscription_status: 'ACTIVE',
                                 last_template: {
                                     ...(chatMetadata.last_template || {}),
                                     meta_message_id: update.messageId,
                                     message_id: update.messageId,
                                     delivery_status: update.status,
-                                    delivery_status_at: update.timestamp
+                                    delivery_status_at: update.timestamp,
+                                    whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
                                 }
                             }
                         })
@@ -1123,6 +1111,7 @@ const extractIncomingInboxMessages = (payload = {}) => {
             if (change.field !== 'messages') continue;
             const value = change.value || {};
             const metadata = value.metadata || {};
+            const businessAccountId = sanitizeMetaId(metadata.whatsapp_business_account_id || metadata.waba_id || entry.id || '');
             const contactsByWaId = new Map((value.contacts || []).map((contact) => [String(contact.wa_id || ''), contact]));
 
             for (const message of value.messages || []) {
@@ -1141,6 +1130,9 @@ const extractIncomingInboxMessages = (payload = {}) => {
                     messageId: message.id || null,
                     fromPhone,
                     clinicMetaId: sanitizeMetaPhoneNumber(metadata.phone_number_id || metadata.display_phone_number || ''),
+                    businessAccountId,
+                    phoneNumberId: sanitizeMetaId(metadata.phone_number_id || ''),
+                    displayPhoneNumber: sanitizeMetaPhoneNumber(metadata.display_phone_number || ''),
                     patientName: contact.profile?.name || 'WhatsApp Patient',
                     text: String(text || `[${message.type || 'message'}]`).trim(),
                     raw: message
@@ -1152,9 +1144,21 @@ const extractIncomingInboxMessages = (payload = {}) => {
     return messages;
 };
 
-const resolveInboxOwnerForIncoming = async ({ clinicMetaId, patientPhone }) => {
+const resolveInboxOwnerForIncoming = async ({ clinicMetaId, businessAccountId, patientPhone }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return null;
+
+    if (businessAccountId) {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id')
+            .or(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`)
+            .limit(1)
+            .maybeSingle();
+
+        if (data?.id) return data.id;
+        if (error) console.warn('Incoming webhook owner lookup by WABA failed:', error.message || error);
+    }
 
     if (clinicMetaId) {
         const { data, error } = await db
@@ -1193,11 +1197,13 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
         try {
             const userId = await resolveInboxOwnerForIncoming({
                 clinicMetaId: incoming.clinicMetaId,
+                businessAccountId: incoming.businessAccountId,
                 patientPhone: incoming.fromPhone
             });
             if (!userId) {
                 console.warn('Incoming inbox webhook skipped: owner not found.', {
                     clinicMetaId: incoming.clinicMetaId,
+                    businessAccountId: incoming.businessAccountId,
                     fromPhone: incoming.fromPhone
                 });
                 continue;
@@ -1209,6 +1215,9 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             const nextMetadata = {
                 ...existingMetadata,
                 meta_message_id: incoming.messageId,
+                whatsapp_business_account_id: incoming.businessAccountId || existingMetadata.whatsapp_business_account_id || null,
+                whatsapp_phone_number_id: incoming.phoneNumberId || existingMetadata.whatsapp_phone_number_id || null,
+                display_phone_number: incoming.displayPhoneNumber || existingMetadata.display_phone_number || null,
                 subscription_status: 'ACTIVE',
                 last_customer_message_at: nowIso,
                 last_inbound_at: nowIso,
@@ -1274,6 +1283,9 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                     is_private_note: false,
                     metadata: {
                         meta_message_id: incoming.messageId,
+                        whatsapp_business_account_id: incoming.businessAccountId || null,
+                        whatsapp_phone_number_id: incoming.phoneNumberId || null,
+                        display_phone_number: incoming.displayPhoneNumber || null,
                         inbound: true,
                         raw: incoming.raw
                     },
@@ -3828,12 +3840,26 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
     const recipientName = String(row.recipient_name || row.payload?.recipient?.patientName || row.payload?.recipient?.name || 'Patient').trim();
     const userId = row.user_id || row.doctor_id || null;
     const messageBody = resolveCampaignMessagePreview(row);
+    const whatsappBusinessAccountId = sanitizeMetaId(
+        metaResult?.whatsapp_business_account_id ||
+        metaResult?.business_account_id ||
+        metaResult?.response?.metadata?.whatsapp_business_account_id ||
+        row.whatsapp_business_account_id ||
+        row.meta_waba_id ||
+        row.payload?.template?.whatsapp_business_account_id ||
+        row.payload?.template?.meta_waba_id ||
+        ''
+    ) || null;
     const metadata = {
         template_id: row.template_id || row.payload?.template?.id || null,
         template_name: row.template_name || row.payload?.template?.template_name || row.payload?.template?.name || 'WhatsApp Template',
         template_category: row.template_category || row.payload?.template?.category || 'UTILITY',
         message_id: getMetaMessageId(metaResult),
         meta_message_id: getMetaMessageId(metaResult),
+        whatsapp_business_account_id: whatsappBusinessAccountId,
+        whatsapp_phone_number_id: safeSenderPhone === 'SYSTEM' ? null : safeSenderPhone,
+        sender_phone: safeSenderPhone,
+        receiver_phone: safeReceiverPhone,
         meta_result: metaResult,
         delivery_status: deliveryStatus,
         delivery_error: deliveryError,
@@ -3927,6 +3953,8 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         message_type: 'text',
         status: deliveryStatus,
         is_agent: true,
+        meta_message_id: getMetaMessageId(metaResult),
+        message_id: getMetaMessageId(metaResult),
         body: messageBody,
         text: messageBody,
         message_body: messageBody,

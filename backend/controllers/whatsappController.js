@@ -596,6 +596,8 @@ exports.sendTestMessage = async (req, res) => {
                         last_template: {
                             message_id: metaMessageId,
                             meta_message_id: metaMessageId,
+                            whatsapp_business_account_id: credentials.businessAccountId || null,
+                            whatsapp_phone_number_id: phoneId || null,
                             template_name: req.body.templateName || 'hello_world',
                             delivery_status: 'SENT',
                             sent_at: nowIso
@@ -636,6 +638,8 @@ exports.sendTestMessage = async (req, res) => {
                 type: 'template',
                 message_type: 'text',
                 status: 'SENT',
+                meta_message_id: metaMessageId,
+                message_id: metaMessageId,
                 workspace_id: ownerId,
                 sender_id: ownerId,
                 sender_phone: phoneId,
@@ -643,6 +647,8 @@ exports.sendTestMessage = async (req, res) => {
                 metadata: {
                     message_id: metaMessageId,
                     meta_message_id: metaMessageId,
+                    whatsapp_business_account_id: credentials.businessAccountId || null,
+                    whatsapp_phone_number_id: phoneId || null,
                     delivery_status: 'SENT',
                     template_name: req.body.templateName || 'hello_world',
                     sent_at: nowIso
