@@ -25,6 +25,58 @@ const isSchemaCacheError = (error) => {
     );
 };
 
+const getMissingSchemaColumn = (error) => {
+    const text = String(error?.message || error?.details || error || '');
+    const quotedMatch = text.match(/'([^']+)'\s+column/i);
+    if (quotedMatch?.[1]) return quotedMatch[1];
+
+    const doubleQuotedMatch = text.match(/column\s+"([^"]+)"/i);
+    if (doubleQuotedMatch?.[1]) return doubleQuotedMatch[1];
+
+    const cacheMatch = text.match(/schema cache.*?['"]([^'"]+)['"]/i);
+    if (cacheMatch?.[1]) return cacheMatch[1];
+
+    return '';
+};
+
+const insertInboxMessageWithSchemaFallback = async (row = {}) => {
+    const stableMetadata = {
+        ...(row.metadata || {}),
+        ...(row.message_id ? { message_id: row.message_id } : {}),
+        ...(row.meta_message_id ? { meta_message_id: row.meta_message_id } : {})
+    };
+    let payload = { ...row, metadata: stableMetadata };
+    const removedColumns = new Set();
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        const { error } = await supabase.from('inbox_messages').insert(payload);
+        if (!error) return { success: true };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (isSchemaCacheError(error) && missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+            console.warn(`Inbox message insert retrying without stale schema column: ${missingColumn}`);
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        if (isSchemaCacheError(error) && attempt === 0) {
+            console.warn('Inbox message insert retrying without top-level WAMID columns due to schema cache mismatch.', {
+                code: error.code,
+                message: error.message
+            });
+            const { message_id: _messageId, meta_message_id: _metaMessageId, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        return { success: false, error };
+    }
+
+    return { success: false };
+};
+
 const resolveScheduledIso = (scheduledFor, index = 0) => {
     const parsed = scheduledFor ? new Date(scheduledFor) : null;
     const date = parsed && Number.isFinite(parsed.getTime())
@@ -655,18 +707,9 @@ exports.sendTestMessage = async (req, res) => {
                 },
                 created_at: nowIso
             };
-            const messageInsert = await supabase.from('inbox_messages').insert(absoluteMessageRow);
-            if (messageInsert.error && isSchemaCacheError(messageInsert.error)) {
-                await supabase.from('inbox_messages').insert({
-                    chat_id: chatRow?.id,
-                    body: absoluteMessageRow.body,
-                    text: absoluteMessageRow.text,
-                    message_body: absoluteMessageRow.message_body,
-                    sender: 'doctor',
-                    from_me: true,
-                    type: 'template',
-                    created_at: nowIso
-                });
+            const messageInsert = await insertInboxMessageWithSchemaFallback(absoluteMessageRow);
+            if (!messageInsert.success) {
+                console.error('Inbox message insert failed after schema-safe fallback:', messageInsert.error?.message || messageInsert.error || 'unknown error');
             }
         } catch (dbError) {
             console.error("Database Backfill Failed:", dbError);
