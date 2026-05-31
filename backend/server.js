@@ -1009,25 +1009,26 @@ const extractMessageStatusUpdates = (payload = {}) => {
 
         for (const change of entry.changes) {
             if (change.field !== 'messages') continue;
-            const value = change.value || {};
+            const value = change?.value || {};
             const valueMetadata = value.metadata || {};
             const statuses = Array.isArray(value.statuses) ? value.statuses : [];
 
-            for (const statusRow of statuses) {
-                const messageId = statusRow.id || statusRow.message_id || null;
-                const status = String(statusRow.status || '').trim().toUpperCase();
-                if (!messageId || !status) continue;
+            for (const statusObj of statuses) {
+                const wamid = statusObj?.id || statusObj?.message_id || null;
+                const statusValue = statusObj?.status || '';
+                const status = String(statusValue || '').trim().toUpperCase();
+                if (!wamid || !status) continue;
 
                 updates.push({
-                    messageId,
+                    messageId: wamid,
                     status,
-                    timestamp: statusRow.timestamp || null,
-                    recipientPhone: sanitizeMetaPhoneNumber(statusRow.recipient_id || ''),
+                    timestamp: statusObj.timestamp || null,
+                    recipientPhone: sanitizeMetaPhoneNumber(statusObj.recipient_id || ''),
                     businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
                     phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
                     displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
-                    error: statusRow.errors?.[0] || null,
-                    raw: statusRow
+                    error: statusObj.errors?.[0] || null,
+                    raw: statusObj
                 });
             }
         }
@@ -1043,7 +1044,7 @@ const updateInboxMessagesByWamid = async (db, update) => {
     let result = await db
         .from('inbox_messages')
         .update(patch)
-        .eq('meta_message_id', update.messageId)
+        .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
         .select('id, chat_id, metadata');
 
     if (!result.error) return result;
@@ -1054,6 +1055,22 @@ const updateInboxMessagesByWamid = async (db, update) => {
         status: update.status,
         error: result.error.message || result.error
     });
+
+    result = await db
+        .from('inbox_messages')
+        .update(patch)
+        .eq('meta_message_id', update.messageId)
+        .select('id, chat_id, metadata');
+
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+
+    result = await db
+        .from('inbox_messages')
+        .update(patch)
+        .eq('message_id', update.messageId)
+        .select('id, chat_id, metadata');
+
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
 
     result = await db
         .from('inbox_messages')

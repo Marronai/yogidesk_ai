@@ -79,20 +79,21 @@ const extractStatuses = (payload) => {
       if (change?.field !== 'messages') continue;
       const value = change?.value || {};
       const metadata = value?.metadata || {};
-      for (const row of value?.statuses || []) {
-        const messageId = row?.id || row?.message_id || '';
-        const status = normalizeDeliveryStatus(row?.status);
-        if (!messageId || !status) continue;
+      for (const statusObj of value?.statuses || []) {
+        const wamid = statusObj?.id || statusObj?.message_id || '';
+        const statusValue = statusObj?.status || '';
+        const status = normalizeDeliveryStatus(statusValue);
+        if (!wamid || !status) continue;
         updates.push({
-          messageId,
+          messageId: wamid,
           status,
-          timestamp: row?.timestamp || null,
-          recipientPhone: normalizePhone(row?.recipient_id || ''),
+          timestamp: statusObj?.timestamp || null,
+          recipientPhone: normalizePhone(statusObj?.recipient_id || ''),
           businessAccountId: normalizeMetaId(metadata?.whatsapp_business_account_id || metadata?.waba_id || entry?.id || ''),
           phoneNumberId: normalizeMetaId(metadata?.phone_number_id || ''),
           displayPhoneNumber: normalizePhone(metadata?.display_phone_number || ''),
-          error: row?.errors?.[0] || null,
-          raw: row,
+          error: statusObj?.errors?.[0] || null,
+          raw: statusObj,
         });
       }
     }
@@ -101,15 +102,57 @@ const extractStatuses = (payload) => {
 };
 
 const updateDeliveryStatus = async (update) => {
-  const { data: messages, error } = await supabase
+  const patch = { status: update.status };
+  let { data: messages, error } = await supabase
     .from('inbox_messages')
-    .update({
-      status: update.status,
-      meta_message_id: update.messageId,
-      message_id: update.messageId,
-    })
-    .eq('meta_message_id', update.messageId)
+    .update(patch)
+    .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`)
     .select('id, chat_id, metadata');
+
+  if (error) {
+    console.warn('delivery status direct WAMID update failed; falling back:', error);
+
+    const metaFallback = await supabase
+      .from('inbox_messages')
+      .update(patch)
+      .eq('meta_message_id', update.messageId)
+      .select('id, chat_id, metadata');
+
+    if (!metaFallback.error && metaFallback.data?.length) {
+      messages = metaFallback.data;
+      error = null;
+    } else {
+      const messageFallback = await supabase
+        .from('inbox_messages')
+        .update(patch)
+        .eq('message_id', update.messageId)
+        .select('id, chat_id, metadata');
+
+      if (!messageFallback.error && messageFallback.data?.length) {
+        messages = messageFallback.data;
+        error = null;
+      } else {
+        const metadataFallback = await supabase
+          .from('inbox_messages')
+          .update(patch)
+          .eq('metadata->>meta_message_id', update.messageId)
+          .select('id, chat_id, metadata');
+
+        if (!metadataFallback.error && metadataFallback.data?.length) {
+          messages = metadataFallback.data;
+          error = null;
+        } else {
+          const metadataMessageFallback = await supabase
+            .from('inbox_messages')
+            .update(patch)
+            .eq('metadata->>message_id', update.messageId)
+            .select('id, chat_id, metadata');
+          messages = metadataMessageFallback.data || [];
+          error = metadataMessageFallback.error;
+        }
+      }
+    }
+  }
 
   if (error) {
     console.error('delivery status WAMID update failed:', error);
@@ -134,8 +177,6 @@ const updateDeliveryStatus = async (update) => {
       .from('inbox_messages')
       .update({
         status: update.status,
-        meta_message_id: update.messageId,
-        message_id: update.messageId,
         metadata,
       })
       .eq('id', message.id);
@@ -163,6 +204,7 @@ const updateDeliveryStatus = async (update) => {
         .from('inbox_chats')
         .update({
           status: update.status,
+          updated_at: new Date().toISOString(),
           metadata: {
             ...chatMetadata,
             meta_message_id: update.messageId,
