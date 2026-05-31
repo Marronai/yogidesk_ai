@@ -621,7 +621,11 @@ exports.sendTestMessage = async (req, res) => {
         const response = await axios.post(url, data, config);
 
         const metaMessageId = response.data?.messages?.[0]?.id || null;
-        console.log("Message Sent ID:", metaMessageId);
+        console.log("=== TEMPLATE SENT ===", {
+            metaMessageId,
+            fullResponse: response.data,
+            hasId: !!metaMessageId
+        });
 
         // --- REAL-TIME INBOX LOGGING ---
         try {

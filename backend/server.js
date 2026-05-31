@@ -1085,14 +1085,30 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return;
 
-    for (const update of extractMessageStatusUpdates(payload)) {
+    const updates = extractMessageStatusUpdates(payload);
+    console.log("=== WEBHOOK STATUS UPDATES RECEIVED ===", {
+        totalUpdates: updates.length,
+        updates: updates.map(u => ({ messageId: u.messageId, status: u.status }))
+    });
+
+    for (const update of updates) {
         try {
             const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
 
             if (error) {
-                console.error('Inbox delivery status WAMID update failed:', error.message || error);
+                console.error('❌ Inbox delivery status WAMID update failed:', {
+                    messageId: update.messageId,
+                    status: update.status,
+                    error: error.message || error
+                });
                 continue;
             }
+
+            console.log('✅ Inbox delivery status updated:', {
+                messageId: update.messageId,
+                status: update.status,
+                matchedRows: Array.isArray(messages) ? messages.length : 0
+            });
 
             if (!Array.isArray(messages) || messages.length === 0) {
                 console.warn('Inbox delivery status WAMID update matched no rows:', {
