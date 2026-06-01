@@ -296,6 +296,11 @@ const Settings = () => {
         lastSavedMetaRef.current = savedMeta;
         const { userId: activeUserId } = await getActiveAccount();
         writeCachedMetaConnection(activeUserId, savedMeta);
+        try {
+          await api.get('/templates/sync', { params: { userId: activeUserId } });
+        } catch (syncError) {
+          console.warn('Meta template refresh skipped:', syncError?.response?.data || syncError.message || syncError);
+        }
         showToast('success', 'Meta credentials updated successfully!');
         playConnectionAnimation('success');
         setConnectionStatus('connected');

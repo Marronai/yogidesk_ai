@@ -1701,6 +1701,72 @@ app.post('/api/webhook/meta', async (req, res) => {
 });
 
 // ====== WHATSAPP TEMPLATE CREATION ======
+const fetchMetaMessageTemplates = async ({ businessAccountId, accessToken }) => {
+    const templates = [];
+    let nextUrl = `https://graph.facebook.com/v20.0/${businessAccountId}/message_templates`;
+    let params = { limit: 100 };
+
+    while (nextUrl) {
+        const response = await axios.get(nextUrl, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            params
+        });
+        templates.push(...(Array.isArray(response.data?.data) ? response.data.data : []));
+        nextUrl = response.data?.paging?.next || '';
+        params = undefined;
+    }
+
+    return templates;
+};
+
+const mapMetaTemplateToWhatsappTemplateRow = ({ metaTemplate, userId }) => {
+    const templateName = metaTemplate.name || metaTemplate.template_name || '';
+    const rawStatus = String(metaTemplate.status || 'PENDING').toUpperCase();
+    const status = rawStatus === 'PENDING_REVIEW' ? 'PENDING' : rawStatus;
+    const components = Array.isArray(metaTemplate.components) ? metaTemplate.components : [];
+    const body = components.find((component) => component.type === 'BODY');
+    const header = components.find((component) => component.type === 'HEADER');
+    const footer = components.find((component) => component.type === 'FOOTER');
+    const buttons = components.find((component) => component.type === 'BUTTONS');
+
+    return {
+        user_id: userId,
+        template_name: templateName,
+        category: metaTemplate.category || 'MARKETING',
+        language: metaTemplate.language || 'en_US',
+        body_content: body?.text || '',
+        status,
+        header_type: header?.format || 'NONE',
+        header_text: header?.format === 'TEXT' ? header?.text || null : null,
+        footer_text: footer?.text || null,
+        buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
+        created_at: new Date().toISOString(),
+        meta_template_id: metaTemplate.id || metaTemplate.message_template_id || null
+    };
+};
+
+const syncCurrentMetaTemplatesForUser = async ({ db, userId, businessAccountId, accessToken }) => {
+    const metaTemplates = await fetchMetaMessageTemplates({ businessAccountId, accessToken });
+    const rows = metaTemplates
+        .map((metaTemplate) => mapMetaTemplateToWhatsappTemplateRow({ metaTemplate, userId }))
+        .filter((row) => row.template_name || row.meta_template_id);
+
+    const { error: deleteError } = await db
+        .from('whatsapp_templates')
+        .delete()
+        .eq('user_id', userId);
+    if (deleteError) throw deleteError;
+
+    if (rows.length > 0) {
+        const { error: insertError } = await db
+            .from('whatsapp_templates')
+            .insert(rows);
+        if (insertError) throw insertError;
+    }
+
+    return rows;
+};
+
 const syncTemplatesFromMetaInBackground = async (userId) => {
     if (!supabase?.from || !userId) return;
 
@@ -1718,69 +1784,12 @@ const syncTemplatesFromMetaInBackground = async (userId) => {
         return;
     }
 
-    const graphUrl = `https://graph.facebook.com/v20.0/${businessAccountId}/message_templates`;
-    const response = await axios.get(graphUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` }
+    await syncCurrentMetaTemplatesForUser({
+        db: supabaseAdmin || supabase,
+        userId,
+        businessAccountId,
+        accessToken
     });
-
-    const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
-    if (!metaTemplates.length) return;
-
-    const { data: localTemplates, error: localError } = await supabase
-        .from('whatsapp_templates')
-        .select('id,template_name')
-        .eq('user_id', userId);
-
-    if (localError) throw localError;
-
-    const localByName = new Map(
-        (Array.isArray(localTemplates) ? localTemplates : [])
-            .map((template) => [String(template.template_name || '').toLowerCase(), template])
-            .filter(([name]) => name)
-    );
-
-    for (const metaTemplate of metaTemplates) {
-        const templateName = metaTemplate.name || metaTemplate.template_name;
-        if (!templateName) continue;
-
-        const status = String(metaTemplate.status || 'PENDING').toUpperCase() === 'PENDING_REVIEW'
-            ? 'PENDING'
-            : String(metaTemplate.status || 'PENDING').toUpperCase();
-        const metaTemplateId = metaTemplate.id || metaTemplate.message_template_id || null;
-        const components = Array.isArray(metaTemplate.components) ? metaTemplate.components : [];
-        const body = components.find((component) => component.type === 'BODY');
-        const header = components.find((component) => component.type === 'HEADER');
-        const footer = components.find((component) => component.type === 'FOOTER');
-        const buttons = components.find((component) => component.type === 'BUTTONS');
-
-        if (localByName.has(String(templateName).toLowerCase())) {
-            const { error } = await supabase
-                .from('whatsapp_templates')
-                .update({ status, meta_template_id: metaTemplateId })
-                .eq('user_id', userId)
-                .eq('template_name', templateName);
-            if (error) throw error;
-            continue;
-        }
-
-        const { error } = await supabase
-            .from('whatsapp_templates')
-            .upsert({
-                user_id: userId,
-                template_name: templateName,
-                category: metaTemplate.category || 'MARKETING',
-                language: metaTemplate.language || 'en_US',
-                body_content: body?.text || '',
-                status,
-                header_type: header?.format || 'NONE',
-                header_text: header?.format === 'TEXT' ? header?.text || null : null,
-                footer_text: footer?.text || null,
-                buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
-                created_at: new Date().toISOString(),
-                meta_template_id: metaTemplateId
-            });
-        if (error) throw error;
-    }
 };
 
 app.get('/api/templates', async (req, res) => {
@@ -1843,64 +1852,25 @@ app.get('/api/templates/sync', async (req, res) => {
             return res.status(200).json({ success: false, meta_configured: false, templates: [], message: 'WhatsApp Business Account credentials are not configured.' });
         }
 
-        const graphUrl = `https://graph.facebook.com/v20.0/${metaConfig.whatsapp_business_account_id}/message_templates`;
-        const response = await axios.get(graphUrl, {
-            headers: { Authorization: `Bearer ${metaConfig.accessToken}` }
+        const rows = await syncCurrentMetaTemplatesForUser({
+            db,
+            userId,
+            businessAccountId: metaConfig.whatsapp_business_account_id,
+            accessToken: metaConfig.accessToken
         });
+        const updates = rows.map((row) => ({
+            name: row.template_name,
+            id: row.meta_template_id,
+            status: row.status,
+            language: row.language
+        }));
 
-        const metaTemplates = Array.isArray(response.data?.data) ? response.data.data : [];
-        const updates = [];
-
-        for (const metaTemplate of metaTemplates) {
-            const metaTemplateId = metaTemplate.id || metaTemplate.message_template_id || null;
-            const templateName = metaTemplate.name || metaTemplate.template_name || '';
-            const rawStatus = String(metaTemplate.status || 'PENDING').toUpperCase();
-            const status = rawStatus === 'PENDING_REVIEW' ? 'PENDING' : rawStatus;
-
-            if (!templateName && !metaTemplateId) continue;
-
-            const components = Array.isArray(metaTemplate.components) ? metaTemplate.components : [];
-            const body = components.find((component) => component.type === 'BODY');
-            const header = components.find((component) => component.type === 'HEADER');
-            const footer = components.find((component) => component.type === 'FOOTER');
-            const buttons = components.find((component) => component.type === 'BUTTONS');
-            const rowPayload = {
-                user_id: userId,
-                template_name: templateName,
-                category: metaTemplate.category || 'MARKETING',
-                language: metaTemplate.language || 'en_US',
-                body_content: body?.text || '',
-                status,
-                header_type: header?.format || 'NONE',
-                header_text: header?.format === 'TEXT' ? header?.text || null : null,
-                footer_text: footer?.text || null,
-                buttons: Array.isArray(buttons?.buttons) ? buttons.buttons : [],
-                meta_template_id: metaTemplateId
-            };
-
-            let updateQuery = db
-                .from('whatsapp_templates')
-                .update(rowPayload)
-                .eq('user_id', userId);
-
-            updateQuery = metaTemplateId
-                ? updateQuery.or(`meta_template_id.eq.${metaTemplateId},template_name.eq.${templateName}`)
-                : updateQuery.eq('template_name', templateName);
-
-            const { data: updatedRows, error: updateError } = await updateQuery.select('id');
-            if (updateError) throw updateError;
-
-            if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
-                const { error: insertError } = await db
-                    .from('whatsapp_templates')
-                    .insert([{ ...rowPayload, created_at: new Date().toISOString() }]);
-                if (insertError) throw insertError;
-            }
-
-            updates.push({ name: templateName, id: metaTemplateId, status });
-        }
-
-        return res.status(200).json({ success: true, templates: updates });
+        return res.status(200).json({
+            success: true,
+            authoritative: true,
+            deletedLocalBeforeSync: true,
+            templates: updates
+        });
     } catch (error) {
         console.error('Template sync error:', error.response?.data || error.message || error);
         return res.status(400).json({ success: false, message: error.response?.data?.error?.message || error.message || 'Template sync failed.' });

@@ -122,6 +122,11 @@ const Campaigns = () => {
   const fetchCampaignData = async () => {
     if (!userId) return;
     setLoading(true);
+    try {
+      await api.get('/templates/sync', { params: { userId } });
+    } catch (syncError) {
+      console.warn('Campaign template sync skipped:', syncError?.response?.data || syncError.message || syncError);
+    }
     const [{ data: approvedTemplates }, { data: profile }] = await Promise.all([
       supabase.from('whatsapp_templates').select('id, template_name, category, language, body_content').eq('user_id', userId).eq('status', 'APPROVED').order('created_at', { ascending: false }),
       supabase.from('doctor_profiles').select('*').eq('id', userId).maybeSingle()
