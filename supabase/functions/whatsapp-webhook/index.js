@@ -81,8 +81,7 @@ const extractStatuses = (payload) => {
       const metadata = value?.metadata || {};
       for (const statusObj of value?.statuses || []) {
         const wamid = statusObj?.id || statusObj?.message_id || '';
-        const statusValue = statusObj?.status || '';
-        const status = normalizeDeliveryStatus(statusValue);
+        const status = normalizeDeliveryStatus(String(statusObj?.status || '').trim().toUpperCase());
         if (!wamid || !status) continue;
         updates.push({
           messageId: wamid,
@@ -103,59 +102,13 @@ const extractStatuses = (payload) => {
 
 const updateDeliveryStatus = async (update) => {
   const patch = { status: update.status };
-  
-  // Try meta_message_id first
-  let { data: messages, error } = await supabase
+
+  let query = supabase
     .from('inbox_messages')
     .update(patch)
-    .eq('meta_message_id', update.messageId)
-    .select('id, chat_id, metadata');
-
-  // If not found by meta_message_id, try message_id
-  if (!error && !messages?.length) {
-    const fallback = await supabase
-      .from('inbox_messages')
-      .update(patch)
-      .eq('message_id', update.messageId)
-      .select('id, chat_id, metadata');
-
-    if (!fallback.error && fallback.data?.length) {
-      messages = fallback.data;
-      error = null;
-    } else {
-      error = fallback.error;
-    }
-  }
-
-  if (error || !messages?.length) {
-    console.warn('delivery status direct WAMID update missed; falling back to metadata:', {
-      messageId: update.messageId,
-      status: update.status,
-      matched: messages?.length || 0,
-      error,
-    });
-
-    if (!messages?.length) {
-      const metadataFallback = await supabase
-        .from('inbox_messages')
-        .update(patch)
-        .eq('metadata->>meta_message_id', update.messageId)
-        .select('id, chat_id, metadata');
-
-      if (!metadataFallback.error && metadataFallback.data?.length) {
-        messages = metadataFallback.data;
-        error = null;
-      } else {
-        const metadataMessageFallback = await supabase
-          .from('inbox_messages')
-          .update(patch)
-          .eq('metadata->>message_id', update.messageId)
-          .select('id, chat_id, metadata');
-        messages = metadataMessageFallback.data || [];
-        error = metadataMessageFallback.error;
-      }
-    }
-  }
+    .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`);
+  if (update.status !== 'READ') query = query.neq('status', 'READ');
+  const { data: messages, error } = await query.select('id, chat_id, metadata');
 
   if (error) {
     console.error('delivery status WAMID update failed:', error);

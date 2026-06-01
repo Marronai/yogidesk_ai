@@ -1015,8 +1015,7 @@ const extractMessageStatusUpdates = (payload = {}) => {
 
             for (const statusObj of statuses) {
                 const wamid = statusObj?.id || statusObj?.message_id || null;
-                const statusValue = statusObj?.status || '';
-                const status = String(statusValue || '').trim().toUpperCase();
+                const status = String(statusObj?.status || '').trim().toUpperCase();
                 if (!wamid || !status) continue;
 
                 updates.push({
@@ -1037,48 +1036,16 @@ const extractMessageStatusUpdates = (payload = {}) => {
     return updates;
 };
 
-const isSchemaMismatchError = (error) => Boolean(error && isMissingColumnError(error));
-
 const updateInboxMessagesByWamid = async (db, update) => {
     const patch = { status: update.status };
-    let result = await db
+    let query = db
         .from('inbox_messages')
         .update(patch)
-        .eq('meta_message_id', update.messageId)
-        .select('id, chat_id, metadata');
+        .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`);
 
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
+    if (update.status !== 'READ') query = query.neq('status', 'READ');
 
-    if (result.error && !isSchemaMismatchError(result.error)) return result;
-
-    console.warn('Inbox delivery status falling back after direct WAMID no-match/error:', {
-        messageId: update.messageId,
-        status: update.status,
-        matched: Array.isArray(result.data) ? result.data.length : null,
-        error: result.error?.message || result.error || null
-    });
-
-    result = await db
-        .from('inbox_messages')
-        .update(patch)
-        .eq('message_id', update.messageId)
-        .select('id, chat_id, metadata');
-
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
-
-    result = await db
-        .from('inbox_messages')
-        .update(patch)
-        .filter('metadata->>meta_message_id', 'eq', update.messageId)
-        .select('id, chat_id, metadata');
-
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return result;
-
-    return db
-        .from('inbox_messages')
-        .update(patch)
-        .filter('metadata->>message_id', 'eq', update.messageId)
-        .select('id, chat_id, metadata');
+    return query.select('id, chat_id, metadata');
 };
 
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
@@ -1393,7 +1360,7 @@ const verifyWhatsAppWebhook = (req, res) => {
     return res.sendStatus(403);
 };
 
-const handleWhatsAppWebhook = (req, res) => {
+const handleWhatsAppWebhook = async (req, res) => {
     if (!verifyMetaWebhookSignature(req)) {
         const allowTestBypass = process.env.NODE_ENV === 'development' || isMetaDeveloperTestPayload(req.body);
         if (allowTestBypass) {
@@ -1406,8 +1373,6 @@ const handleWhatsAppWebhook = (req, res) => {
             return res.status(403).send('Invalid signature');
         }
     }
-
-    res.status(200).send('EVENT_RECEIVED');
 
     const webhookFields = [];
     if (Array.isArray(req.body?.entry)) {
@@ -1426,10 +1391,17 @@ const handleWhatsAppWebhook = (req, res) => {
         incomingCount
     });
 
+    try {
+        await updateInboxMessageDeliveryStatuses(req.body);
+    } catch (error) {
+        console.error('WhatsApp webhook realtime status sync failed:', error.message || error);
+    }
+
+    res.status(200).send('EVENT_RECEIVED');
+
     Promise.resolve()
         .then(async () => {
             await processTemplateStatusWebhook(req.body);
-            await updateInboxMessageDeliveryStatuses(req.body);
             await processIncomingInboxMessagesWebhook(req.body);
             await processFailedDeliveryWebhook(req.body);
         })
