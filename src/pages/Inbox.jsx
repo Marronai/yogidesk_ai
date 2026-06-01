@@ -403,6 +403,23 @@ const InboxContent = () => {
   }, []);
 
   useEffect(() => {
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_messages' }, (payload) => {
+        setMessages((prev) => prev.map((msg) => (
+          msg.id === payload.new.id
+            ? { ...msg, status: payload.new.status, metadata: payload.new.metadata || msg.metadata }
+            : msg
+        )));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
     let channel;
     let active = true;
 
