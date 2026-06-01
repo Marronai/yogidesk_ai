@@ -30,6 +30,7 @@ const tagOptions = ['#ActiveLead', '#FollowUp'];
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
+const normalizeDeliveryStatus = (status) => String(status || '').trim().toUpperCase();
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
@@ -297,6 +298,7 @@ const InboxContent = () => {
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
           unread: count,
           status: chat.status || 'Offline',
+          deliveryStatus: chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status || chat.status || '',
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
           metadata: chat?.metadata || {},
@@ -385,10 +387,10 @@ const InboxContent = () => {
   };
 
   const renderStatusBadge = (status) => {
-    const normalized = String(status || '').toUpperCase();
+    const normalized = normalizeDeliveryStatus(status);
     if (normalized === 'SENT') return <Check size={13} className="text-slate-400" />;
     if (normalized === 'DELIVERED') return <CheckCheck size={14} className="text-slate-400" />;
-    if (normalized === 'READ') return <CheckCheck size={14} className="text-blue-500" />;
+    if (normalized === 'READ') return <CheckCheck size={14} className="text-sky-400" style={{ color: '#34B7F1' }} />;
     if (normalized === 'FAILED') return <AlertCircle size={13} className="text-rose-500" />;
     return null;
   };
@@ -431,7 +433,7 @@ const InboxContent = () => {
 
         if (updatedMessage.chat_id) {
           setConversations((prev) => prev.map((chat) => (
-            chat.id === updatedMessage.chat_id ? { ...chat, status: nextStatus } : chat
+            chat.id === updatedMessage.chat_id ? { ...chat, deliveryStatus: nextStatus } : chat
           )));
         }
       })
@@ -662,7 +664,7 @@ const InboxContent = () => {
                   <h3 className="truncate text-sm font-bold text-slate-800">{chat.name}</h3>
                   <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400">
                     {chat.time}
-                    {renderStatusBadge(chat.status)}
+                    {renderStatusBadge(chat.deliveryStatus || chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status)}
                   </span>
                 </div>
                 {String(chat.status || '').toUpperCase() === 'QUEUED' ? (
@@ -739,7 +741,7 @@ const InboxContent = () => {
                     <p className="text-[13.5px] font-medium leading-relaxed">{messageText}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
-                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && (renderStatusBadge(msg.status) || <Check size={12} className="text-slate-400" />)}
+                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && (renderStatusBadge(msg.status || msg.metadata?.delivery_status) || <Check size={12} className="text-slate-400" />)}
                     </div>
                   </div>
                 </div>
