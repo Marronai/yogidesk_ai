@@ -71,6 +71,13 @@ const normalizeDeliveryStatus = (value = '') => {
   const status = String(value || '').trim().toUpperCase();
   return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status : '';
 };
+
+const getDeliveryStatusRank = (status = '') => ({
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4,
+}[String(status || '').trim().toUpperCase()] || 0);
 const quotePostgrestValue = (value = '') => {
   const clean = String(value || '').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${clean}"`;
@@ -124,7 +131,10 @@ const updateDeliveryStatus = async (update) => {
 
   const runStatusUpdate = async (buildQuery) => {
     let query = buildQuery(supabase.from('inbox_messages').update(patch));
-    if (update.status !== 'READ') query = query.neq('status', 'READ');
+    const statusRank = getDeliveryStatusRank(update.status);
+    if (statusRank <= getDeliveryStatusRank('SENT')) query = query.not('status', 'in', '("DELIVERED","READ","FAILED")');
+    if (statusRank === getDeliveryStatusRank('DELIVERED')) query = query.not('status', 'in', '("READ","FAILED")');
+    if (statusRank === getDeliveryStatusRank('READ')) query = query.neq('status', 'FAILED');
     return query.select('id, chat_id, metadata');
   };
 

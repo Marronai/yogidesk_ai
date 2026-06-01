@@ -31,6 +31,16 @@ const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
 const normalizeDeliveryStatus = (status) => String(status || '').trim().toUpperCase();
+const deliveryStatusRank = (status) => ({
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4,
+}[normalizeDeliveryStatus(status)] || 0);
+const resolveDeliveryStatus = (...statuses) => statuses
+  .map(normalizeDeliveryStatus)
+  .filter(Boolean)
+  .sort((a, b) => deliveryStatusRank(b) - deliveryStatusRank(a))[0] || '';
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
@@ -40,7 +50,7 @@ const mapStoredMessage = (item = {}) => ({
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
   is_private_note: Boolean(item.is_private_note),
-  status: item.status || item.metadata?.delivery_status || '',
+  status: resolveDeliveryStatus(item.status, item.metadata?.delivery_status),
   metadata: item.metadata || {},
   created_at: item.created_at || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
@@ -298,7 +308,7 @@ const InboxContent = () => {
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
           unread: count,
           status: chat.status || 'Offline',
-          deliveryStatus: chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status || chat.status || '',
+          deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
           metadata: chat?.metadata || {},

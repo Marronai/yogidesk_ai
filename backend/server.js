@@ -1011,6 +1011,13 @@ const isMissingStatusMatchColumn = (error) => {
     return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
 
+const getDeliveryStatusRank = (status) => ({
+    SENT: 1,
+    DELIVERED: 2,
+    READ: 3,
+    FAILED: 4
+}[String(status || '').trim().toUpperCase()] || 0);
+
 const extractMessageStatusUpdates = (payload = {}) => {
     try {
         const updates = [];
@@ -1055,7 +1062,10 @@ const updateInboxMessagesByWamid = async (db, update) => {
 
     const runStatusUpdate = async (buildQuery) => {
         let query = buildQuery(db.from('inbox_messages').update(patch));
-        if (update.status !== 'READ') query = query.neq('status', 'READ');
+        const statusRank = getDeliveryStatusRank(update.status);
+        if (statusRank <= getDeliveryStatusRank('SENT')) query = query.not('status', 'in', '("DELIVERED","READ","FAILED")');
+        if (statusRank === getDeliveryStatusRank('DELIVERED')) query = query.not('status', 'in', '("READ","FAILED")');
+        if (statusRank === getDeliveryStatusRank('READ')) query = query.neq('status', 'FAILED');
         return query.select('id, chat_id, metadata');
     };
 

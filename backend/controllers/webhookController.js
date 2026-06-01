@@ -36,6 +36,28 @@ const normalizeStatus = (status) => {
   return normalized === 'PENDING_REVIEW' || normalized === 'IN_REVIEW' ? 'PENDING' : normalized;
 };
 
+const quotePostgrestValue = (value) => {
+  const clean = String(value || '').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${clean}"`;
+};
+
+const isMissingStatusMatchColumn = (error) => {
+  const message = String(error?.message || error?.details || '').toLowerCase();
+  return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
+
+const normalizeDeliveryStatus = (status) => {
+  const normalized = String(status || '').trim().toUpperCase();
+  return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(normalized) ? normalized : '';
+};
+
+const getDeliveryStatusRank = (status) => ({
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4
+}[String(status || '').trim().toUpperCase()] || 0);
+
 const getTemplateUpdates = (payload = {}) => {
   if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
 
@@ -73,20 +95,130 @@ const getDeliveryStatusUpdates = (payload = {}) => {
           const metadata = statusRow.metadata || value.metadata || {};
           const template = statusRow.template || metadata.template || {};
           const rawStatus = String(statusRow.status || '').toLowerCase();
+          const deliveryStatus = normalizeDeliveryStatus(rawStatus);
 
           return {
             status: rawStatus,
+            deliveryStatus,
             userId: metadata.user_id || metadata.doctor_id || value.user_id || null,
             messageId: statusRow.id || statusRow.message_id || null,
             templateCategory: pricing.category || metadata.template_category || metadata.category || template.category || null,
             templateName: metadata.template_name || template.name || null,
             templateId: metadata.template_id || template.id || conversation.id || null,
-            reason: statusRow.errors?.[0]?.title || statusRow.errors?.[0]?.message || 'Delivery Failed / Undelivered Number'
+            reason: statusRow.errors?.[0]?.title || statusRow.errors?.[0]?.message || 'Delivery Failed / Undelivered Number',
+            timestamp: statusRow.timestamp || null,
+            businessAccountId: metadata.whatsapp_business_account_id || metadata.waba_id || entry.id || null,
+            phoneNumberId: metadata.phone_number_id || null,
+            displayPhoneNumber: metadata.display_phone_number || null,
+            error: statusRow.errors?.[0] || null,
+            raw: statusRow
           };
-        }).filter((update) => update.status === 'failed' && update.messageId);
+        }).filter((update) => update.deliveryStatus && update.messageId);
       })
       : []
   ));
+};
+
+const updateInboxMessagesByWamid = async (db, update) => {
+  const incomingWamid = String(update.messageId || '').trim();
+  const quotedWamid = quotePostgrestValue(incomingWamid);
+  const patch = { status: update.deliveryStatus };
+
+  const runStatusUpdate = async (buildQuery) => {
+    let query = buildQuery(db.from('inbox_messages').update(patch));
+    const statusRank = getDeliveryStatusRank(update.deliveryStatus);
+    if (statusRank <= getDeliveryStatusRank('SENT')) query = query.not('status', 'in', '("DELIVERED","READ","FAILED")');
+    if (statusRank === getDeliveryStatusRank('DELIVERED')) query = query.not('status', 'in', '("READ","FAILED")');
+    if (statusRank === getDeliveryStatusRank('READ')) query = query.neq('status', 'FAILED');
+    return query.select('id, chat_id, metadata');
+  };
+
+  const attempts = [
+    () => runStatusUpdate((query) => query.or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`)),
+    () => runStatusUpdate((query) => query.filter('metadata->>meta_message_id', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.filter('metadata->>message_id', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.filter('metadata->>wamid', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.ilike('wamid', incomingWamid))
+  ];
+
+  let result = { data: [], error: null };
+  for (const attempt of attempts) {
+    result = await attempt();
+    if (result.error) {
+      if (isMissingStatusMatchColumn(result.error)) continue;
+      return result;
+    }
+    if (Array.isArray(result.data) && result.data.length > 0) return result;
+  }
+
+  return result;
+};
+
+const syncInboxDeliveryStatus = async (db, update) => {
+  const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
+  if (error) {
+    console.error('Webhook inbox delivery status update failed:', error.message || error);
+    return;
+  }
+
+  if (!Array.isArray(messages) || messages.length === 0) {
+    console.warn('Webhook inbox delivery status matched no rows:', {
+      messageId: update.messageId,
+      status: update.deliveryStatus
+    });
+    return;
+  }
+
+  for (const message of messages) {
+    const metadata = {
+      ...(message.metadata || {}),
+      meta_message_id: update.messageId,
+      message_id: update.messageId,
+      delivery_status: update.deliveryStatus,
+      delivery_status_at: update.timestamp,
+      delivery_error: update.error,
+      whatsapp_business_account_id: update.businessAccountId || message.metadata?.whatsapp_business_account_id || null,
+      whatsapp_phone_number_id: update.phoneNumberId || message.metadata?.whatsapp_phone_number_id || null,
+      display_phone_number: update.displayPhoneNumber || message.metadata?.display_phone_number || null,
+      last_meta_status: update.raw
+    };
+
+    const { error: messageError } = await db
+      .from('inbox_messages')
+      .update({ status: update.deliveryStatus, metadata })
+      .eq('id', message.id);
+
+    if (messageError) console.error('Webhook inbox metadata update failed:', messageError.message || messageError);
+
+    if (!message.chat_id) continue;
+
+    const { data: chat } = await db.from('inbox_chats').select('metadata').eq('id', message.chat_id).maybeSingle();
+    const chatMetadata = chat?.metadata || {};
+    const { error: chatError } = await db
+      .from('inbox_chats')
+      .update({
+        status: update.deliveryStatus,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...chatMetadata,
+          meta_message_id: update.messageId,
+          delivery_status: update.deliveryStatus,
+          whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
+          subscription_status: 'ACTIVE',
+          last_template: {
+            ...(chatMetadata.last_template || {}),
+            meta_message_id: update.messageId,
+            message_id: update.messageId,
+            delivery_status: update.deliveryStatus,
+            delivery_status_at: update.timestamp,
+            whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
+          }
+        }
+      })
+      .eq('id', message.chat_id);
+
+    if (chatError) console.error('Webhook inbox chat status update failed:', chatError.message || chatError);
+  }
 };
 
 const findClinic = async (businessAccountId) => {
@@ -132,16 +264,20 @@ exports.handleWebhook = async (req, res) => {
     }
 
     for (const update of getDeliveryStatusUpdates(req.body)) {
-      await processFailedDeliveryRefund({
-        userId: update.userId,
-        messageId: update.messageId,
-        templateCategory: update.templateCategory,
-        templateName: update.templateName,
-        templateId: update.templateId,
-        reason: update.reason,
-        source: 'meta_webhook',
-        rawStatus: update.status
-      });
+      await syncInboxDeliveryStatus(db, update);
+
+      if (update.deliveryStatus === 'FAILED') {
+        await processFailedDeliveryRefund({
+          userId: update.userId,
+          messageId: update.messageId,
+          templateCategory: update.templateCategory,
+          templateName: update.templateName,
+          templateId: update.templateId,
+          reason: update.reason,
+          source: 'meta_webhook',
+          rawStatus: update.status
+        });
+      }
     }
   } catch (error) {
     console.error('Webhook handler error:', error.message || error);
