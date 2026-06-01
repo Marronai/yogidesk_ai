@@ -71,42 +71,50 @@ const normalizeDeliveryStatus = (value = '') => {
   const status = String(value || '').trim().toUpperCase();
   return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status : '';
 };
+const quotePostgrestValue = (value = '') => {
+  const clean = String(value || '').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${clean}"`;
+};
 
 const extractStatuses = (payload) => {
-  const updates = [];
-  for (const entry of payload?.entry || []) {
-    for (const change of entry?.changes || []) {
-      if (change?.field !== 'messages') continue;
-      const value = change?.value || {};
-      const metadata = value?.metadata || {};
-      for (const statusObj of value?.statuses || []) {
-        const wamid = statusObj?.id || statusObj?.message_id || '';
-        const status = normalizeDeliveryStatus(String(statusObj?.status || '').trim().toUpperCase());
-        if (!wamid || !status) continue;
-        updates.push({
-          messageId: wamid,
-          status,
-          timestamp: statusObj?.timestamp || null,
-          recipientPhone: normalizePhone(statusObj?.recipient_id || ''),
-          businessAccountId: normalizeMetaId(metadata?.whatsapp_business_account_id || metadata?.waba_id || entry?.id || ''),
-          phoneNumberId: normalizeMetaId(metadata?.phone_number_id || ''),
-          displayPhoneNumber: normalizePhone(metadata?.display_phone_number || ''),
-          error: statusObj?.errors?.[0] || null,
-          raw: statusObj,
-        });
-      }
-    }
+  try {
+    const statuses = payload?.entry?.[0]?.changes?.[0]?.value?.statuses;
+    if (!Array.isArray(statuses) || statuses.length === 0) return [];
+
+    const statusObj = statuses[0] || {};
+    const incomingWamid = String(statusObj?.id || statusObj?.message_id || '').trim();
+    const rawStatus = normalizeDeliveryStatus(String(statusObj?.status || '').trim().toUpperCase());
+    if (!incomingWamid || !rawStatus) return [];
+
+    const entry = payload?.entry?.[0] || {};
+    const metadata = payload?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
+    return [{
+      messageId: incomingWamid,
+      status: rawStatus,
+      timestamp: statusObj?.timestamp || null,
+      recipientPhone: normalizePhone(statusObj?.recipient_id || ''),
+      businessAccountId: normalizeMetaId(metadata?.whatsapp_business_account_id || metadata?.waba_id || entry?.id || ''),
+      phoneNumberId: normalizeMetaId(metadata?.phone_number_id || ''),
+      displayPhoneNumber: normalizePhone(metadata?.display_phone_number || ''),
+      error: statusObj?.errors?.[0] || null,
+      raw: statusObj,
+    }];
+  } catch (error) {
+    console.error('WhatsApp status payload extraction failed:', error?.message || error);
+    return [];
   }
-  return updates;
 };
 
 const updateDeliveryStatus = async (update) => {
   const patch = { status: update.status };
+  const incomingWamid = String(update.messageId || '').trim();
+  const quotedWamid = quotePostgrestValue(incomingWamid);
+  console.log('Processing Webhook for WAMID:', incomingWamid, 'New Status:', update.status);
 
   let query = supabase
     .from('inbox_messages')
     .update(patch)
-    .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`);
+    .or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`);
   if (update.status !== 'READ') query = query.neq('status', 'READ');
   const { data: messages, error } = await query.select('id, chat_id, metadata');
 
@@ -240,8 +248,8 @@ const extractMessage = (payload) => {
   };
 };
 
-const processWebhookPayload = async (payload) => {
-  const statuses = extractStatuses(payload);
+const processWebhookPayload = async (payload, preExtractedStatuses = null) => {
+  const statuses = Array.isArray(preExtractedStatuses) ? preExtractedStatuses : extractStatuses(payload);
   for (const status of statuses) await updateDeliveryStatus(status);
 
   const { fromPhone, clinicMetaId, businessAccountId, phoneNumberId, displayPhoneNumber, messageText, patientName, currentAdminId, messageId } = extractMessage(payload);
@@ -376,15 +384,16 @@ serve((req) => {
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405);
 
   try {
-    const processing = req.clone().json()
-      .then(processWebhookPayload)
+    const payload = await req.json();
+    const statuses = extractStatuses(payload);
+    const processing = processWebhookPayload(payload, statuses)
       .catch((error) => console.error('whatsapp-webhook error:', error));
     if (globalThis.EdgeRuntime?.waitUntil) {
       globalThis.EdgeRuntime.waitUntil(processing);
     } else {
       // processing already owns its error handler; this branch keeps Deno happy outside EdgeRuntime.
     }
-    return new Response('EVENT_RECEIVED', {
+    return new Response(statuses.length > 0 ? 'EVENT_RECEIVED' : 'NO_STATUS_PAYLOAD', {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
     });

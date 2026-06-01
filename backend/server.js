@@ -1000,48 +1000,50 @@ const processFailedDeliveryWebhook = async (payload = {}) => {
     }
 };
 
+const quotePostgrestValue = (value) => {
+    const clean = String(value || '').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `"${clean}"`;
+};
+
 const extractMessageStatusUpdates = (payload = {}) => {
-    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+    try {
+        const statuses = payload?.entry?.[0]?.changes?.[0]?.value?.statuses;
+        if (!Array.isArray(statuses) || statuses.length === 0) return [];
 
-    const updates = [];
-    for (const entry of payload.entry) {
-        if (!Array.isArray(entry.changes)) continue;
+        const statusObj = statuses[0] || {};
+        const incomingWamid = String(statusObj.id || statusObj.message_id || '').trim();
+        const rawStatus = String(statusObj.status || '').trim().toUpperCase();
+        if (!incomingWamid || !rawStatus) return [];
 
-        for (const change of entry.changes) {
-            if (change.field !== 'messages') continue;
-            const value = change?.value || {};
-            const valueMetadata = value.metadata || {};
-            const statuses = Array.isArray(value.statuses) ? value.statuses : [];
-
-            for (const statusObj of statuses) {
-                const wamid = statusObj?.id || statusObj?.message_id || null;
-                const status = String(statusObj?.status || '').trim().toUpperCase();
-                if (!wamid || !status) continue;
-
-                updates.push({
-                    messageId: wamid,
-                    status,
-                    timestamp: statusObj.timestamp || null,
-                    recipientPhone: sanitizeMetaPhoneNumber(statusObj.recipient_id || ''),
-                    businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
-                    phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
-                    displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
-                    error: statusObj.errors?.[0] || null,
-                    raw: statusObj
-                });
-            }
-        }
+        const entry = payload?.entry?.[0] || {};
+        const valueMetadata = payload?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
+        return [{
+            messageId: incomingWamid,
+            status: rawStatus,
+            timestamp: statusObj.timestamp || null,
+            recipientPhone: sanitizeMetaPhoneNumber(statusObj.recipient_id || ''),
+            businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
+            phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
+            displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
+            error: statusObj.errors?.[0] || null,
+            raw: statusObj
+        }];
+    } catch (error) {
+        console.error('WhatsApp status payload extraction failed:', error.message || error);
+        return [];
     }
-
-    return updates;
 };
 
 const updateInboxMessagesByWamid = async (db, update) => {
     const patch = { status: update.status };
+    const incomingWamid = String(update.messageId || '').trim();
+    const quotedWamid = quotePostgrestValue(incomingWamid);
+    console.log("Processing Webhook for WAMID:", incomingWamid, "New Status:", update.status);
+
     let query = db
         .from('inbox_messages')
         .update(patch)
-        .or(`meta_message_id.eq.${update.messageId},message_id.eq.${update.messageId}`);
+        .or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`);
 
     if (update.status !== 'READ') query = query.neq('status', 'READ');
 
@@ -1382,7 +1384,8 @@ const handleWhatsAppWebhook = async (req, res) => {
             }
         }
     }
-    const statusCount = extractMessageStatusUpdates(req.body).length;
+    const statusUpdates = extractMessageStatusUpdates(req.body);
+    const statusCount = statusUpdates.length;
     const incomingCount = extractIncomingInboxMessages(req.body).length;
     console.log('WhatsApp webhook POST hit:', {
         object: req.body?.object || null,
@@ -1391,16 +1394,11 @@ const handleWhatsAppWebhook = async (req, res) => {
         incomingCount
     });
 
-    try {
-        await updateInboxMessageDeliveryStatuses(req.body);
-    } catch (error) {
-        console.error('WhatsApp webhook realtime status sync failed:', error.message || error);
-    }
-
-    res.status(200).send('EVENT_RECEIVED');
+    res.status(200).send(statusUpdates.length > 0 ? 'EVENT_RECEIVED' : 'NO_STATUS_PAYLOAD');
 
     Promise.resolve()
         .then(async () => {
+            if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
             await processTemplateStatusWebhook(req.body);
             await processIncomingInboxMessagesWebhook(req.body);
             await processFailedDeliveryWebhook(req.body);
