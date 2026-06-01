@@ -165,6 +165,7 @@ const sanitizeMetaPhoneNumber = (value) => {
     return digits.length === 10 ? `91${digits}` : digits;
 };
 const sanitizeMetaId = (value) => String(value || '').trim().replace(/[^\w.-]/g, '');
+const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/[<>]/g, '')
@@ -1314,7 +1315,14 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 chatId = createdChat?.id || null;
             }
 
-            if (!chatId) continue;
+            if (!isUuid(chatId)) {
+                console.error('Incoming inbox message skipped: no valid inbox_chats parent UUID resolved.', {
+                    userId,
+                    fromPhone: incoming.fromPhone,
+                    chatId
+                });
+                continue;
+            }
             await safeInsertRows({
                 table: 'inbox_messages',
                 rows: [{
@@ -3986,10 +3994,11 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         chatId = createdChat?.id || null;
     }
 
-    if (!chatId) {
+    if (!isUuid(chatId)) {
         console.error('Campaign inbox message skipped because no active chat id could be resolved.', {
             user_id: userId,
             receiver_phone: safeReceiverPhone,
+            chat_id: chatId,
             conversation_chat_id: conversationChatId
         });
         return;

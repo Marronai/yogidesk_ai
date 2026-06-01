@@ -77,6 +77,59 @@ const insertInboxMessageWithSchemaFallback = async (row = {}) => {
     return { success: false };
 };
 
+const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+
+const findInboxChatByOwnerAndPhone = async ({ ownerId, phone }) => {
+    if (!supabase?.from || !ownerId || !phone) return null;
+    const { data, error } = await supabase
+        .from('inbox_chats')
+        .select('id, metadata')
+        .eq('phone', phone)
+        .or(`user_id.eq.${ownerId},doctor_id.eq.${ownerId}`)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+        console.error('Inbox chat lookup before message insert failed:', error.message || error);
+        return null;
+    }
+
+    return data?.id ? data : null;
+};
+
+const writeTemplateDispatchChat = async ({ ownerId, activePhone, activeName, messageText, status, metadata, nowIso }) => {
+    const existingChat = await findInboxChatByOwnerAndPhone({ ownerId, phone: activePhone });
+    const payload = {
+        user_id: ownerId,
+        doctor_id: ownerId,
+        phone: activePhone,
+        patient_phone: activePhone,
+        name: activeName,
+        patient_name: activeName,
+        last_message: messageText,
+        status,
+        unread_count: 0,
+        updated_at: nowIso,
+        metadata: {
+            ...(existingChat?.metadata || {}),
+            last_template: metadata
+        }
+    };
+
+    const query = existingChat?.id
+        ? supabase.from('inbox_chats').update(payload).eq('id', existingChat.id).select('id, metadata').maybeSingle()
+        : supabase.from('inbox_chats').insert([payload]).select('id, metadata').maybeSingle();
+    const { data, error } = await query;
+
+    if (error) {
+        console.error('Inbox chat write before message insert failed:', error.message || error);
+        return existingChat || null;
+    }
+
+    return data?.id ? data : existingChat || null;
+};
+
 const resolveScheduledIso = (scheduledFor, index = 0) => {
     const parsed = scheduledFor ? new Date(scheduledFor) : null;
     const date = parsed && Number.isFinite(parsed.getTime())
@@ -634,58 +687,46 @@ exports.sendTestMessage = async (req, res) => {
             const ownerId = req.body.userId || req.body.doctorId || doctorId;
             const nowIso = new Date().toISOString();
 
-            // 1. Upsert into inbox_chats so the row definitely exists
-            let chatResult = await supabase
-                .from('inbox_chats')
-                .upsert({
-                    user_id: ownerId,
-                    doctor_id: ownerId,
-                    phone: activePhone,
-                    patient_phone: activePhone,
-                    name: activeName,
-                    patient_name: activeName,
-                    last_message: req.body.templateText || 'Template Sent',
-                    status: 'SENT',
-                    unread_count: 0,
-                    updated_at: nowIso,
-                    metadata: {
-                        last_template: {
-                            message_id: metaMessageId,
-                            meta_message_id: metaMessageId,
-                            whatsapp_business_account_id: credentials.businessAccountId || null,
-                            whatsapp_phone_number_id: phoneId || null,
-                            template_name: req.body.templateName || 'hello_world',
-                            delivery_status: 'SENT',
-                            sent_at: nowIso
-                        }
-                    }
-                }, { onConflict: 'phone' })
-                .select()
-                .single();
+            const messageText = req.body.templateText || 'Template Sent';
+            const deliveryMetadata = {
+                message_id: metaMessageId,
+                meta_message_id: metaMessageId,
+                whatsapp_business_account_id: credentials.businessAccountId || null,
+                whatsapp_phone_number_id: phoneId || null,
+                template_name: req.body.templateName || 'hello_world',
+                delivery_status: 'SENT',
+                sent_at: nowIso
+            };
 
-            if (chatResult.error && isSchemaCacheError(chatResult.error)) {
-                chatResult = await supabase
-                    .from('inbox_chats')
-                    .upsert({
-                        doctor_id: ownerId,
-                        phone: activePhone,
-                        patient_phone: activePhone,
-                        name: activeName,
-                        patient_name: activeName,
-                        last_message: req.body.templateText || 'Template Sent',
-                        status: 'SENT',
-                        unread_count: 0,
-                        updated_at: nowIso
-                    }, { onConflict: 'phone' })
-                    .select()
-                    .single();
+            // 1. Resolve the exact owner-scoped inbox_chats parent before inserting the child row.
+            const chatRow = await writeTemplateDispatchChat({
+                ownerId,
+                activePhone,
+                activeName,
+                messageText,
+                status: 'SENT',
+                metadata: deliveryMetadata,
+                nowIso
+            });
+
+            if (!isUuid(chatRow?.id)) {
+                console.error('Inbox message insert skipped: no valid inbox_chats parent UUID resolved.', {
+                    ownerId,
+                    activePhone,
+                    chatId: chatRow?.id || null,
+                    metaMessageId
+                });
+                return res.status(200).json({
+                    success: true,
+                    msg: "Message sent successfully!",
+                    data: response.data,
+                    inboxLogged: false
+                });
             }
-
-            const chatRow = chatResult.data;
 
             // 2. Insert the outbound message directly into inbox_messages
             const absoluteMessageRow = {
-                chat_id: chatRow?.id,
+                chat_id: chatRow.id,
                 body: req.body.templateText || `Template: ${req.body.templateName || 'hello_world'}`,
                 text: req.body.templateText || `Template: ${req.body.templateName || 'hello_world'}`,
                 message_body: req.body.templateText || `Template: ${req.body.templateName || 'hello_world'}`,
@@ -701,13 +742,8 @@ exports.sendTestMessage = async (req, res) => {
                 sender_phone: phoneId,
                 receiver_phone: activePhone,
                 metadata: {
-                    message_id: metaMessageId,
-                    meta_message_id: metaMessageId,
-                    whatsapp_business_account_id: credentials.businessAccountId || null,
-                    whatsapp_phone_number_id: phoneId || null,
-                    delivery_status: 'SENT',
-                    template_name: req.body.templateName || 'hello_world',
-                    sent_at: nowIso
+                    ...deliveryMetadata,
+                    inbox_chat_id: chatRow.id
                 },
                 created_at: nowIso
             };
