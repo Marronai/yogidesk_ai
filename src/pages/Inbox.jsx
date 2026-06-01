@@ -32,6 +32,8 @@ const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
+  meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
+  message_id: item.message_id || item.metadata?.message_id || item.metadata?.meta_message_id || '',
   text: item.message_text || item.body || item.text || item.message_body || '',
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
@@ -331,14 +333,14 @@ const InboxContent = () => {
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, chat_id, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
+        .select('id, chat_id, meta_message_id, message_id, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
       if (result.error) {
         result = await supabase
           .from('inbox_messages')
-          .select('id, chat_id, body, text, message_body, sender, from_me, status, created_at')
+          .select('id, chat_id, meta_message_id, message_id, body, text, message_body, sender, from_me, status, created_at')
           .eq('chat_id', chat.id)
           .order('created_at', { ascending: true });
       }
@@ -406,11 +408,32 @@ const InboxContent = () => {
     const channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_messages' }, (payload) => {
+        const updatedMessage = payload.new || {};
+        const nextStatus = String(updatedMessage.status || updatedMessage.metadata?.delivery_status || '').toUpperCase();
+        if (!['READ', 'DELIVERED'].includes(nextStatus)) return;
+
+        const nextMetaMessageId = updatedMessage.meta_message_id || updatedMessage.metadata?.meta_message_id || '';
+        const nextMessageId = updatedMessage.message_id || updatedMessage.metadata?.message_id || nextMetaMessageId;
+
         setMessages((prev) => prev.map((msg) => (
-          msg.id === payload.new.id
-            ? { ...msg, status: payload.new.status, metadata: payload.new.metadata || msg.metadata }
+          (msg.id === updatedMessage.id
+            || (nextMetaMessageId && (msg.meta_message_id === nextMetaMessageId || msg.metadata?.meta_message_id === nextMetaMessageId))
+            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId)))
+            ? {
+              ...msg,
+              status: nextStatus,
+              meta_message_id: nextMetaMessageId || msg.meta_message_id,
+              message_id: nextMessageId || msg.message_id,
+              metadata: updatedMessage.metadata || msg.metadata,
+            }
             : msg
         )));
+
+        if (updatedMessage.chat_id) {
+          setConversations((prev) => prev.map((chat) => (
+            chat.id === updatedMessage.chat_id ? { ...chat, status: nextStatus } : chat
+          )));
+        }
       })
       .subscribe();
 
