@@ -75,6 +75,10 @@ const quotePostgrestValue = (value = '') => {
   const clean = String(value || '').trim().replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `"${clean}"`;
 };
+const isMissingStatusMatchColumn = (error) => {
+  const message = String(error?.message || error?.details || '').toLowerCase();
+  return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
 
 const extractStatuses = (payload) => {
   try {
@@ -111,16 +115,46 @@ const updateDeliveryStatus = async (update) => {
   const quotedWamid = quotePostgrestValue(incomingWamid);
   console.log('Processing Webhook for WAMID:', incomingWamid, 'New Status:', update.status);
 
-  let query = supabase
-    .from('inbox_messages')
-    .update(patch)
-    .or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`);
-  if (update.status !== 'READ') query = query.neq('status', 'READ');
-  const { data: messages, error } = await query.select('id, chat_id, metadata');
+  const runStatusUpdate = async (buildQuery) => {
+    let query = buildQuery(supabase.from('inbox_messages').update(patch));
+    if (update.status !== 'READ') query = query.neq('status', 'READ');
+    return query.select('id, chat_id, metadata');
+  };
+
+  const attempts = [
+    () => runStatusUpdate((query) => query.or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`)),
+    () => runStatusUpdate((query) => query.filter('metadata->>meta_message_id', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.filter('metadata->>message_id', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.filter('metadata->>wamid', 'eq', incomingWamid)),
+    () => runStatusUpdate((query) => query.ilike('wamid', incomingWamid)),
+  ];
+
+  let messages = [];
+  let error = null;
+  for (const attempt of attempts) {
+    const result = await attempt();
+    if (result.error) {
+      if (isMissingStatusMatchColumn(result.error)) {
+        continue;
+      }
+      error = result.error;
+      break;
+    }
+    error = null;
+    messages = result.data || [];
+    if (messages.length > 0) break;
+  }
 
   if (error) {
     console.error('delivery status WAMID update failed:', error);
     return;
+  }
+
+  if (!messages.length) {
+    console.warn('delivery status update matched no WAMID rows after all lookup strategies:', {
+      incomingWamid,
+      status: update.status,
+    });
   }
 
   for (const message of messages || []) {

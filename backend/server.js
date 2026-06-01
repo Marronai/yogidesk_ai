@@ -1006,6 +1006,11 @@ const quotePostgrestValue = (value) => {
     return `"${clean}"`;
 };
 
+const isMissingStatusMatchColumn = (error) => {
+    const message = String(error?.message || error?.details || '').toLowerCase();
+    return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
+
 const extractMessageStatusUpdates = (payload = {}) => {
     try {
         const statuses = payload?.entry?.[0]?.changes?.[0]?.value?.statuses;
@@ -1041,14 +1046,38 @@ const updateInboxMessagesByWamid = async (db, update) => {
     const quotedWamid = quotePostgrestValue(incomingWamid);
     console.log("Processing Webhook for WAMID:", incomingWamid, "New Status:", update.status);
 
-    let query = db
-        .from('inbox_messages')
-        .update(patch)
-        .or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`);
+    const runStatusUpdate = async (buildQuery) => {
+        let query = buildQuery(db.from('inbox_messages').update(patch));
+        if (update.status !== 'READ') query = query.neq('status', 'READ');
+        return query.select('id, chat_id, metadata');
+    };
 
-    if (update.status !== 'READ') query = query.neq('status', 'READ');
+    const attempts = [
+        () => runStatusUpdate((query) => query.or(`meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`)),
+        () => runStatusUpdate((query) => query.filter('metadata->>meta_message_id', 'eq', incomingWamid)),
+        () => runStatusUpdate((query) => query.filter('metadata->>message_id', 'eq', incomingWamid)),
+        () => runStatusUpdate((query) => query.filter('metadata->>wamid', 'eq', incomingWamid)),
+        () => runStatusUpdate((query) => query.ilike('wamid', incomingWamid))
+    ];
 
-    return query.select('id, chat_id, metadata');
+    let lastResult = { data: [], error: null };
+    for (const attempt of attempts) {
+        const result = await attempt();
+        if (result.error) {
+            if (isMissingStatusMatchColumn(result.error)) {
+                continue;
+            }
+            return result;
+        }
+        if (Array.isArray(result.data) && result.data.length > 0) return result;
+        lastResult = result;
+    }
+
+    console.warn('Inbox delivery status update matched no WAMID rows after all lookup strategies:', {
+        incomingWamid,
+        status: update.status
+    });
+    return lastResult;
 };
 
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
