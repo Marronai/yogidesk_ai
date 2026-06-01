@@ -1122,6 +1122,34 @@ const logWhatsAppWebhookStatusEvent = async (db, update, messages = [], processi
     }
 };
 
+const logRawWhatsAppWebhookHit = async (payload = {}, { fields = [], statusCount = 0, incomingCount = 0 } = {}) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return;
+    try {
+        const { error } = await db.from('whatsapp_webhook_events').insert([{
+            source: 'express_whatsapp_webhook',
+            message_id: null,
+            status: 'WEBHOOK_POST',
+            matched_message_count: 0,
+            matched_chat_ids: [],
+            processing_error: null,
+            payload: {
+                object: payload?.object || null,
+                fields,
+                status_count: statusCount,
+                incoming_count: incomingCount,
+                entry_count: Array.isArray(payload?.entry) ? payload.entry.length : 0,
+                raw: payload
+            }
+        }]);
+        if (error && !isMissingStatusMatchColumn(error)) {
+            console.error('WhatsApp raw webhook hit log failed:', error.message || error);
+        }
+    } catch (error) {
+        console.error('WhatsApp raw webhook hit log crashed:', error.message || error);
+    }
+};
+
 const logWhatsAppInboundWebhookEvent = async (db, incoming, { userId = null, chatId = null, inserted = false, processingError = null } = {}) => {
     if (!db?.from || !incoming?.messageId) return;
     try {
@@ -1518,6 +1546,11 @@ const handleWhatsAppWebhook = async (req, res) => {
         statusCount,
         incomingCount,
         entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
+    });
+    await logRawWhatsAppWebhookHit(req.body, {
+        fields: [...new Set(webhookFields)],
+        statusCount,
+        incomingCount
     });
 
     res.status(200).send(statusUpdates.length > 0 ? 'EVENT_RECEIVED' : 'NO_STATUS_PAYLOAD');
