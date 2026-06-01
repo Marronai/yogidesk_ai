@@ -82,27 +82,34 @@ const isMissingStatusMatchColumn = (error) => {
 
 const extractStatuses = (payload) => {
   try {
-    const statuses = payload?.entry?.[0]?.changes?.[0]?.value?.statuses;
-    if (!Array.isArray(statuses) || statuses.length === 0) return [];
+    const updates = [];
+    for (const entry of payload?.entry || []) {
+      for (const change of entry?.changes || []) {
+        if (change?.field !== 'messages') continue;
+        const value = change?.value || {};
+        const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+        const metadata = value?.metadata || {};
 
-    const statusObj = statuses[0] || {};
-    const incomingWamid = String(statusObj?.id || statusObj?.message_id || '').trim();
-    const rawStatus = normalizeDeliveryStatus(String(statusObj?.status || '').trim().toUpperCase());
-    if (!incomingWamid || !rawStatus) return [];
+        for (const statusObj of statuses) {
+          const incomingWamid = String(statusObj?.id || statusObj?.message_id || '').trim();
+          const rawStatus = normalizeDeliveryStatus(String(statusObj?.status || '').trim().toUpperCase());
+          if (!incomingWamid || !rawStatus) continue;
 
-    const entry = payload?.entry?.[0] || {};
-    const metadata = payload?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
-    return [{
-      messageId: incomingWamid,
-      status: rawStatus,
-      timestamp: statusObj?.timestamp || null,
-      recipientPhone: normalizePhone(statusObj?.recipient_id || ''),
-      businessAccountId: normalizeMetaId(metadata?.whatsapp_business_account_id || metadata?.waba_id || entry?.id || ''),
-      phoneNumberId: normalizeMetaId(metadata?.phone_number_id || ''),
-      displayPhoneNumber: normalizePhone(metadata?.display_phone_number || ''),
-      error: statusObj?.errors?.[0] || null,
-      raw: statusObj,
-    }];
+          updates.push({
+            messageId: incomingWamid,
+            status: rawStatus,
+            timestamp: statusObj?.timestamp || null,
+            recipientPhone: normalizePhone(statusObj?.recipient_id || ''),
+            businessAccountId: normalizeMetaId(metadata?.whatsapp_business_account_id || metadata?.waba_id || entry?.id || ''),
+            phoneNumberId: normalizeMetaId(metadata?.phone_number_id || ''),
+            displayPhoneNumber: normalizePhone(metadata?.display_phone_number || ''),
+            error: statusObj?.errors?.[0] || null,
+            raw: statusObj,
+          });
+        }
+      }
+    }
+    return updates;
   } catch (error) {
     console.error('WhatsApp status payload extraction failed:', error?.message || error);
     return [];
@@ -420,6 +427,11 @@ serve((req) => {
   try {
     const payload = await req.json();
     const statuses = extractStatuses(payload);
+    console.log('WhatsApp Edge webhook POST hit:', {
+      object: payload?.object || null,
+      entryCount: Array.isArray(payload?.entry) ? payload.entry.length : 0,
+      statusCount: statuses.length,
+    });
     const processing = processWebhookPayload(payload, statuses)
       .catch((error) => console.error('whatsapp-webhook error:', error));
     if (globalThis.EdgeRuntime?.waitUntil) {

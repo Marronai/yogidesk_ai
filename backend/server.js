@@ -1013,27 +1013,34 @@ const isMissingStatusMatchColumn = (error) => {
 
 const extractMessageStatusUpdates = (payload = {}) => {
     try {
-        const statuses = payload?.entry?.[0]?.changes?.[0]?.value?.statuses;
-        if (!Array.isArray(statuses) || statuses.length === 0) return [];
+        const updates = [];
+        for (const entry of payload?.entry || []) {
+            for (const change of entry?.changes || []) {
+                if (change?.field !== 'messages') continue;
+                const value = change?.value || {};
+                const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+                const valueMetadata = value?.metadata || {};
 
-        const statusObj = statuses[0] || {};
-        const incomingWamid = String(statusObj.id || statusObj.message_id || '').trim();
-        const rawStatus = String(statusObj.status || '').trim().toUpperCase();
-        if (!incomingWamid || !rawStatus) return [];
+                for (const statusObj of statuses) {
+                    const incomingWamid = String(statusObj?.id || statusObj?.message_id || '').trim();
+                    const rawStatus = String(statusObj?.status || '').trim().toUpperCase();
+                    if (!incomingWamid || !rawStatus) continue;
 
-        const entry = payload?.entry?.[0] || {};
-        const valueMetadata = payload?.entry?.[0]?.changes?.[0]?.value?.metadata || {};
-        return [{
-            messageId: incomingWamid,
-            status: rawStatus,
-            timestamp: statusObj.timestamp || null,
-            recipientPhone: sanitizeMetaPhoneNumber(statusObj.recipient_id || ''),
-            businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
-            phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
-            displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
-            error: statusObj.errors?.[0] || null,
-            raw: statusObj
-        }];
+                    updates.push({
+                        messageId: incomingWamid,
+                        status: rawStatus,
+                        timestamp: statusObj.timestamp || null,
+                        recipientPhone: sanitizeMetaPhoneNumber(statusObj.recipient_id || ''),
+                        businessAccountId: sanitizeMetaId(valueMetadata.whatsapp_business_account_id || valueMetadata.waba_id || entry.id || ''),
+                        phoneNumberId: sanitizeMetaId(valueMetadata.phone_number_id || ''),
+                        displayPhoneNumber: sanitizeMetaPhoneNumber(valueMetadata.display_phone_number || ''),
+                        error: statusObj.errors?.[0] || null,
+                        raw: statusObj
+                    });
+                }
+            }
+        }
+        return updates;
     } catch (error) {
         console.error('WhatsApp status payload extraction failed:', error.message || error);
         return [];
@@ -1428,7 +1435,8 @@ const handleWhatsAppWebhook = async (req, res) => {
         object: req.body?.object || null,
         fields: [...new Set(webhookFields)],
         statusCount,
-        incomingCount
+        incomingCount,
+        entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
     });
 
     res.status(200).send(statusUpdates.length > 0 ? 'EVENT_RECEIVED' : 'NO_STATUS_PAYLOAD');
@@ -3943,6 +3951,7 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
         template_id: row.template_id || row.payload?.template?.id || null,
         template_name: row.template_name || row.payload?.template?.template_name || row.payload?.template?.name || 'WhatsApp Template',
         template_category: row.template_category || row.payload?.template?.category || 'UTILITY',
+        wamid: getMetaMessageId(metaResult),
         message_id: getMetaMessageId(metaResult),
         meta_message_id: getMetaMessageId(metaResult),
         whatsapp_business_account_id: whatsappBusinessAccountId,

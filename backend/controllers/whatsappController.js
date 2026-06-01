@@ -689,6 +689,7 @@ exports.sendTestMessage = async (req, res) => {
 
             const messageText = req.body.templateText || 'Template Sent';
             const deliveryMetadata = {
+                wamid: metaMessageId,
                 message_id: metaMessageId,
                 meta_message_id: metaMessageId,
                 whatsapp_business_account_id: credentials.businessAccountId || null,
@@ -735,6 +736,7 @@ exports.sendTestMessage = async (req, res) => {
                 type: 'template',
                 message_type: 'text',
                 status: 'SENT',
+                wamid: metaMessageId,
                 meta_message_id: metaMessageId,
                 message_id: metaMessageId,
                 workspace_id: ownerId,
