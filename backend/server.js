@@ -1122,6 +1122,35 @@ const logWhatsAppWebhookStatusEvent = async (db, update, messages = [], processi
     }
 };
 
+const logWhatsAppInboundWebhookEvent = async (db, incoming, { userId = null, chatId = null, inserted = false, processingError = null } = {}) => {
+    if (!db?.from || !incoming?.messageId) return;
+    try {
+        const { error } = await db.from('whatsapp_webhook_events').insert([{
+            source: 'express_whatsapp_webhook',
+            message_id: incoming.messageId,
+            status: 'INBOUND',
+            recipient_phone: incoming.fromPhone || null,
+            business_account_id: incoming.businessAccountId || null,
+            phone_number_id: incoming.phoneNumberId || null,
+            display_phone_number: incoming.displayPhoneNumber || null,
+            matched_message_count: inserted ? 1 : 0,
+            matched_chat_ids: chatId ? [chatId] : [],
+            processing_error: processingError ? String(processingError.message || processingError) : null,
+            payload: {
+                ...(incoming.raw || {}),
+                resolved_user_id: userId,
+                resolved_chat_id: chatId,
+                text_preview: incoming.text
+            }
+        }]);
+        if (error && !isMissingStatusMatchColumn(error)) {
+            console.error('WhatsApp inbound webhook event log failed:', error.message || error);
+        }
+    } catch (error) {
+        console.error('WhatsApp inbound webhook event log crashed:', error.message || error);
+    }
+};
+
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return;
@@ -1326,6 +1355,9 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 patientPhone: incoming.fromPhone
             });
             if (!userId) {
+                await logWhatsAppInboundWebhookEvent(db, incoming, {
+                    processingError: `Owner not found for WABA=${incoming.businessAccountId || 'missing'} phoneNumberId=${incoming.phoneNumberId || incoming.clinicMetaId || 'missing'}`
+                });
                 console.warn('Incoming inbox webhook skipped: owner not found.', {
                     clinicMetaId: incoming.clinicMetaId,
                     businessAccountId: incoming.businessAccountId,
@@ -1389,6 +1421,11 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             }
 
             if (!isUuid(chatId)) {
+                await logWhatsAppInboundWebhookEvent(db, incoming, {
+                    userId,
+                    chatId,
+                    processingError: 'No valid inbox_chats parent UUID resolved'
+                });
                 console.error('Incoming inbox message skipped: no valid inbox_chats parent UUID resolved.', {
                     userId,
                     fromPhone: incoming.fromPhone,
@@ -1396,7 +1433,7 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 });
                 continue;
             }
-            await safeInsertRows({
+            const insertResult = await safeInsertRows({
                 table: 'inbox_messages',
                 rows: [{
                     chat_id: chatId,
@@ -1425,7 +1462,14 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 }],
                 pruneMissingColumns: false
             });
+            await logWhatsAppInboundWebhookEvent(db, incoming, {
+                userId,
+                chatId,
+                inserted: insertResult.success,
+                processingError: insertResult.success ? null : (insertResult.error || 'Inbox message insert failed')
+            });
         } catch (error) {
+            await logWhatsAppInboundWebhookEvent(db, incoming, { processingError: error });
             console.error('Incoming inbox webhook sync failed:', error.message || error);
         }
     }
