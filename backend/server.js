@@ -1583,6 +1583,43 @@ app.get('/api/webhooks/whatsapp/diagnostics', (req, res) => {
         requiredMetaSubscriptionField: 'messages'
     });
 });
+app.get('/api/webhooks/whatsapp/audit-ping', async (req, res) => {
+    try {
+        const token = String(req.query.token || '').trim();
+        if (!token || token !== getMetaWebhookVerifyToken()) {
+            return res.status(403).json({ success: false, message: 'Invalid audit token.' });
+        }
+
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) {
+            return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+        }
+
+        const { error } = await db.from('whatsapp_webhook_events').insert([{
+            source: 'webhook_diagnostics',
+            status: 'AUDIT_PING',
+            matched_message_count: 0,
+            matched_chat_ids: [],
+            payload: {
+                path: '/api/webhooks/whatsapp/audit-ping',
+                at: new Date().toISOString()
+            }
+        }]);
+
+        if (error) {
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Audit insert failed.',
+                details: error.details || null,
+                code: error.code || null
+            });
+        }
+
+        return res.status(200).json({ success: true, message: 'Audit ping inserted.' });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message || 'Audit ping failed.' });
+    }
+});
 app.get('/api/whatsapp-webhook', verifyWhatsAppWebhook);
 app.post('/api/whatsapp-webhook', handleWhatsAppWebhook);
 app.get('/api/webhook/meta', verifyWhatsAppWebhook);
