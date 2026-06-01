@@ -1097,6 +1097,31 @@ const updateInboxMessagesByWamid = async (db, update) => {
     return lastResult;
 };
 
+const logWhatsAppWebhookStatusEvent = async (db, update, messages = [], processingError = null) => {
+    if (!db?.from || !update?.messageId) return;
+    try {
+        const matchedMessages = Array.isArray(messages) ? messages : [];
+        const { error } = await db.from('whatsapp_webhook_events').insert([{
+            source: 'express_whatsapp_webhook',
+            message_id: update.messageId,
+            status: update.status,
+            recipient_phone: update.recipientPhone || null,
+            business_account_id: update.businessAccountId || null,
+            phone_number_id: update.phoneNumberId || null,
+            display_phone_number: update.displayPhoneNumber || null,
+            matched_message_count: matchedMessages.length,
+            matched_chat_ids: matchedMessages.map((message) => message.chat_id).filter(Boolean),
+            processing_error: processingError ? String(processingError.message || processingError) : null,
+            payload: update.raw || null
+        }]);
+        if (error && !isMissingStatusMatchColumn(error)) {
+            console.error('WhatsApp webhook status event log failed:', error.message || error);
+        }
+    } catch (error) {
+        console.error('WhatsApp webhook status event log crashed:', error.message || error);
+    }
+};
+
 const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return;
@@ -1110,6 +1135,7 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     for (const update of updates) {
         try {
             const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
+            await logWhatsAppWebhookStatusEvent(db, update, messages || [], error || null);
 
             if (error) {
                 console.error('❌ Inbox delivery status WAMID update failed:', {
@@ -1193,6 +1219,7 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                 }
             }
         } catch (error) {
+            await logWhatsAppWebhookStatusEvent(db, update, [], error);
             console.error('Inbox delivery status sync failed:', error.message || error);
         }
     }

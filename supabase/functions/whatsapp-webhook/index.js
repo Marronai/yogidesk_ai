@@ -123,6 +123,31 @@ const extractStatuses = (payload) => {
   }
 };
 
+const logWebhookStatusEvent = async (update, messages = [], processingError = null) => {
+  if (!update?.messageId) return;
+  try {
+    const matchedMessages = Array.isArray(messages) ? messages : [];
+    const { error } = await supabase.from('whatsapp_webhook_events').insert([{
+      source: 'supabase_edge_whatsapp_webhook',
+      message_id: update.messageId,
+      status: update.status,
+      recipient_phone: update.recipientPhone || null,
+      business_account_id: update.businessAccountId || null,
+      phone_number_id: update.phoneNumberId || null,
+      display_phone_number: update.displayPhoneNumber || null,
+      matched_message_count: matchedMessages.length,
+      matched_chat_ids: matchedMessages.map((message) => message.chat_id).filter(Boolean),
+      processing_error: processingError ? String(processingError.message || processingError) : null,
+      payload: update.raw || null,
+    }]);
+    if (error && !isMissingStatusMatchColumn(error)) {
+      console.error('WhatsApp webhook status event log failed:', error.message || error);
+    }
+  } catch (error) {
+    console.error('WhatsApp webhook status event log crashed:', error?.message || error);
+  }
+};
+
 const updateDeliveryStatus = async (update) => {
   const patch = { status: update.status };
   const incomingWamid = String(update.messageId || '').trim();
@@ -163,9 +188,12 @@ const updateDeliveryStatus = async (update) => {
   }
 
   if (error) {
+    await logWebhookStatusEvent(update, [], error);
     console.error('delivery status WAMID update failed:', error);
     return;
   }
+
+  await logWebhookStatusEvent(update, messages || [], null);
 
   if (!messages.length) {
     console.warn('delivery status update matched no WAMID rows after all lookup strategies:', {
