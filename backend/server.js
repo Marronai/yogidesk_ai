@@ -3540,7 +3540,7 @@ app.get('/api/inbox/messages', async (req, res) => {
         const db = supabaseAdmin || supabase;
         const { data: chat, error: chatError } = await db
             .from('inbox_chats')
-            .select('id')
+            .select('id, user_id, doctor_id, name, patient_name, phone, patient_phone, status, unread_count, updated_at, window_expires_at, whatsapp_window_expires_at, metadata')
             .eq('id', chatId)
             .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
             .maybeSingle();
@@ -3568,7 +3568,13 @@ app.get('/api/inbox/messages', async (req, res) => {
         }
 
         if (result.error) throw result.error;
-        return res.status(200).json({ success: true, messages: result.data || [] });
+        const { data: refreshedChat } = await db
+            .from('inbox_chats')
+            .select('id, user_id, doctor_id, name, patient_name, phone, patient_phone, status, unread_count, updated_at, window_expires_at, whatsapp_window_expires_at, metadata')
+            .eq('id', chatId)
+            .maybeSingle();
+
+        return res.status(200).json({ success: true, messages: result.data || [], chat: refreshedChat || { ...chat, unread_count: 0 } });
     } catch (error) {
         const statusCode = error.statusCode || 500;
         console.error('Inbox messages API failed:', error.message || error);
