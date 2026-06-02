@@ -89,6 +89,18 @@ const normalizeMessages = (items = []) => {
   });
   return Array.from(byKey.values()).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
 };
+const mergeServerMessagesWithPending = (serverItems = [], currentItems = []) => {
+  const serverMessages = normalizeMessages(serverItems);
+  const recentPending = (Array.isArray(currentItems) ? currentItems : [])
+    .filter((message) => message.status === 'SENDING')
+    .filter((message) => Date.now() - getMessageTime(message) < 45000)
+    .filter((message) => !serverMessages.some((serverMessage) => (
+      serverMessage.from_me === true &&
+      serverMessage.text === message.text &&
+      Math.abs(getMessageTime(serverMessage) - getMessageTime(message)) < 60000
+    )));
+  return normalizeMessages([...serverMessages, ...recentPending]);
+};
 const getMessageTime = (message = {}) => {
   const value = new Date(message.created_at || '').getTime();
   return Number.isFinite(value) ? value : 0;
@@ -390,7 +402,7 @@ const InboxContent = () => {
     try {
       const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
       if (apiResult.data?.success) {
-        setMessages(normalizeMessages(apiResult.data.messages || []));
+        setMessages((prev) => mergeServerMessagesWithPending(apiResult.data.messages || [], prev));
         if (apiResult.data.chat?.id) {
           const mappedChat = { ...mapInboxChatRow(apiResult.data.chat), unread: 0, unread_count: 0 };
           setConversations((prev) => prev.map((item) => (
@@ -423,7 +435,7 @@ const InboxContent = () => {
 
       if (result.error) throw result.error;
       if (Array.isArray(result.data) && result.data.length > 0) {
-        setMessages(normalizeMessages(result.data));
+        setMessages((prev) => mergeServerMessagesWithPending(result.data, prev));
       }
     } catch (error) {
       logInboxError(error);
@@ -667,14 +679,19 @@ const InboxContent = () => {
       return;
     }
 
+    const localMessageId = `local-${Date.now()}`;
+    const nowIso = new Date().toISOString();
     const created = {
-      id: Date.now(),
+      id: localMessageId,
       text,
       sender: 'agent',
       from_me: true,
       type: isPrivateNote ? 'private' : 'public',
       is_private_note: isPrivateNote,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: isPrivateNote ? 'SENT' : 'SENDING',
+      created_at: nowIso,
+      metadata: { local_client_id: localMessageId },
+      time: new Date(nowIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, created]);
