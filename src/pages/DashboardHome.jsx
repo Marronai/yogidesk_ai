@@ -303,21 +303,12 @@ const DashboardHome = () => {
           { data: [] }
         ),
         safeFetch(
-          () => supabase
-            .from('inbox_messages')
-            .select('id,created_at,from_me,status')
-            .eq('workspace_id', userId)
-            .eq('from_me', true)
-            .gte('created_at', sevenDayStart.toISOString())
-            .lt('created_at', tomorrowStart.toISOString()),
-          { data: [] }
+          () => api.get(backendPath('/api/analytics/message-history'), { params: { userId, timezone: 'Asia/Kolkata' } }),
+          { data: { success: false, data: [], totalMessages: 0 } }
         ),
         safeFetch(
-          () => supabase
-            .from('submitted_meta_templates')
-            .select('status')
-            .eq('user_id', userId),
-          { data: [] }
+          () => api.get(backendPath('/api/analytics/templates'), { params: { userId } }),
+          { data: { success: false, data: { approved: 0, rejected: 0, pending: 0 } } }
         ),
         safeFetch(
           () => supabase
@@ -371,16 +362,17 @@ const DashboardHome = () => {
       const previousInboxTotal = Array.isArray(inboxPreviousRows?.data) ? inboxPreviousRows.data.length : 0;
       const lastWeekSent = sumCampaignRows(previousRows) || previousInboxTotal;
 
-      const templates = Array.isArray(templateRows?.data) ? templateRows.data : [];
-      const approvedCount = templates.filter((t) => t.status === 'APPROVED').length;
-      const pendingCount = templates.filter((t) => t.status === 'PENDING_APPROVAL' || t.status === 'PENDING').length;
-      const rejectedCount = templates.filter((t) => t.status === 'REJECTED').length;
-      setTemplateStats({ approved: approvedCount, pending: pendingCount, rejected: rejectedCount });
+      const templates = templateRows?.data?.data || {};
+      setTemplateStats({ 
+        approved: templates.approved || 0, 
+        pending: templates.pending || 0, 
+        rejected: templates.rejected || 0 
+      });
 
       const campaignHistoryRows = Array.isArray(sevenDayCampaignRows?.data) ? sevenDayCampaignRows.data : [];
-      const inboxHistoryRows = Array.isArray(sevenDayInboxRows?.data) ? sevenDayInboxRows.data : [];
-      const historyRows = campaignHistoryRows.length ? campaignHistoryRows : inboxHistoryRows;
-      setMessageHistory(countRowsByDay(historyRows, sevenDays));
+      const messageHistoryData = Array.isArray(sevenDayInboxRows?.data?.data) ? sevenDayInboxRows.data.data : [];
+      const historyRows = campaignHistoryRows.length ? campaignHistoryRows : messageHistoryData;
+      setMessageHistory(historyRows.length > 0 && historyRows[0]?.key ? historyRows : countRowsByDay(historyRows, sevenDays));
 
       const inbound = Array.isArray(inboundRows?.data) ? inboundRows.data : [];
       const hourCounts = inbound.reduce((acc, row) => {

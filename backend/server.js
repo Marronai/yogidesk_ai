@@ -15,6 +15,7 @@ const {
     insertQueuedInboxChatRows
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
+const { getTemplateStatusAggregation, getMessageSentHistory, getDashboardMetrics } = require('./controllers/analyticsController');
 const adminControlRoutes = require('./routes/adminControlRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
@@ -2779,6 +2780,75 @@ app.get('/api/templates/dashboard', async (req, res) => {
     } catch (error) {
         console.error('Template dashboard error:', error.message || error);
         return res.status(400).json({ success: false, message: error.message || 'Unable to load template dashboard.' });
+    }
+});
+
+// ============================================================================
+// Analytics API Routes
+// ============================================================================
+
+app.get('/api/analytics/templates', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        return await getTemplateStatusAggregation({ query: { userId } }, res, db);
+    } catch (error) {
+        console.error('Analytics templates error:', error.message || error);
+        return res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Unable to load template analytics.',
+            data: { approved: 0, rejected: 0, pending: 0, total: 0 }
+        });
+    }
+});
+
+app.get('/api/analytics/message-history', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || sessionUser?.id;
+        const timezone = req.query.timezone || 'Asia/Kolkata';
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        return await getMessageSentHistory({ query: { userId, timezone } }, res, db);
+    } catch (error) {
+        console.error('Analytics message history error:', error.message || error);
+        return res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Unable to load message history.',
+            data: [],
+            totalMessages: 0
+        });
+    }
+});
+
+app.get('/api/analytics/dashboard', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) throw new Error('Database connection unavailable.');
+
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = req.query.userId || sessionUser?.id;
+        const timezone = req.query.timezone || 'Asia/Kolkata';
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+
+        return await getDashboardMetrics({ query: { userId, timezone } }, res, db);
+    } catch (error) {
+        console.error('Analytics dashboard error:', error.message || error);
+        return res.status(500).json({ 
+            success: false, 
+            error: error.message || 'Unable to load dashboard analytics.'
+        });
     }
 });
 
