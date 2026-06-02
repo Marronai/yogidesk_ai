@@ -1294,27 +1294,30 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
                         .eq('id', message.chat_id)
                         .maybeSingle();
                     const chatMetadata = chat?.metadata || {};
+                    const chatPatch = {
+                        status: update.status,
+                        updated_at: new Date().toISOString(),
+                        metadata: {
+                            ...chatMetadata,
+                            meta_message_id: update.messageId,
+                            delivery_status: update.status,
+                            whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
+                            subscription_status: 'ACTIVE',
+                            last_template: {
+                                ...(chatMetadata.last_template || {}),
+                                meta_message_id: update.messageId,
+                                message_id: update.messageId,
+                                delivery_status: update.status,
+                                delivery_status_at: update.timestamp,
+                                whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
+                            }
+                        }
+                    };
+                    if (update.status === 'READ') chatPatch.unread_count = 0;
+
                     await db
                         .from('inbox_chats')
-                        .update({
-                            status: update.status,
-                            updated_at: new Date().toISOString(),
-                            metadata: {
-                                ...chatMetadata,
-                                meta_message_id: update.messageId,
-                                delivery_status: update.status,
-                                whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
-                                subscription_status: 'ACTIVE',
-                                last_template: {
-                                    ...(chatMetadata.last_template || {}),
-                                    meta_message_id: update.messageId,
-                                    message_id: update.messageId,
-                                    delivery_status: update.status,
-                                    delivery_status_at: update.timestamp,
-                                    whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
-                                }
-                            }
-                        })
+                        .update(chatPatch)
                         .eq('id', message.chat_id);
                 }
             }
@@ -3435,7 +3438,7 @@ app.get('/api/inbox/chats', async (req, res) => {
 
         let chatResult = await db
             .from('inbox_chats')
-            .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, whatsapp_window_expires_at, metadata')
+            .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, window_expires_at, whatsapp_window_expires_at, metadata')
             .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
             .order('updated_at', { ascending: false });
 
@@ -4205,9 +4208,14 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             patient_phone: safeReceiverPhone,
             status: deliveryStatus,
             last_message: messageBody,
+            unread_count: 0,
+            window_expires_at: null,
+            whatsapp_window_expires_at: null,
             updated_at: nowIso,
             metadata: {
                 ...(existingChat.metadata || {}),
+                window_expires_at: null,
+                whatsapp_window_expires_at: null,
                 last_template: metadata,
                 messages: [...existingMessages, { ...storedMessagePreview, chat_id: chatId }].slice(-50),
             },
@@ -4223,8 +4231,15 @@ const upsertCampaignInboxMessage = async ({ row = {}, metaResult = null, fallbac
             status: deliveryStatus,
             last_message: messageBody,
             unread_count: 0,
+            window_expires_at: null,
+            whatsapp_window_expires_at: null,
             updated_at: nowIso,
-            metadata: { last_template: metadata, messages: [storedMessagePreview] },
+            metadata: {
+                window_expires_at: null,
+                whatsapp_window_expires_at: null,
+                last_template: metadata,
+                messages: [storedMessagePreview]
+            },
         } });
         chatId = createdChat?.id || null;
     }
@@ -4297,6 +4312,8 @@ const processCampaignFallbackRows = async (rows = []) => {
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
                     last_message: resolveCampaignMessagePreview(row),
+                    window_expires_at: null,
+                    whatsapp_window_expires_at: null,
                     updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{
@@ -4388,6 +4405,8 @@ const processCampaignQueue = async () => {
                 supabase.from('inbox_chats').update({
                     status: 'SENT',
                     last_message: resolveCampaignMessagePreview(row),
+                    window_expires_at: null,
+                    whatsapp_window_expires_at: null,
                     updated_at: new Date().toISOString()
                 }).eq('phone', row.recipient_phone),
                 supabase.from('wallet_transactions').insert([{

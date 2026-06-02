@@ -138,40 +138,12 @@ const InboxContent = () => {
       ? (Array.isArray(conversations) ? conversations : [])
       : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
   ), [conversations, tagFilter]);
-  const latestMessage = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
-  const chatHasInboundState = normalizeDeliveryStatus(selectedChat?.status) === 'INBOUND' || selectedChat?.metadata?.conversation_state === 'INBOUND';
-  const latestMessageIsInbound = normalizeDeliveryStatus(latestMessage?.status) === 'INBOUND';
-  const isWindowOpen = selectedChat?.whatsapp_window_expires_at
-    ? new Date(selectedChat.whatsapp_window_expires_at) > new Date(now)
+  const activeWindowExpiresAt = selectedChat?.window_expires_at || selectedChat?.whatsapp_window_expires_at || null;
+  const isWindowOpen = activeWindowExpiresAt
+    ? new Date(activeWindowExpiresAt) > new Date(now)
     : false;
-  const lastInboundAt = useMemo(() => {
-    const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
-    const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
-    const messageMs = (Array.isArray(messages) ? messages : []).reduce((latest, item) => {
-      if (item.from_me === true || item.sender === 'agent' || item.sender === 'doctor') return latest;
-      const itemMs = item.created_at ? new Date(item.created_at).getTime() : 0;
-      return Number.isFinite(itemMs) ? Math.max(latest, itemMs) : latest;
-    }, 0);
-    return Math.max(metadataMs, messageMs);
-  }, [messages, selectedChat]);
-  const lastTemplateSentAt = useMemo(() => {
-    const messageMs = (Array.isArray(messages) ? messages : []).reduce((latest, item) => {
-      const isOutbound = item.from_me === true || item.sender === 'agent' || item.sender === 'doctor';
-      const isTemplate = item.type === 'template' || item.message_type === 'template' || item.metadata?.campaign_triggered || item.metadata?.bulk_broadcast;
-      const itemMs = item.created_at ? new Date(item.created_at).getTime() : 0;
-      return isOutbound && isTemplate && Number.isFinite(itemMs) ? Math.max(latest, itemMs) : latest;
-    }, 0);
-    const metadataTime = selectedChat?.metadata?.last_template?.sent_at || selectedChat?.metadata?.last_template_sent_at;
-    const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
-    return Math.max(messageMs, metadataMs);
-  }, [messages, selectedChat]);
-  const isReplyWindowOpen = Boolean(
-    isWindowOpen ||
-    (lastInboundAt &&
-      now - lastInboundAt <= 24 * 60 * 60 * 1000 &&
-      (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt))
-  );
-  const canUseComposer = isPrivateNote || chatHasInboundState || latestMessageIsInbound || isReplyWindowOpen;
+  const isReplyWindowOpen = Boolean(isWindowOpen);
+  const canUseComposer = isPrivateNote || isReplyWindowOpen;
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -219,7 +191,7 @@ const InboxContent = () => {
       if (loadedFromApi) throw new Error('__INBOX_API_LOADED__');
       let result = await supabase
         .from('inbox_chats')
-        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, whatsapp_window_expires_at, metadata')
+        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, window_expires_at, whatsapp_window_expires_at, metadata')
         .or(`user_id.eq.${user.id},doctor_id.eq.${user.id}`)
         .order('updated_at', { ascending: false });
 
@@ -314,10 +286,12 @@ const InboxContent = () => {
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
           unread: count,
+          unread_count: count,
           status: chat.status || 'Offline',
           deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
+          window_expires_at: chat.window_expires_at || chat.metadata?.window_expires_at || null,
           whatsapp_window_expires_at: chat.whatsapp_window_expires_at || chat.metadata?.whatsapp_window_expires_at || null,
           metadata: chat?.metadata || {},
         };
@@ -451,8 +425,15 @@ const InboxContent = () => {
 
         if (updatedMessage.chat_id) {
           setConversations((prev) => prev.map((chat) => (
-            chat.id === updatedMessage.chat_id ? { ...chat, deliveryStatus: nextStatus } : chat
+            chat.id === updatedMessage.chat_id
+              ? { ...chat, deliveryStatus: nextStatus, ...(nextStatus === 'READ' ? { unread: 0, unread_count: 0 } : {}) }
+              : chat
           )));
+          if (nextStatus === 'READ') {
+            setSelectedChat((prev) => (
+              prev?.id === updatedMessage.chat_id ? { ...prev, unread: 0, unread_count: 0 } : prev
+            ));
+          }
         }
       })
       .subscribe();
@@ -694,7 +675,11 @@ const InboxContent = () => {
                   <p className="truncate text-xs text-slate-500">{chat.lastMsg}</p>
                 )}
               </div>
-              {chat.unread > 0 && <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">{chat.unread}</div>}
+              {Number(chat.unread_count ?? chat.unread ?? 0) > 0 && (
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
+                  {Number(chat.unread_count ?? chat.unread ?? 0)}
+                </div>
+              )}
             </button>
           ))}
         </div>

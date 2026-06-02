@@ -110,9 +110,13 @@ const writeTemplateDispatchChat = async ({ ownerId, activePhone, activeName, mes
         last_message: messageText,
         status,
         unread_count: 0,
+        window_expires_at: null,
+        whatsapp_window_expires_at: null,
         updated_at: nowIso,
         metadata: {
             ...(existingChat?.metadata || {}),
+            window_expires_at: null,
+            whatsapp_window_expires_at: null,
             last_template: metadata
         }
     };
@@ -226,12 +230,17 @@ const buildQueuedInboxChatPayload = ({ userId, doctorId: requestDoctorId, templa
         phone: recipientPhone || 'unknown',
         last_message: `Queued: ${template.template_name || template.name || 'WhatsApp Template'}`,
         status: 'QUEUED',
+        unread_count: 0,
         scheduled_at: scheduledIso,
+        window_expires_at: null,
+        whatsapp_window_expires_at: null,
         updated_at: new Date().toISOString(),
         metadata: {
             template_id: template.id || null,
             template_name: template.template_name || template.name || 'WhatsApp Template',
             template_category: template.category || 'UTILITY',
+            window_expires_at: null,
+            whatsapp_window_expires_at: null,
             recipient,
         }
     };
@@ -281,6 +290,8 @@ const insertQueuedInboxChatRows = async ({ rows = [] }) => {
                 ...row,
                 phone,
                 patient_phone: row.patient_phone || phone,
+                window_expires_at: null,
+                whatsapp_window_expires_at: null,
                 updated_at: row.updated_at || new Date().toISOString(),
             };
 

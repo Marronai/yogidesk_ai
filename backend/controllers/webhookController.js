@@ -253,27 +253,30 @@ const syncInboxDeliveryStatus = async (db, update) => {
 
     const { data: chat } = await db.from('inbox_chats').select('metadata').eq('id', message.chat_id).maybeSingle();
     const chatMetadata = chat?.metadata || {};
+    const chatPatch = {
+      status: update.deliveryStatus,
+      updated_at: new Date().toISOString(),
+      metadata: {
+        ...chatMetadata,
+        meta_message_id: update.messageId,
+        delivery_status: update.deliveryStatus,
+        whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
+        subscription_status: 'ACTIVE',
+        last_template: {
+          ...(chatMetadata.last_template || {}),
+          meta_message_id: update.messageId,
+          message_id: update.messageId,
+          delivery_status: update.deliveryStatus,
+          delivery_status_at: update.timestamp,
+          whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
+        }
+      }
+    };
+    if (update.deliveryStatus === 'READ') chatPatch.unread_count = 0;
+
     const { error: chatError } = await db
       .from('inbox_chats')
-      .update({
-        status: update.deliveryStatus,
-        updated_at: new Date().toISOString(),
-        metadata: {
-          ...chatMetadata,
-          meta_message_id: update.messageId,
-          delivery_status: update.deliveryStatus,
-          whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
-          subscription_status: 'ACTIVE',
-          last_template: {
-            ...(chatMetadata.last_template || {}),
-            meta_message_id: update.messageId,
-            message_id: update.messageId,
-            delivery_status: update.deliveryStatus,
-            delivery_status_at: update.timestamp,
-            whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
-          }
-        }
-      })
+      .update(chatPatch)
       .eq('id', message.chat_id);
 
     if (chatError) console.error('Webhook inbox chat status update failed:', chatError.message || chatError);
