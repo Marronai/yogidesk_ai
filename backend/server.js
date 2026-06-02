@@ -128,6 +128,16 @@ const buildPhoneOrFilter = (columns = [], value) => {
     }
     return filters.join(',');
 };
+const phonesReferToSameContact = (left, right) => {
+    const leftParts = getPhoneMatchParts(left);
+    const rightParts = getPhoneMatchParts(right);
+    if (!leftParts.digits || !rightParts.digits) return false;
+    if (leftParts.digits === rightParts.digits) return true;
+    if (leftParts.last10 && rightParts.last10 && leftParts.last10 === rightParts.last10) return true;
+
+    const rightVariants = new Set(rightParts.variants.map((item) => phoneDigitsOnly(item)));
+    return leftParts.variants.some((variant) => rightVariants.has(phoneDigitsOnly(variant)));
+};
 const resolveCampaignVariableValue = (value, recipient = {}) => {
     const rawValue = String(value || '').trim();
     const token = rawValue.replace(/^\[\[|\]\]$/g, '');
@@ -1444,6 +1454,9 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             const windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             const { data: existingChat } = await selectInboxChatByPhone(db, incoming.fromPhone, userId);
             const existingMetadata = existingChat?.metadata || {};
+            const chatDisplayName = existingChat?.name || existingChat?.patient_name || incoming.patientName;
+            const chatPhone = existingChat?.phone || incoming.fromPhone;
+            const chatPatientPhone = existingChat?.patient_phone || incoming.fromPhone;
             const nextMetadata = {
                 ...existingMetadata,
                 meta_message_id: incoming.messageId,
@@ -1467,10 +1480,10 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                     payload: {
                         user_id: userId,
                         doctor_id: userId,
-                        name: incoming.patientName,
-                        patient_name: incoming.patientName,
-                        phone: incoming.fromPhone,
-                        patient_phone: incoming.fromPhone,
+                        name: chatDisplayName,
+                        patient_name: chatDisplayName,
+                        phone: chatPhone,
+                        patient_phone: chatPatientPhone,
                         last_message: incoming.text,
                         status: 'INBOUND',
                         unread_count: 1,
@@ -1538,10 +1551,10 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 payload: {
                     user_id: userId,
                     doctor_id: userId,
-                    name: incoming.patientName,
-                    patient_name: incoming.patientName,
-                    phone: incoming.fromPhone,
-                    patient_phone: incoming.fromPhone,
+                    name: chatDisplayName,
+                    patient_name: chatDisplayName,
+                    phone: chatPhone,
+                    patient_phone: chatPatientPhone,
                     last_message: incoming.text,
                     status: 'INBOUND',
                     unread_count: 1,
@@ -3485,11 +3498,16 @@ app.get('/api/inbox/chats', async (req, res) => {
 
         const collapsedChats = new Map();
         for (const chat of chats) {
-            const key = String(chat.phone || chat.patient_phone || chat.id || '').trim();
+            const phoneKey = getPhoneMatchParts(chat.phone || chat.patient_phone || '').last10;
+            const key = phoneKey || String(chat.phone || chat.patient_phone || chat.id || '').trim();
             const previous = collapsedChats.get(key);
             const previousTime = previous?.updated_at ? new Date(previous.updated_at).getTime() : 0;
             const nextTime = chat?.updated_at ? new Date(chat.updated_at).getTime() : 0;
-            if (!previous || nextTime >= previousTime) {
+            const previousMeta = previous?.metadata || {};
+            const nextMeta = chat?.metadata || {};
+            const previousEstablished = previousMeta.last_template || previousMeta.template_id || previousMeta.template_name ? 1 : 0;
+            const nextEstablished = nextMeta.last_template || nextMeta.template_id || nextMeta.template_name ? 1 : 0;
+            if (!previous || nextEstablished > previousEstablished || (nextEstablished === previousEstablished && nextTime >= previousTime)) {
                 collapsedChats.set(key, chat);
             }
         }
@@ -3530,6 +3548,11 @@ app.get('/api/inbox/messages', async (req, res) => {
         if (chatError) throw chatError;
         if (!chat?.id) return res.status(404).json({ success: false, message: 'Chat not found.' });
 
+        await db
+            .from('inbox_chats')
+            .update({ unread_count: 0 })
+            .eq('id', chatId);
+
         let result = await db
             .from('inbox_messages')
             .select('id, chat_id, body_content, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
@@ -3565,7 +3588,7 @@ app.post('/api/inbox/send-message', async (req, res) => {
         if (!messageText) return res.status(400).json({ success: false, message: 'Message text is required.' });
 
         const db = supabaseAdmin || supabase;
-        const { data: activeChat, error: chatError } = await db
+        let { data: activeChat, error: chatError } = await db
             .from('inbox_chats')
             .select('id, user_id, doctor_id, phone, patient_phone, name, patient_name, metadata')
             .eq('id', chatId)
@@ -3577,6 +3600,14 @@ app.post('/api/inbox/send-message', async (req, res) => {
 
         const recipientPhone = sanitizeMetaPhoneNumber(activeChat.patient_phone || activeChat.phone || '');
         if (!recipientPhone) return res.status(400).json({ success: false, message: 'Patient phone number is missing.' });
+        const { data: canonicalChat } = await selectInboxChatByPhone(db, recipientPhone, userId);
+        if (canonicalChat?.id) {
+            activeChat = {
+                ...activeChat,
+                ...canonicalChat,
+                metadata: canonicalChat.metadata || activeChat.metadata || {}
+            };
+        }
 
         const credentials = await getUserMetaCredentials(userId);
         const finalToken = String(credentials.accessToken || '').trim();
@@ -3679,6 +3710,7 @@ app.post('/api/inbox/send-message', async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Message sent.',
+            chatId: activeChat.id,
             wamid,
             meta: metaResponse.data,
             storedMessage: insertResult.data?.[0] || messageRow
@@ -4129,37 +4161,50 @@ const resolveCampaignMessagePreview = (row = {}) => {
 const selectInboxChatByPhone = async (db, recipientPhone, userId) => {
     const safePhone = String(recipientPhone || '').trim();
     if (!safePhone) return { data: null, error: null };
-    const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], safePhone);
 
-    let query = db
+    let ownerQuery = db
         .from('inbox_chats')
-        .select('id, metadata')
-        .or(phoneFilter)
+        .select('id, phone, patient_phone, name, patient_name, metadata, updated_at')
         .order('updated_at', { ascending: false })
-        .limit(1);
+        .limit(500);
 
     if (userId) {
-        query = query.or(`user_id.eq.${userId},doctor_id.eq.${userId}`);
+        ownerQuery = ownerQuery.or(`user_id.eq.${userId},doctor_id.eq.${userId}`);
     }
 
-    let result = await query.maybeSingle();
-
+    let result = await ownerQuery;
     if (result.error && getMissingSchemaColumn(result.error) === 'metadata') {
         let fallbackQuery = db
             .from('inbox_chats')
-            .select('id')
-            .or(phoneFilter)
+            .select('id, phone, patient_phone, updated_at')
             .order('updated_at', { ascending: false })
-            .limit(1);
+            .limit(500);
 
         if (userId) {
             fallbackQuery = fallbackQuery.or(`user_id.eq.${userId},doctor_id.eq.${userId}`);
         }
 
-        result = await fallbackQuery.maybeSingle();
+        result = await fallbackQuery;
     }
 
-    return result;
+    if (result.error) return result;
+
+    const matchingChats = (result.data || []).filter((chat) => (
+        phonesReferToSameContact(chat.phone, safePhone) ||
+        phonesReferToSameContact(chat.patient_phone, safePhone)
+    ));
+    matchingChats.sort((left, right) => {
+        const leftMeta = left.metadata || {};
+        const rightMeta = right.metadata || {};
+        const leftEstablished = leftMeta.last_template || leftMeta.template_id || leftMeta.template_name ? 1 : 0;
+        const rightEstablished = rightMeta.last_template || rightMeta.template_id || rightMeta.template_name ? 1 : 0;
+        if (leftEstablished !== rightEstablished) return rightEstablished - leftEstablished;
+        const leftTime = left.updated_at ? new Date(left.updated_at).getTime() : 0;
+        const rightTime = right.updated_at ? new Date(right.updated_at).getTime() : 0;
+        return rightTime - leftTime;
+    });
+
+    return { data: matchingChats[0] || null, error: null };
 };
 
 const resolveCampaignConversationChatId = async ({ db, userId, recipientPhone, recipientName, messageBody, nowIso }) => {

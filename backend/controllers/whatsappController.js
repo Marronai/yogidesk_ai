@@ -78,24 +78,58 @@ const insertInboxMessageWithSchemaFallback = async (row = {}) => {
 };
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
+const getPhoneMatchParts = (value) => {
+    const digits = phoneDigitsOnly(value);
+    const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
+    const variants = new Set([digits]);
+    if (last10 && last10.length === 10) {
+        variants.add(last10);
+        variants.add(`91${last10}`);
+        variants.add(`+91${last10}`);
+        variants.add(`1${last10}`);
+        variants.add(`+1${last10}`);
+    }
+    return { digits, last10, variants: Array.from(variants).filter(Boolean) };
+};
+const phonesReferToSameContact = (left, right) => {
+    const leftParts = getPhoneMatchParts(left);
+    const rightParts = getPhoneMatchParts(right);
+    if (!leftParts.digits || !rightParts.digits) return false;
+    if (leftParts.digits === rightParts.digits) return true;
+    if (leftParts.last10 && rightParts.last10 && leftParts.last10 === rightParts.last10) return true;
+    const rightVariants = new Set(rightParts.variants.map((item) => phoneDigitsOnly(item)));
+    return leftParts.variants.some((variant) => rightVariants.has(phoneDigitsOnly(variant)));
+};
 
 const findInboxChatByOwnerAndPhone = async ({ ownerId, phone }) => {
     if (!supabase?.from || !ownerId || !phone) return null;
     const { data, error } = await supabase
         .from('inbox_chats')
-        .select('id, metadata')
-        .eq('phone', phone)
+        .select('id, phone, patient_phone, metadata, updated_at')
         .or(`user_id.eq.${ownerId},doctor_id.eq.${ownerId}`)
         .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(500);
 
     if (error) {
         console.error('Inbox chat lookup before message insert failed:', error.message || error);
         return null;
     }
 
-    return data?.id ? data : null;
+    const matches = (data || []).filter((chat) => (
+        phonesReferToSameContact(chat.phone, phone) ||
+        phonesReferToSameContact(chat.patient_phone, phone)
+    ));
+    matches.sort((left, right) => {
+        const leftEstablished = left.metadata?.last_template || left.metadata?.template_id || left.metadata?.template_name ? 1 : 0;
+        const rightEstablished = right.metadata?.last_template || right.metadata?.template_id || right.metadata?.template_name ? 1 : 0;
+        if (leftEstablished !== rightEstablished) return rightEstablished - leftEstablished;
+        const leftTime = left.updated_at ? new Date(left.updated_at).getTime() : 0;
+        const rightTime = right.updated_at ? new Date(right.updated_at).getTime() : 0;
+        return rightTime - leftTime;
+    });
+
+    return matches[0]?.id ? matches[0] : null;
 };
 
 const writeTemplateDispatchChat = async ({ ownerId, activePhone, activeName, messageText, status, metadata, nowIso }) => {

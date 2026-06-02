@@ -527,12 +527,14 @@ const InboxContent = () => {
           messageText: text,
         });
         const stored = response.data?.storedMessage;
+        const responseChatId = response.data?.chatId || stored?.chat_id || selectedChat.id;
         if (stored?.id) {
           setMessages((prev) => prev.map((item) => (
             item.id === created.id ? mapStoredMessage(stored) : item
           )));
         }
-        updateConversation(selectedChat.id, { lastMsg: text, deliveryStatus: 'SENT' });
+        updateConversation(selectedChat.id, { id: responseChatId, lastMsg: text, deliveryStatus: 'SENT', unread: 0, unread_count: 0 });
+        if (responseChatId !== selectedChat.id) setReloadToken((value) => value + 1);
         return;
       }
 
@@ -615,14 +617,23 @@ const InboxContent = () => {
   };
 
   const openChat = (chat) => {
-    setSelectedChat(chat);
+    const nextChat = { ...chat, unread: 0, unread_count: 0 };
+    setSelectedChat(nextChat);
+    setConversations((prev) => prev.map((item) => (
+      item.id === chat.id ? { ...item, unread: 0, unread_count: 0 } : item
+    )));
     setShowPhone(false);
     setShowBgMenu(false);
     setShowDetailsPanel(false);
     const agent = agents.find((item) => String(item.id) === String(chat?.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
-    loadMessages(chat);
+    loadMessages(nextChat);
+    if (chat?.id && !String(chat.id).startsWith('message-')) {
+      supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', chat.id).then(({ error }) => {
+        if (error) logInboxError(error);
+      });
+    }
   };
 
   const chatViewportStyle = chatBg.type === 'image'
