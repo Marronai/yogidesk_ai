@@ -12,7 +12,8 @@ const {
     buildCampaignQueuePayload,
     buildQueuedInboxChatPayload,
     insertCampaignQueueRows,
-    insertQueuedInboxChatRows
+    insertQueuedInboxChatRows,
+    handleDialogflowCxWhatsAppMessage
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 const { getTemplateStatusAggregation, getMessageSentHistory, getDashboardMetrics } = require('./controllers/analyticsController');
@@ -1664,8 +1665,18 @@ const handleWhatsAppWebhook = (req, res) => {
                 incomingCount,
                 entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
             });
+            console.log('[YogiDesk Debug] GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
+            console.log('[YogiDesk Debug] DIALOGFLOW_LOCATION:', process.env.DIALOGFLOW_LOCATION);
+            console.log('[YogiDesk Debug] DIALOGFLOW_AGENT_ID:', process.env.DIALOGFLOW_AGENT_ID);
 
-            if (incomingCount > 0) await processIncomingInboxMessagesWebhook(req.body);
+            if (incomingCount > 0) {
+                await processIncomingInboxMessagesWebhook(req.body);
+                await handleDialogflowCxWhatsAppMessage({
+                    payload: req.body,
+                    languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'hi',
+                    sendReplies: true
+                });
+            }
             if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
             await processTemplateStatusWebhook(req.body);
             await processFailedDeliveryWebhook(req.body);

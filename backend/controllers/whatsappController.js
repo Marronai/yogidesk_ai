@@ -155,6 +155,85 @@ const extractDialogflowTextResponses = (queryResult = {}) => {
     return texts.map((text) => String(text || '').trim()).filter(Boolean);
 };
 
+const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } = {}) => {
+    const envPhoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_ID || '').trim();
+    const envAccessToken = String(process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || '').trim();
+    const fallbackCredentials = {
+        phoneNumberId: String(phoneNumberId || envPhoneNumberId || '').trim(),
+        accessToken: envAccessToken
+    };
+
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return fallbackCredentials;
+
+    try {
+        const filters = [];
+        if (businessAccountId) filters.push(`meta_waba_id.eq.${businessAccountId}`, `whatsapp_business_account_id.eq.${businessAccountId}`);
+        if (phoneNumberId) filters.push(`meta_phone_number_id.eq.${phoneNumberId}`, `whatsapp_phone_number_id.eq.${phoneNumberId}`);
+
+        if (filters.length === 0) return fallbackCredentials;
+
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('meta_phone_number_id, whatsapp_phone_number_id, system_user_token, whatsapp_access_token')
+            .or(filters.join(','))
+            .limit(1)
+            .maybeSingle();
+
+        if (error) {
+            console.warn('[YogiDesk Debug] Meta reply credential lookup failed:', error.message || error);
+            return fallbackCredentials;
+        }
+
+        return {
+            phoneNumberId: data?.meta_phone_number_id || data?.whatsapp_phone_number_id || fallbackCredentials.phoneNumberId,
+            accessToken: data?.system_user_token || data?.whatsapp_access_token || fallbackCredentials.accessToken
+        };
+    } catch (error) {
+        console.warn('[YogiDesk Debug] Meta reply credential lookup crashed:', error.message || error);
+        return fallbackCredentials;
+    }
+};
+
+const sendDialogflowWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId }) => {
+    const safeText = String(text || '').trim();
+    if (!toPhone || !safeText) return null;
+
+    const credentials = await resolveMetaReplyCredentials({ phoneNumberId, businessAccountId });
+    if (!credentials.phoneNumberId || !credentials.accessToken) {
+        throw new Error('Missing Meta phone number ID or access token for Dialogflow WhatsApp reply.');
+    }
+
+    const url = `https://graph.facebook.com/v20.0/${credentials.phoneNumberId}/messages`;
+    const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: phoneDigitsOnly(toPhone),
+        type: 'text',
+        text: {
+            preview_url: false,
+            body: safeText
+        }
+    };
+
+    console.log('[YogiDesk Debug] Sending Dialogflow reply through Meta:', {
+        to: payload.to,
+        phoneNumberId: credentials.phoneNumberId,
+        textLength: safeText.length
+    });
+
+    const response = await axios.post(url, payload, {
+        headers: {
+            Authorization: `Bearer ${credentials.accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        timeout: 15000
+    });
+
+    console.log('[YogiDesk Debug] Meta reply response:', JSON.stringify(response.data, null, 2));
+    return response.data;
+};
+
 const extractWhatsAppInboundTextMessages = (payload = {}) => {
     if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
 
@@ -198,13 +277,30 @@ const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode
     const sessionId = sanitizeDialogflowPathSegment(phoneDigitsOnly(fromPhone));
     const session = sessionsClient.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
 
-    const [response] = await sessionsClient.detectIntent({
-        session,
-        queryInput: {
-            text: { text: String(text).slice(0, 2048) },
-            languageCode
-        }
-    });
+    console.log('[YogiDesk Debug] GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
+    console.log('[YogiDesk Debug] DIALOGFLOW_LOCATION:', process.env.DIALOGFLOW_LOCATION);
+    console.log('[YogiDesk Debug] DIALOGFLOW_AGENT_ID:', process.env.DIALOGFLOW_AGENT_ID);
+    console.log('[YogiDesk Debug] Dialogflow CX session path:', session);
+
+    let response;
+    try {
+        [response] = await sessionsClient.detectIntent({
+            session,
+            queryInput: {
+                text: { text: String(text).slice(0, 2048) },
+                languageCode
+            }
+        });
+        console.log("[YogiDesk Debug] Full Dialogflow Raw Response:", JSON.stringify(response, null, 2));
+    } catch (error) {
+        console.error('[YogiDesk Debug] Dialogflow detectIntent failed:', {
+            session,
+            fromPhone: phoneDigitsOnly(fromPhone),
+            languageCode,
+            error: error.message || error
+        });
+        throw error;
+    }
 
     const queryResult = response?.queryResult || {};
     const sessionParameters = normalizeDialogflowParameters(
@@ -233,7 +329,7 @@ const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode
     };
 };
 
-const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCode = 'hi' }) => {
+const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
     const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
     const results = [];
 
@@ -245,13 +341,40 @@ const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCod
                 languageCode
             });
 
-            results.push({
+            const result = {
                 ...inbound,
                 dialogflow: dialogflowResult,
                 replyTexts: dialogflowResult.replyTexts,
                 bookingReady: dialogflowResult.bookingReady,
-                bookingPayload: dialogflowResult.bookingPayload
-            });
+                bookingPayload: dialogflowResult.bookingPayload,
+                metaReplies: []
+            };
+
+            if (sendReplies) {
+                for (const replyText of dialogflowResult.replyTexts) {
+                    try {
+                        const metaReply = await sendDialogflowWhatsAppTextReply({
+                            toPhone: inbound.fromPhone,
+                            text: replyText,
+                            phoneNumberId: inbound.phoneNumberId,
+                            businessAccountId: inbound.businessAccountId
+                        });
+                        result.metaReplies.push({ success: true, response: metaReply });
+                    } catch (sendError) {
+                        console.error('[YogiDesk Debug] Meta reply send failed:', {
+                            messageId: inbound.messageId,
+                            fromPhone: inbound.fromPhone,
+                            error: sendError.response?.data || sendError.message || sendError
+                        });
+                        result.metaReplies.push({
+                            success: false,
+                            error: sendError.response?.data || sendError.message || 'Meta reply send failed.'
+                        });
+                    }
+                }
+            }
+
+            results.push(result);
         } catch (error) {
             console.error('Dialogflow CX WhatsApp runtime failed:', {
                 messageId: inbound.messageId,
@@ -1249,3 +1372,4 @@ exports.logInboxDatabaseError = logInboxDatabaseError;
 exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
 exports.runDialogflowCxForWhatsAppMessage = runDialogflowCxForWhatsAppMessage;
 exports.handleDialogflowCxWhatsAppMessage = handleDialogflowCxWhatsAppMessage;
+exports.sendDialogflowWhatsAppTextReply = sendDialogflowWhatsAppTextReply;
