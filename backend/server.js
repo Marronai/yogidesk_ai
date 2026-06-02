@@ -1337,7 +1337,7 @@ const extractIncomingInboxMessages = (payload = {}) => {
                     message.interactive?.list_reply?.title ||
                     message.image?.caption ||
                     message.document?.caption ||
-                    '';
+                    'Media/Unsupported Message';
 
                 if (!fromPhone) continue;
                 messages.push({
@@ -1347,8 +1347,8 @@ const extractIncomingInboxMessages = (payload = {}) => {
                     businessAccountId,
                     phoneNumberId: sanitizeMetaId(metadata.phone_number_id || ''),
                     displayPhoneNumber: sanitizeMetaPhoneNumber(metadata.display_phone_number || ''),
-                    patientName: contact.profile?.name || 'WhatsApp Patient',
-                    text: String(text || `[${message.type || 'message'}]`).trim(),
+                    patientName: contact.profile?.name || 'Patient',
+                    text: String(text || 'Media/Unsupported Message').trim(),
                     raw: message
                 });
             }
@@ -1427,40 +1427,27 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             }
 
             const nowIso = new Date().toISOString();
+            const windowExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
             const { data: existingChat } = await selectInboxChatByPhone(db, incoming.fromPhone, userId);
             const existingMetadata = existingChat?.metadata || {};
             const nextMetadata = {
                 ...existingMetadata,
                 meta_message_id: incoming.messageId,
+                message_id: incoming.messageId,
+                conversation_state: 'INBOUND',
                 whatsapp_business_account_id: incoming.businessAccountId || existingMetadata.whatsapp_business_account_id || null,
                 whatsapp_phone_number_id: incoming.phoneNumberId || existingMetadata.whatsapp_phone_number_id || null,
                 display_phone_number: incoming.displayPhoneNumber || existingMetadata.display_phone_number || null,
                 subscription_status: 'ACTIVE',
                 last_customer_message_at: nowIso,
                 last_inbound_at: nowIso,
-                whatsapp_window_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+                whatsapp_window_expires_at: windowExpiresAt,
+                window_expires_at: windowExpiresAt,
+                input_locked: false
             };
 
             let chatId = existingChat?.id || null;
-            if (chatId) {
-                await writeInboxChatSafely({
-                    db,
-                    chatId,
-                    payload: {
-                        user_id: userId,
-                        doctor_id: userId,
-                        name: incoming.patientName,
-                        patient_name: incoming.patientName,
-                        phone: incoming.fromPhone,
-                        patient_phone: incoming.fromPhone,
-                        last_message: incoming.text,
-                        status: 'Active',
-                        unread_count: 1,
-                        updated_at: nowIso,
-                        metadata: nextMetadata
-                    }
-                });
-            } else {
+            if (!chatId) {
                 const createdChat = await writeInboxChatSafely({
                     db,
                     payload: {
@@ -1471,10 +1458,12 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                         phone: incoming.fromPhone,
                         patient_phone: incoming.fromPhone,
                         last_message: incoming.text,
-                        status: 'Active',
+                        status: 'INBOUND',
                         unread_count: 1,
                         updated_at: nowIso,
-                        metadata: nextMetadata
+                        metadata: nextMetadata,
+                        whatsapp_window_expires_at: windowExpiresAt,
+                        window_expires_at: windowExpiresAt
                     }
                 });
                 chatId = createdChat?.id || null;
@@ -1504,14 +1493,20 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                     from_me: false,
                     type: 'public',
                     message_type: 'text',
-                    status: 'RECEIVED',
+                    status: 'INBOUND',
+                    message_id: incoming.messageId,
+                    meta_message_id: incoming.messageId,
+                    wamid: incoming.messageId,
                     body: incoming.text,
                     text: incoming.text,
+                    body_content: incoming.text,
                     message_body: incoming.text,
                     message_text: incoming.text,
                     is_private_note: false,
                     metadata: {
                         meta_message_id: incoming.messageId,
+                        message_id: incoming.messageId,
+                        wamid: incoming.messageId,
                         whatsapp_business_account_id: incoming.businessAccountId || null,
                         whatsapp_phone_number_id: incoming.phoneNumberId || null,
                         display_phone_number: incoming.displayPhoneNumber || null,
@@ -1520,8 +1515,29 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                     },
                     created_at: nowIso
                 }],
-                pruneMissingColumns: false
+                pruneMissingColumns: true
             });
+
+            await writeInboxChatSafely({
+                db,
+                chatId,
+                payload: {
+                    user_id: userId,
+                    doctor_id: userId,
+                    name: incoming.patientName,
+                    patient_name: incoming.patientName,
+                    phone: incoming.fromPhone,
+                    patient_phone: incoming.fromPhone,
+                    last_message: incoming.text,
+                    status: 'INBOUND',
+                    unread_count: 1,
+                    updated_at: nowIso,
+                    metadata: nextMetadata,
+                    whatsapp_window_expires_at: windowExpiresAt,
+                    window_expires_at: windowExpiresAt
+                }
+            });
+
             await logWhatsAppInboundWebhookEvent(db, incoming, {
                 userId,
                 chatId,
@@ -3436,7 +3452,7 @@ app.get('/api/inbox/chats', async (req, res) => {
                     name: phone || 'Patient',
                     patient_name: phone || 'Patient',
                     phone,
-                    last_message: item.message_text || item.message_body || item.body || item.text || '',
+                    last_message: item.message_text || item.message_body || item.body_content || item.body || item.text || '',
                     updated_at: item.created_at,
                     status: item.status || 'SENT',
                     unread_count: 0,
@@ -3495,7 +3511,7 @@ app.get('/api/inbox/messages', async (req, res) => {
 
         let result = await db
             .from('inbox_messages')
-            .select('id, chat_id, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
+            .select('id, chat_id, body_content, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
             .eq('chat_id', chatId)
             .order('created_at', { ascending: true });
 

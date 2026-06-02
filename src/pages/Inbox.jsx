@@ -45,7 +45,7 @@ const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
   message_id: item.message_id || item.metadata?.message_id || item.metadata?.meta_message_id || '',
-  text: item.message_text || item.body || item.text || item.message_body || '',
+  text: item.message_text || item.body_content || item.body || item.text || item.message_body || '',
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
@@ -138,6 +138,12 @@ const InboxContent = () => {
       ? (Array.isArray(conversations) ? conversations : [])
       : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
   ), [conversations, tagFilter]);
+  const latestMessage = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
+  const chatHasInboundState = normalizeDeliveryStatus(selectedChat?.status) === 'INBOUND' || selectedChat?.metadata?.conversation_state === 'INBOUND';
+  const latestMessageIsInbound = normalizeDeliveryStatus(latestMessage?.status) === 'INBOUND';
+  const storedWindowExpiresAt = selectedChat?.window_expires_at || selectedChat?.whatsapp_window_expires_at || selectedChat?.metadata?.window_expires_at || selectedChat?.metadata?.whatsapp_window_expires_at;
+  const storedWindowExpiresMs = storedWindowExpiresAt ? new Date(storedWindowExpiresAt).getTime() : 0;
+  const hasActiveStoredWindow = Number.isFinite(storedWindowExpiresMs) && storedWindowExpiresMs > now;
   const lastInboundAt = useMemo(() => {
     const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
     const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
@@ -160,11 +166,12 @@ const InboxContent = () => {
     return Math.max(messageMs, metadataMs);
   }, [messages, selectedChat]);
   const isReplyWindowOpen = Boolean(
-    lastInboundAt &&
-    Date.now() - lastInboundAt <= 24 * 60 * 60 * 1000 &&
-    (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt)
+    hasActiveStoredWindow ||
+    (lastInboundAt &&
+      now - lastInboundAt <= 24 * 60 * 60 * 1000 &&
+      (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt))
   );
-  const canUseComposer = isPrivateNote || isReplyWindowOpen;
+  const canUseComposer = isPrivateNote || chatHasInboundState || latestMessageIsInbound || isReplyWindowOpen;
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -273,7 +280,7 @@ const InboxContent = () => {
               name: phone || 'Patient',
               patient_name: phone || 'Patient',
               phone,
-              last_message: item.message_text || item.message_body || item.body || item.text || '',
+              last_message: item.message_text || item.body_content || item.message_body || item.body || item.text || '',
               updated_at: item.created_at,
               status: item.status || item.metadata?.delivery_status || 'SENT',
               unread_count: 0,
@@ -311,6 +318,8 @@ const InboxContent = () => {
           deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
+          window_expires_at: chat.window_expires_at || chat.metadata?.window_expires_at || null,
+          whatsapp_window_expires_at: chat.whatsapp_window_expires_at || chat.metadata?.whatsapp_window_expires_at || null,
           metadata: chat?.metadata || {},
         };
       })
@@ -345,7 +354,7 @@ const InboxContent = () => {
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, chat_id, meta_message_id, message_id, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
+        .select('id, chat_id, meta_message_id, message_id, body_content, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
@@ -800,7 +809,7 @@ const InboxContent = () => {
                     <input
                       type="text"
                       placeholder={isGhostMode ? 'Ghost mode active: typing disabled' : (isPrivateNote ? 'Type a private team note...' : 'Reply to customer...')}
-                      disabled={isGhostMode}
+                      disabled={isGhostMode || !canUseComposer}
                       className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
                       value={message}
                       onChange={(event) => setMessage(event.target.value)}
