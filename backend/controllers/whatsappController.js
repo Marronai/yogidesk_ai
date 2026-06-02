@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 const { supabase, supabaseAdmin } = require('../config/supabase');
 
 const missingSubAccountConfigResponse = {
@@ -79,6 +80,7 @@ const insertInboxMessageWithSchemaFallback = async (row = {}) => {
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
+const sanitizeDialogflowPathSegment = (value) => String(value || '').trim().replace(/[^\w.-]/g, '_');
 const getPhoneMatchParts = (value) => {
     const digits = phoneDigitsOnly(value);
     const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
@@ -91,6 +93,183 @@ const getPhoneMatchParts = (value) => {
         variants.add(`+1${last10}`);
     }
     return { digits, last10, variants: Array.from(variants).filter(Boolean) };
+};
+
+let dialogflowSessionsClient;
+
+const getDialogflowCxConfig = () => {
+    const projectId = String(process.env.DIALOGFLOW_PROJECT_ID || process.env.GOOGLE_PROJECT_ID || '').trim();
+    const location = String(process.env.DIALOGFLOW_LOCATION || 'global').trim();
+    const rawAgentId = String(process.env.DIALOGFLOW_AGENT_ID || '').trim();
+    const agentId = rawAgentId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || rawAgentId;
+
+    if (!projectId || !location || !agentId) {
+        throw new Error('Dialogflow CX config missing. Set GOOGLE_PROJECT_ID/DIALOGFLOW_PROJECT_ID, DIALOGFLOW_LOCATION, and DIALOGFLOW_AGENT_ID.');
+    }
+
+    return { projectId, location, agentId };
+};
+
+const getDialogflowSessionsClient = () => {
+    if (!dialogflowSessionsClient) {
+        const { location } = getDialogflowCxConfig();
+        const clientOptions = location && location !== 'global'
+            ? { apiEndpoint: `${location}-dialogflow.googleapis.com` }
+            : undefined;
+
+        dialogflowSessionsClient = new SessionsClient(clientOptions);
+    }
+
+    return dialogflowSessionsClient;
+};
+
+const unwrapDialogflowValue = (value) => {
+    if (!value || typeof value !== 'object') return value;
+    if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) return value.stringValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'numberValue')) return value.numberValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'boolValue')) return value.boolValue;
+    if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) return null;
+    if (value.listValue?.values) return value.listValue.values.map(unwrapDialogflowValue);
+    if (value.structValue?.fields) return unwrapDialogflowStruct(value.structValue);
+    return value;
+};
+
+const unwrapDialogflowStruct = (struct = {}) => {
+    if (!struct?.fields || typeof struct.fields !== 'object') return struct || {};
+    return Object.fromEntries(
+        Object.entries(struct.fields).map(([key, value]) => [key, unwrapDialogflowValue(value)])
+    );
+};
+
+const normalizeDialogflowParameters = (parameters = {}) => (
+    parameters?.fields ? unwrapDialogflowStruct(parameters) : parameters || {}
+);
+
+const extractDialogflowTextResponses = (queryResult = {}) => {
+    const responseMessages = Array.isArray(queryResult.responseMessages) ? queryResult.responseMessages : [];
+    const texts = responseMessages.flatMap((message) => {
+        const text = message.text?.text;
+        return Array.isArray(text) ? text : [];
+    });
+
+    return texts.map((text) => String(text || '').trim()).filter(Boolean);
+};
+
+const extractWhatsAppInboundTextMessages = (payload = {}) => {
+    if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
+
+    return payload.entry.flatMap((entry) => (
+        Array.isArray(entry.changes)
+            ? entry.changes.flatMap((change) => {
+                if (change.field !== 'messages') return [];
+                const value = change.value || {};
+                const metadata = value.metadata || {};
+                const contactsByWaId = new Map((value.contacts || []).map((contact) => [String(contact.wa_id || ''), contact]));
+
+                return (value.messages || []).map((message) => {
+                    const text = message.text?.body ||
+                        message.button?.text ||
+                        message.interactive?.button_reply?.title ||
+                        message.interactive?.list_reply?.title ||
+                        '';
+
+                    return {
+                        messageId: message.id || null,
+                        fromPhone: phoneDigitsOnly(message.from || ''),
+                        patientName: contactsByWaId.get(String(message.from || ''))?.profile?.name || null,
+                        text: String(text || '').trim(),
+                        phoneNumberId: String(metadata.phone_number_id || '').trim(),
+                        businessAccountId: String(metadata.whatsapp_business_account_id || metadata.waba_id || entry.id || '').trim(),
+                        raw: message
+                    };
+                }).filter((message) => message.fromPhone && message.text);
+            })
+            : []
+    ));
+};
+
+const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode = 'hi' }) => {
+    if (!fromPhone || !text) {
+        throw new Error('Dialogflow CX dispatch requires both fromPhone and text.');
+    }
+
+    const { projectId, location, agentId } = getDialogflowCxConfig();
+    const sessionsClient = getDialogflowSessionsClient();
+    const sessionId = sanitizeDialogflowPathSegment(phoneDigitsOnly(fromPhone));
+    const session = sessionsClient.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
+
+    const [response] = await sessionsClient.detectIntent({
+        session,
+        queryInput: {
+            text: { text: String(text).slice(0, 2048) },
+            languageCode
+        }
+    });
+
+    const queryResult = response?.queryResult || {};
+    const sessionParameters = normalizeDialogflowParameters(
+        queryResult.currentPage?.playbookInfo?.sessionParameters || queryResult.parameters || {}
+    );
+    const bookingPayload = {
+        patient_name: sessionParameters.patient_name || null,
+        appointment_date: sessionParameters.appointment_date || null,
+        appointment_time: sessionParameters.appointment_time || null,
+        whatsapp_phone: phoneDigitsOnly(fromPhone)
+    };
+    const bookingReady = Boolean(
+        bookingPayload.patient_name &&
+        bookingPayload.appointment_date &&
+        bookingPayload.appointment_time
+    );
+
+    return {
+        success: true,
+        session,
+        replyTexts: extractDialogflowTextResponses(queryResult),
+        sessionParameters,
+        bookingReady,
+        bookingPayload: bookingReady ? bookingPayload : null,
+        rawResponse: response
+    };
+};
+
+const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCode = 'hi' }) => {
+    const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
+    const results = [];
+
+    for (const inbound of inboundMessages) {
+        try {
+            const dialogflowResult = await runDialogflowCxForWhatsAppMessage({
+                fromPhone: inbound.fromPhone,
+                text: inbound.text,
+                languageCode
+            });
+
+            results.push({
+                ...inbound,
+                dialogflow: dialogflowResult,
+                replyTexts: dialogflowResult.replyTexts,
+                bookingReady: dialogflowResult.bookingReady,
+                bookingPayload: dialogflowResult.bookingPayload
+            });
+        } catch (error) {
+            console.error('Dialogflow CX WhatsApp runtime failed:', {
+                messageId: inbound.messageId,
+                fromPhone: inbound.fromPhone,
+                error: error.message || error
+            });
+
+            results.push({
+                ...inbound,
+                dialogflow: { success: false, error: error.message || 'Dialogflow CX runtime failed.' },
+                replyTexts: [],
+                bookingReady: false,
+                bookingPayload: null
+            });
+        }
+    }
+
+    return results;
 };
 const phonesReferToSameContact = (left, right) => {
     const leftParts = getPhoneMatchParts(left);
@@ -1067,3 +1246,6 @@ exports.insertCampaignQueueRows = insertCampaignQueueRows;
 exports.insertQueuedInboxChatRows = insertQueuedInboxChatRows;
 exports.safeInsertInboxRows = safeInsertInboxRows;
 exports.logInboxDatabaseError = logInboxDatabaseError;
+exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
+exports.runDialogflowCxForWhatsAppMessage = runDialogflowCxForWhatsAppMessage;
+exports.handleDialogflowCxWhatsAppMessage = handleDialogflowCxWhatsAppMessage;
