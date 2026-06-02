@@ -141,9 +141,9 @@ const InboxContent = () => {
   const latestMessage = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
   const chatHasInboundState = normalizeDeliveryStatus(selectedChat?.status) === 'INBOUND' || selectedChat?.metadata?.conversation_state === 'INBOUND';
   const latestMessageIsInbound = normalizeDeliveryStatus(latestMessage?.status) === 'INBOUND';
-  const storedWindowExpiresAt = selectedChat?.window_expires_at || selectedChat?.whatsapp_window_expires_at || selectedChat?.metadata?.window_expires_at || selectedChat?.metadata?.whatsapp_window_expires_at;
-  const storedWindowExpiresMs = storedWindowExpiresAt ? new Date(storedWindowExpiresAt).getTime() : 0;
-  const hasActiveStoredWindow = Number.isFinite(storedWindowExpiresMs) && storedWindowExpiresMs > now;
+  const isWindowOpen = selectedChat?.whatsapp_window_expires_at
+    ? new Date(selectedChat.whatsapp_window_expires_at) > new Date(now)
+    : false;
   const lastInboundAt = useMemo(() => {
     const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
     const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
@@ -166,7 +166,7 @@ const InboxContent = () => {
     return Math.max(messageMs, metadataMs);
   }, [messages, selectedChat]);
   const isReplyWindowOpen = Boolean(
-    hasActiveStoredWindow ||
+    isWindowOpen ||
     (lastInboundAt &&
       now - lastInboundAt <= 24 * 60 * 60 * 1000 &&
       (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt))
@@ -219,7 +219,7 @@ const InboxContent = () => {
       if (loadedFromApi) throw new Error('__INBOX_API_LOADED__');
       let result = await supabase
         .from('inbox_chats')
-        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
+        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, whatsapp_window_expires_at, metadata')
         .or(`user_id.eq.${user.id},doctor_id.eq.${user.id}`)
         .order('updated_at', { ascending: false });
 
@@ -318,7 +318,6 @@ const InboxContent = () => {
           deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
-          window_expires_at: chat.window_expires_at || chat.metadata?.window_expires_at || null,
           whatsapp_window_expires_at: chat.whatsapp_window_expires_at || chat.metadata?.whatsapp_window_expires_at || null,
           metadata: chat?.metadata || {},
         };

@@ -3435,7 +3435,7 @@ app.get('/api/inbox/chats', async (req, res) => {
 
         let chatResult = await db
             .from('inbox_chats')
-            .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
+            .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, whatsapp_window_expires_at, metadata')
             .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
             .order('updated_at', { ascending: false });
 
