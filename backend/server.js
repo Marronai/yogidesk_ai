@@ -1232,10 +1232,121 @@ const logWhatsAppInboundWebhookEvent = async (db, incoming, { userId = null, cha
     }
 };
 
-const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
+const scheduleInboxDeliveryStatusRetry = (update = {}) => {
+    const retryAttempt = Number(update.retryAttempt || 0);
+    const retryDelays = [700, 2000, 5000, 10000];
+    const delay = retryDelays[retryAttempt];
+    if (!delay) return;
+
+    setTimeout(() => {
+        applyInboxDeliveryStatusUpdate({ ...update, retryAttempt: retryAttempt + 1 })
+            .catch((error) => console.error('Inbox delivery status retry failed:', error.message || error));
+    }, delay);
+};
+
+const applyInboxDeliveryStatusUpdate = async (update = {}) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return;
 
+    try {
+        const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
+        await logWhatsAppWebhookStatusEvent(db, update, messages || [], error || null);
+
+        if (error) {
+            console.error('❌ Inbox delivery status WAMID update failed:', {
+                messageId: update.messageId,
+                status: update.status,
+                retryAttempt: update.retryAttempt || 0,
+                error: error.message || error
+            });
+            return;
+        }
+
+        console.log('✅ Inbox delivery status updated:', {
+            messageId: update.messageId,
+            status: update.status,
+            retryAttempt: update.retryAttempt || 0,
+            matchedRows: Array.isArray(messages) ? messages.length : 0
+        });
+
+        if (!Array.isArray(messages) || messages.length === 0) {
+            console.warn('Inbox delivery status WAMID update matched no rows:', {
+                messageId: update.messageId,
+                status: update.status,
+                retryAttempt: update.retryAttempt || 0
+            });
+            scheduleInboxDeliveryStatusRetry(update);
+            return;
+        }
+
+        for (const message of messages || []) {
+            const nextMetadata = {
+                ...(message.metadata || {}),
+                meta_message_id: update.messageId,
+                message_id: update.messageId,
+                delivery_status: update.status,
+                delivery_status_at: update.timestamp,
+                delivery_error: update.error,
+                whatsapp_business_account_id: update.businessAccountId || message.metadata?.whatsapp_business_account_id || null,
+                whatsapp_phone_number_id: update.phoneNumberId || message.metadata?.whatsapp_phone_number_id || null,
+                display_phone_number: update.displayPhoneNumber || message.metadata?.display_phone_number || null,
+                last_meta_status: update.raw
+            };
+
+            const { error: updateError } = await db
+                .from('inbox_messages')
+                .update({
+                    status: update.status,
+                    metadata: nextMetadata
+                })
+                .eq('id', message.id);
+
+            if (updateError) {
+                console.error('Inbox delivery status update failed:', updateError.message || updateError);
+                continue;
+            }
+
+            if (message.chat_id) {
+                const { data: chat } = await db
+                    .from('inbox_chats')
+                    .select('metadata')
+                    .eq('id', message.chat_id)
+                    .maybeSingle();
+                const chatMetadata = chat?.metadata || {};
+                const chatPatch = {
+                    status: update.status,
+                    updated_at: new Date().toISOString(),
+                    metadata: {
+                        ...chatMetadata,
+                        meta_message_id: update.messageId,
+                        delivery_status: update.status,
+                        whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
+                        subscription_status: 'ACTIVE',
+                        last_template: {
+                            ...(chatMetadata.last_template || {}),
+                            meta_message_id: update.messageId,
+                            message_id: update.messageId,
+                            delivery_status: update.status,
+                            delivery_status_at: update.timestamp,
+                            whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
+                        }
+                    }
+                };
+                if (update.status === 'READ') chatPatch.unread_count = 0;
+
+                await db
+                    .from('inbox_chats')
+                    .update(chatPatch)
+                    .eq('id', message.chat_id);
+            }
+        }
+    } catch (error) {
+        await logWhatsAppWebhookStatusEvent(db, update, [], error);
+        console.error('Inbox delivery status sync failed:', error.message || error);
+    }
+};
+
+const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     const updates = extractMessageStatusUpdates(payload);
     console.log("=== WEBHOOK STATUS UPDATES RECEIVED ===", {
         totalUpdates: updates.length,
@@ -1243,98 +1354,7 @@ const updateInboxMessageDeliveryStatuses = async (payload = {}) => {
     });
 
     for (const update of updates) {
-        try {
-            const { data: messages, error } = await updateInboxMessagesByWamid(db, update);
-            await logWhatsAppWebhookStatusEvent(db, update, messages || [], error || null);
-
-            if (error) {
-                console.error('❌ Inbox delivery status WAMID update failed:', {
-                    messageId: update.messageId,
-                    status: update.status,
-                    error: error.message || error
-                });
-                continue;
-            }
-
-            console.log('✅ Inbox delivery status updated:', {
-                messageId: update.messageId,
-                status: update.status,
-                matchedRows: Array.isArray(messages) ? messages.length : 0
-            });
-
-            if (!Array.isArray(messages) || messages.length === 0) {
-                console.warn('Inbox delivery status WAMID update matched no rows:', {
-                    messageId: update.messageId,
-                    status: update.status
-                });
-                continue;
-            }
-
-            for (const message of messages || []) {
-                const nextMetadata = {
-                    ...(message.metadata || {}),
-                    meta_message_id: update.messageId,
-                    message_id: update.messageId,
-                    delivery_status: update.status,
-                    delivery_status_at: update.timestamp,
-                    delivery_error: update.error,
-                    whatsapp_business_account_id: update.businessAccountId || message.metadata?.whatsapp_business_account_id || null,
-                    whatsapp_phone_number_id: update.phoneNumberId || message.metadata?.whatsapp_phone_number_id || null,
-                    display_phone_number: update.displayPhoneNumber || message.metadata?.display_phone_number || null,
-                    last_meta_status: update.raw
-                };
-
-                const { error: updateError } = await db
-                    .from('inbox_messages')
-                    .update({
-                        status: update.status,
-                        metadata: nextMetadata
-                    })
-                    .eq('id', message.id);
-
-                if (updateError) {
-                    console.error('Inbox delivery status update failed:', updateError.message || updateError);
-                    continue;
-                }
-
-                if (message.chat_id) {
-                    const { data: chat } = await db
-                        .from('inbox_chats')
-                        .select('metadata')
-                        .eq('id', message.chat_id)
-                        .maybeSingle();
-                    const chatMetadata = chat?.metadata || {};
-                    const chatPatch = {
-                        status: update.status,
-                        updated_at: new Date().toISOString(),
-                        metadata: {
-                            ...chatMetadata,
-                            meta_message_id: update.messageId,
-                            delivery_status: update.status,
-                            whatsapp_business_account_id: update.businessAccountId || chatMetadata.whatsapp_business_account_id || null,
-                            subscription_status: 'ACTIVE',
-                            last_template: {
-                                ...(chatMetadata.last_template || {}),
-                                meta_message_id: update.messageId,
-                                message_id: update.messageId,
-                                delivery_status: update.status,
-                                delivery_status_at: update.timestamp,
-                                whatsapp_business_account_id: update.businessAccountId || chatMetadata.last_template?.whatsapp_business_account_id || null
-                            }
-                        }
-                    };
-                    if (update.status === 'READ') chatPatch.unread_count = 0;
-
-                    await db
-                        .from('inbox_chats')
-                        .update(chatPatch)
-                        .eq('id', message.chat_id);
-                }
-            }
-        } catch (error) {
-            await logWhatsAppWebhookStatusEvent(db, update, [], error);
-            console.error('Inbox delivery status sync failed:', error.message || error);
-        }
+        await applyInboxDeliveryStatusUpdate(update);
     }
 };
 

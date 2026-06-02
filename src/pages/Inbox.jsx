@@ -92,12 +92,13 @@ const normalizeMessages = (items = []) => {
 const mergeServerMessagesWithPending = (serverItems = [], currentItems = []) => {
   const serverMessages = normalizeMessages(serverItems);
   const recentPending = (Array.isArray(currentItems) ? currentItems : [])
-    .filter((message) => message.status === 'SENDING')
+    .filter((message) => message.status === 'SENDING' || message.metadata?.local_client_id)
     .filter((message) => Date.now() - getMessageTime(message) < 45000)
     .filter((message) => !serverMessages.some((serverMessage) => (
-      serverMessage.from_me === true &&
-      serverMessage.text === message.text &&
-      Math.abs(getMessageTime(serverMessage) - getMessageTime(message)) < 60000
+      serverMessage.from_me === true && (
+        (message.wamid && (serverMessage.wamid === message.wamid || serverMessage.message_id === message.wamid || serverMessage.meta_message_id === message.wamid)) ||
+        (serverMessage.text === message.text && Math.abs(getMessageTime(serverMessage) - getMessageTime(message)) < 60000)
+      )
     )));
   return normalizeMessages([...serverMessages, ...recentPending]);
 };
@@ -708,7 +709,15 @@ const InboxContent = () => {
         const responseChatId = response.data?.chatId || stored?.chat_id || selectedChat.id;
         if (stored?.id) {
           setMessages((prev) => prev.map((item) => (
-            item.id === created.id ? mapStoredMessage(stored) : item
+            item.id === created.id
+              ? {
+                ...mapStoredMessage(stored),
+                metadata: {
+                  ...(stored.metadata || {}),
+                  local_client_id: localMessageId,
+                },
+              }
+              : item
           )));
         }
         updateConversation(selectedChat.id, { id: responseChatId, lastMsg: text, deliveryStatus: 'SENT', unread: 0, unread_count: 0 });
