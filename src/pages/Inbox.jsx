@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -41,23 +41,11 @@ const resolveDeliveryStatus = (...statuses) => statuses
   .map(normalizeDeliveryStatus)
   .filter(Boolean)
   .sort((a, b) => deliveryStatusRank(b) - deliveryStatusRank(a))[0] || '';
-const resolveMessageText = (item = {}) => (
-  item.body_content ||
-  item.text ||
-  item.body ||
-  item.message_body ||
-  item.message_text ||
-  item.metadata?.body_content ||
-  item.metadata?.text ||
-  item.metadata?.message_text ||
-  ''
-);
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
-  meta_message_id: item.meta_message_id || item.wamid || item.metadata?.meta_message_id || item.metadata?.wamid || '',
-  message_id: item.message_id || item.wamid || item.metadata?.message_id || item.metadata?.wamid || item.metadata?.meta_message_id || '',
-  wamid: item.wamid || item.meta_message_id || item.message_id || item.metadata?.wamid || '',
-  text: resolveMessageText(item),
+  meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
+  message_id: item.message_id || item.metadata?.message_id || item.metadata?.meta_message_id || '',
+  text: item.message_text || item.body || item.text || item.message_body || '',
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
@@ -67,66 +55,6 @@ const mapStoredMessage = (item = {}) => ({
   created_at: item.created_at || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
-const getMessageDedupeKey = (message = {}) => (
-  message.wamid ||
-  message.meta_message_id ||
-  message.message_id ||
-  message.metadata?.wamid ||
-  message.metadata?.meta_message_id ||
-  message.metadata?.message_id ||
-  `${message.created_at || ''}|${message.sender || ''}|${message.from_me ? '1' : '0'}|${message.text || ''}`
-);
-const normalizeMessages = (items = []) => {
-  const byKey = new Map();
-  (Array.isArray(items) ? items : []).map(mapStoredMessage).forEach((message) => {
-    const key = getMessageDedupeKey(message);
-    const previous = byKey.get(key);
-    const previousText = resolveMessageText(previous);
-    const nextText = resolveMessageText(message);
-    if (!previous || (!previousText && nextText) || new Date(message.created_at || 0) >= new Date(previous.created_at || 0)) {
-      byKey.set(key, message);
-    }
-  });
-  return Array.from(byKey.values()).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
-};
-const mergeServerMessagesWithPending = (serverItems = [], currentItems = []) => {
-  const serverMessages = normalizeMessages(serverItems);
-  const recentPending = (Array.isArray(currentItems) ? currentItems : [])
-    .filter((message) => message.status === 'SENDING' || message.metadata?.local_client_id)
-    .filter((message) => Date.now() - getMessageTime(message) < 45000)
-    .filter((message) => !serverMessages.some((serverMessage) => (
-      serverMessage.from_me === true && (
-        (message.wamid && (serverMessage.wamid === message.wamid || serverMessage.message_id === message.wamid || serverMessage.meta_message_id === message.wamid)) ||
-        (serverMessage.text === message.text && Math.abs(getMessageTime(serverMessage) - getMessageTime(message)) < 60000)
-      )
-    )));
-  return normalizeMessages([...serverMessages, ...recentPending]);
-};
-const getMessageTime = (message = {}) => {
-  const value = new Date(message.created_at || '').getTime();
-  return Number.isFinite(value) ? value : 0;
-};
-const mapInboxChatRow = (chat = {}) => {
-  const displayName = chat.name || chat.patient_name || 'Unknown Patient';
-  const count = Number(chat.unread_count || 0);
-  return {
-    id: chat.id,
-    name: displayName,
-    phone: chat?.phone || chat?.patient_phone || '',
-    lastMsg: chat.last_message || '',
-    time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-    updated_at: chat.updated_at || '',
-    unread: count,
-    unread_count: count,
-    status: chat.status || 'Offline',
-    deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
-    scheduled_at: chat.scheduled_at || null,
-    assigned_agent_id: chat?.assigned_agent_id || null,
-    window_expires_at: chat.window_expires_at || chat.metadata?.window_expires_at || null,
-    whatsapp_window_expires_at: chat.whatsapp_window_expires_at || chat.metadata?.whatsapp_window_expires_at || null,
-    metadata: chat?.metadata || {},
-  };
-};
 const logInboxError = (error) => {
   const message = error?.message || error?.details || String(error || '');
   if (error?.code === 'PGRST205' || String(message).toLowerCase().includes('schema cache')) {
@@ -195,9 +123,6 @@ const InboxContent = () => {
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
-  const messagesEndRef = useRef(null);
-  const messageScrollRef = useRef(null);
-  const selectedChatRef = useRef(null);
   const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
@@ -213,45 +138,33 @@ const InboxContent = () => {
       ? (Array.isArray(conversations) ? conversations : [])
       : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
   ), [conversations, tagFilter]);
-  const messageWindowState = useMemo(() => {
-    const publicMessages = (Array.isArray(messages) ? messages : []).filter((item) => !(item.is_private_note || item.type === 'private'));
-    const latestInboundAt = publicMessages
-      .filter((item) => item.from_me === false || item.sender === 'user')
-      .reduce((latest, item) => Math.max(latest, getMessageTime(item)), 0);
-    const latestTemplateAt = publicMessages
-      .filter((item) => item.from_me === true && (item.type === 'template' || item.message_type === 'template' || item.metadata?.template_name || item.metadata?.last_template))
-      .reduce((latest, item) => Math.max(latest, getMessageTime(item)), 0);
-    const inferredExpiresAt = latestInboundAt && latestInboundAt > latestTemplateAt
-      ? new Date(latestInboundAt + 24 * 60 * 60 * 1000).toISOString()
-      : null;
-    return { inferredExpiresAt, latestInboundAt, latestTemplateAt };
-  }, [messages]);
-  const activeWindowExpiresAt = selectedChat?.window_expires_at || selectedChat?.whatsapp_window_expires_at || null;
-  const explicitWindowOpen = activeWindowExpiresAt ? new Date(activeWindowExpiresAt) > new Date(now) : false;
-  const inferredWindowOpen = messageWindowState.inferredExpiresAt
-    ? new Date(messageWindowState.inferredExpiresAt) > new Date(now)
-    : false;
-  const templateLocksWindow = messageWindowState.latestTemplateAt > messageWindowState.latestInboundAt;
-  const isWindowOpen = !templateLocksWindow && (explicitWindowOpen || inferredWindowOpen);
-  const isReplyWindowOpen = Boolean(isWindowOpen);
+  const lastInboundAt = useMemo(() => {
+    const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
+    const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
+    const messageMs = (Array.isArray(messages) ? messages : []).reduce((latest, item) => {
+      if (item.from_me === true || item.sender === 'agent' || item.sender === 'doctor') return latest;
+      const itemMs = item.created_at ? new Date(item.created_at).getTime() : 0;
+      return Number.isFinite(itemMs) ? Math.max(latest, itemMs) : latest;
+    }, 0);
+    return Math.max(metadataMs, messageMs);
+  }, [messages, selectedChat]);
+  const lastTemplateSentAt = useMemo(() => {
+    const messageMs = (Array.isArray(messages) ? messages : []).reduce((latest, item) => {
+      const isOutbound = item.from_me === true || item.sender === 'agent' || item.sender === 'doctor';
+      const isTemplate = item.type === 'template' || item.message_type === 'template' || item.metadata?.campaign_triggered || item.metadata?.bulk_broadcast;
+      const itemMs = item.created_at ? new Date(item.created_at).getTime() : 0;
+      return isOutbound && isTemplate && Number.isFinite(itemMs) ? Math.max(latest, itemMs) : latest;
+    }, 0);
+    const metadataTime = selectedChat?.metadata?.last_template?.sent_at || selectedChat?.metadata?.last_template_sent_at;
+    const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
+    return Math.max(messageMs, metadataMs);
+  }, [messages, selectedChat]);
+  const isReplyWindowOpen = Boolean(
+    lastInboundAt &&
+    Date.now() - lastInboundAt <= 24 * 60 * 60 * 1000 &&
+    (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt)
+  );
   const canUseComposer = isPrivateNote || isReplyWindowOpen;
-
-  const scrollToBottom = () => {
-    const container = messageScrollRef.current;
-    if (container) {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-      return;
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  };
-
-  useEffect(() => {
-    selectedChatRef.current = selectedChat;
-  }, [selectedChat]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages.length, selectedChat?.id]);
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -299,7 +212,7 @@ const InboxContent = () => {
       if (loadedFromApi) throw new Error('__INBOX_API_LOADED__');
       let result = await supabase
         .from('inbox_chats')
-        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, window_expires_at, whatsapp_window_expires_at, metadata')
+        .select('id, user_id, doctor_id, name, last_message, updated_at, phone, patient_phone, status, unread_count, patient_name, scheduled_at, assigned_agent_id, metadata')
         .or(`user_id.eq.${user.id},doctor_id.eq.${user.id}`)
         .order('updated_at', { ascending: false });
 
@@ -360,7 +273,7 @@ const InboxContent = () => {
               name: phone || 'Patient',
               patient_name: phone || 'Patient',
               phone,
-              last_message: item.message_text || item.body_content || item.message_body || item.body || item.text || '',
+              last_message: item.message_text || item.message_body || item.body || item.text || '',
               updated_at: item.created_at,
               status: item.status || item.metadata?.delivery_status || 'SENT',
               unread_count: 0,
@@ -382,7 +295,26 @@ const InboxContent = () => {
       }))
       : [fallbackAgent];
 
-    const mappedChats = Array.isArray(chatData) ? chatData.map(mapInboxChatRow) : [];
+    const mappedChats = Array.isArray(chatData)
+      ? chatData.map((chat) => {
+        const displayName = chat.name || chat.patient_name || 'Unknown Patient';
+        const currentAgent = chat?.assigned_agent_id || null;
+        const count = Number(chat.unread_count || 0);
+        return {
+          id: chat.id,
+          name: displayName,
+          phone: chat?.phone || chat?.patient_phone || '',
+          lastMsg: chat.last_message || '',
+          time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          unread: count,
+          status: chat.status || 'Offline',
+          deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
+          scheduled_at: chat.scheduled_at || null,
+          assigned_agent_id: currentAgent,
+          metadata: chat?.metadata || {},
+        };
+      })
+      : [];
 
     setAgents(mappedAgents);
     setActiveAgent(mappedAgents[0]);
@@ -394,25 +326,16 @@ const InboxContent = () => {
     setLoading(false);
   }, [getUser]);
 
-  const loadMessages = useCallback(async (chat, { primeFromMetadata = true } = {}) => {
+  const loadMessages = useCallback(async (chat) => {
     const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
-    if (primeFromMetadata) setMessages(normalizeMessages(storedMessages));
+    setMessages(storedMessages.map(mapStoredMessage));
 
     if (!chat?.id || String(chat.id).startsWith('message-')) return;
     const user = await getUser();
     try {
       const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
       if (apiResult.data?.success) {
-        setMessages((prev) => mergeServerMessagesWithPending(apiResult.data.messages || [], prev));
-        if (apiResult.data.chat?.id) {
-          const mappedChat = { ...mapInboxChatRow(apiResult.data.chat), unread: 0, unread_count: 0 };
-          setConversations((prev) => prev.map((item) => (
-            String(item.id) === String(mappedChat.id) ? { ...item, ...mappedChat } : item
-          )));
-          setSelectedChat((prev) => (
-            String(prev?.id || '') === String(mappedChat.id) ? { ...prev, ...mappedChat } : prev
-          ));
-        }
+        setMessages((apiResult.data.messages || []).map(mapStoredMessage));
         return;
       }
     } catch (error) {
@@ -422,7 +345,7 @@ const InboxContent = () => {
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, chat_id, wamid, meta_message_id, message_id, body_content, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
+        .select('id, chat_id, meta_message_id, message_id, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
@@ -436,7 +359,7 @@ const InboxContent = () => {
 
       if (result.error) throw result.error;
       if (Array.isArray(result.data) && result.data.length > 0) {
-        setMessages((prev) => mergeServerMessagesWithPending(result.data, prev));
+        setMessages(result.data.map(mapStoredMessage));
       }
     } catch (error) {
       logInboxError(error);
@@ -486,155 +409,70 @@ const InboxContent = () => {
     loadInbox();
   }, [loadInbox, reloadToken]);
 
-  const mapInboxChat = useCallback((chat = {}) => mapInboxChatRow(chat), []);
-
-  const mergeConversation = useCallback((nextChat, forceUnreadZero = false) => {
-    if (!nextChat?.id) return;
-    const chatPatch = forceUnreadZero ? { ...nextChat, unread: 0, unread_count: 0 } : nextChat;
-    setConversations((prev) => {
-      const existing = prev.some((chat) => String(chat.id) === String(chatPatch.id));
-      const merged = existing
-        ? prev.map((chat) => (String(chat.id) === String(chatPatch.id) ? { ...chat, ...chatPatch } : chat))
-        : [chatPatch, ...prev];
-      return merged.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
-    });
-    setSelectedChat((prev) => (String(prev?.id || '') === String(chatPatch.id) ? { ...prev, ...chatPatch } : prev));
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setReloadToken((value) => value + 1);
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const mergeRealtimeMessage = useCallback((row = {}) => {
-    if (!row.chat_id) return;
-    const activeChat = selectedChatRef.current;
-    const isActiveChat = String(activeChat?.id || '') === String(row.chat_id);
-    const nextMessage = mapStoredMessage(row);
-    const nextStatus = normalizeDeliveryStatus(nextMessage.status || row.status || row.metadata?.delivery_status);
-    const isInbound = nextStatus === 'INBOUND' || row.from_me === false || row.sender === 'user';
+  useEffect(() => {
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_messages' }, (payload) => {
+        const updatedMessage = payload.new || {};
+        const nextStatus = String(updatedMessage.status || updatedMessage.metadata?.delivery_status || '').toUpperCase();
+        if (!['READ', 'DELIVERED'].includes(nextStatus)) return;
 
-    if (isActiveChat) {
-      setMessages((prev) => {
-        const nextMetaMessageId = nextMessage.meta_message_id || nextMessage.metadata?.meta_message_id || '';
-        const nextMessageId = nextMessage.message_id || nextMessage.metadata?.message_id || nextMetaMessageId;
-        let replaced = false;
-        const merged = prev.map((msg) => {
-          const matches = msg.id === nextMessage.id
+        const nextMetaMessageId = updatedMessage.meta_message_id || updatedMessage.metadata?.meta_message_id || '';
+        const nextMessageId = updatedMessage.message_id || updatedMessage.metadata?.message_id || nextMetaMessageId;
+
+        setMessages((prev) => prev.map((msg) => (
+          (msg.id === updatedMessage.id
             || (nextMetaMessageId && (msg.meta_message_id === nextMetaMessageId || msg.metadata?.meta_message_id === nextMetaMessageId))
-            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId))
-            || (msg.status === 'SENDING' && msg.from_me === true && nextMessage.from_me === true && msg.text === nextMessage.text);
-          if (!matches) return msg;
-          replaced = true;
-          return { ...msg, ...nextMessage, status: nextStatus || msg.status };
-        });
-        const withInserted = replaced ? merged : [...merged, { ...nextMessage, status: nextStatus || nextMessage.status }];
-        return normalizeMessages(withInserted);
-      });
-    }
+            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId)))
+            ? {
+              ...msg,
+              status: nextStatus,
+              meta_message_id: nextMetaMessageId || msg.meta_message_id,
+              message_id: nextMessageId || msg.message_id,
+              metadata: updatedMessage.metadata || msg.metadata,
+            }
+            : msg
+        )));
 
-    setConversations((prev) => prev.map((chat) => {
-      if (String(chat.id) !== String(row.chat_id)) return chat;
-      const shouldClearUnread = isActiveChat || nextStatus === 'READ' || nextStatus === 'SENT';
-      const nextUnread = shouldClearUnread
-        ? 0
-        : isInbound
-          ? Number(chat.unread_count ?? chat.unread ?? 0) + 1
-          : Number(chat.unread_count ?? chat.unread ?? 0);
-      return {
-        ...chat,
-        lastMsg: nextMessage.text || chat.lastMsg,
-        deliveryStatus: nextStatus || chat.deliveryStatus,
-        unread: nextUnread,
-        unread_count: nextUnread,
-        updated_at: row.created_at || chat.updated_at,
-        time: row.created_at ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : chat.time,
-      };
-    }));
+        if (updatedMessage.chat_id) {
+          setConversations((prev) => prev.map((chat) => (
+            chat.id === updatedMessage.chat_id ? { ...chat, deliveryStatus: nextStatus } : chat
+          )));
+        }
+      })
+      .subscribe();
 
-    if (isActiveChat || nextStatus === 'READ' || nextStatus === 'SENT') {
-      setSelectedChat((prev) => (
-        String(prev?.id || '') === String(row.chat_id) ? { ...prev, unread: 0, unread_count: 0 } : prev
-      ));
-    }
-
-    if (isActiveChat && isInbound) {
-      supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', row.chat_id).then(({ error }) => {
-        if (error) logInboxError(error);
-      });
-    }
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
     let channel;
     let active = true;
 
-    getUser().then((user) => {
+    getUser().then((user) => {      
       if (!active || !user?.id) return;
       channel = supabase
         .channel(`inbox-live-${user.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'inbox_messages',
-          filter: `workspace_id=eq.${user.id}`,
-        }, (payload) => mergeRealtimeMessage(payload.new || {}))
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'inbox_messages',
-          filter: `workspace_id=eq.${user.id}`,
-        }, (payload) => mergeRealtimeMessage(payload.new || {}))
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'inbox_messages',
-          filter: `sender_id=eq.${user.id}`,
-        }, (payload) => mergeRealtimeMessage(payload.new || {}))
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'inbox_messages',
-          filter: `sender_id=eq.${user.id}`,
-        }, (payload) => mergeRealtimeMessage(payload.new || {}))
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'inbox_chats',
-          filter: `user_id=eq.${user.id}`,
-        }, (payload) => mergeConversation(mapInboxChat(payload.new || {})))
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'inbox_chats',
-          filter: `user_id=eq.${user.id}`,
-        }, (payload) => {
-          const mapped = mapInboxChat(payload.new || {});
-          const isActive = String(selectedChatRef.current?.id || '') === String(mapped.id);
-          mergeConversation(mapped, isActive || Number(mapped.unread_count || 0) === 0);
-          if (isActive) loadMessages(mapped, { primeFromMetadata: false });
-          if (isActive && Number(mapped.unread_count || 0) > 0) {
-            supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', mapped.id).then(({ error }) => {
-              if (error) logInboxError(error);
-            });
-          }
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_chats' }, () => {
+          setReloadToken((value) => value + 1);
         })
         .on('postgres_changes', {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
-          table: 'inbox_chats',
-          filter: `doctor_id=eq.${user.id}`,
-        }, (payload) => mergeConversation(mapInboxChat(payload.new || {})))
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'inbox_chats',
-          filter: `doctor_id=eq.${user.id}`,
-        }, (payload) => {
-          const mapped = mapInboxChat(payload.new || {});
-          const isActive = String(selectedChatRef.current?.id || '') === String(mapped.id);
-          mergeConversation(mapped, isActive || Number(mapped.unread_count || 0) === 0);
-          if (isActive) loadMessages(mapped, { primeFromMetadata: false });
-          if (isActive && Number(mapped.unread_count || 0) > 0) {
-            supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', mapped.id).then(({ error }) => {
-              if (error) logInboxError(error);
-            });
-          }
+          table: 'inbox_messages',
+          filter: `workspace_id=eq.${user.id}`,
+        }, () => {
+          setReloadToken((value) => value + 1);
+          if (selectedChat) loadMessages(selectedChat);
         })
         .subscribe();
     });
@@ -643,16 +481,15 @@ const InboxContent = () => {
       active = false;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [getUser, loadMessages, mapInboxChat, mergeConversation, mergeRealtimeMessage]);
+  }, [selectedChat, loadMessages]);
 
   useEffect(() => {
-    if (!selectedChat?.id || String(selectedChat.id).startsWith('message-')) return undefined;
+    if (!selectedChat?.id) return undefined;
     const timer = window.setInterval(() => {
-      const activeChat = selectedChatRef.current;
-      if (activeChat?.id) loadMessages(activeChat, { primeFromMetadata: false });
-    }, 2500);
+      loadMessages(selectedChat);
+    }, 15000);
     return () => window.clearInterval(timer);
-  }, [selectedChat?.id, loadMessages]);
+  }, [selectedChat, loadMessages]);
 
   const updateConversation = (chatId, patch) => {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...patch } : chat)));
@@ -680,51 +517,20 @@ const InboxContent = () => {
       return;
     }
 
-    const localMessageId = `local-${Date.now()}`;
-    const nowIso = new Date().toISOString();
     const created = {
-      id: localMessageId,
+      id: Date.now(),
       text,
       sender: 'agent',
       from_me: true,
       type: isPrivateNote ? 'private' : 'public',
       is_private_note: isPrivateNote,
-      status: isPrivateNote ? 'SENT' : 'SENDING',
-      created_at: nowIso,
-      metadata: { local_client_id: localMessageId },
-      time: new Date(nowIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
     setMessages((prev) => [...prev, created]);
     setMessage('');
 
     try {
-      if (!isPrivateNote) {
-        const response = await api.post('/api/inbox/send-message', {
-          userId: (await getUser()).id,
-          chatId: selectedChat.id,
-          messageText: text,
-        });
-        const stored = response.data?.storedMessage;
-        const responseChatId = response.data?.chatId || stored?.chat_id || selectedChat.id;
-        if (stored?.id) {
-          setMessages((prev) => prev.map((item) => (
-            item.id === created.id
-              ? {
-                ...mapStoredMessage(stored),
-                metadata: {
-                  ...(stored.metadata || {}),
-                  local_client_id: localMessageId,
-                },
-              }
-              : item
-          )));
-        }
-        updateConversation(selectedChat.id, { id: responseChatId, lastMsg: text, deliveryStatus: 'SENT', unread: 0, unread_count: 0 });
-        if (responseChatId !== selectedChat.id) setReloadToken((value) => value + 1);
-        return;
-      }
-
       const storedMessage = {
         id: created.id,
         body: text,
@@ -753,9 +559,6 @@ const InboxContent = () => {
       });
     } catch (error) {
       logInboxError(error);
-      setMessages((prev) => prev.map((item) => (
-        item.id === created.id ? { ...item, status: 'FAILED', metadata: { ...(item.metadata || {}), send_error: error?.message || 'Send failed' } } : item
-      )));
     }
   };
 
@@ -804,23 +607,14 @@ const InboxContent = () => {
   };
 
   const openChat = (chat) => {
-    const nextChat = { ...chat, unread: 0, unread_count: 0 };
-    setSelectedChat(nextChat);
-    setConversations((prev) => prev.map((item) => (
-      item.id === chat.id ? { ...item, unread: 0, unread_count: 0 } : item
-    )));
+    setSelectedChat(chat);
     setShowPhone(false);
     setShowBgMenu(false);
     setShowDetailsPanel(false);
     const agent = agents.find((item) => String(item.id) === String(chat?.assigned_agent_id)) || agents[0];
     setActiveAgent(agent);
     loadChatBackground(chat.id);
-    loadMessages(nextChat);
-    if (chat?.id && !String(chat.id).startsWith('message-')) {
-      supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', chat.id).then(({ error }) => {
-        if (error) logInboxError(error);
-      });
-    }
+    loadMessages(chat);
   };
 
   const chatViewportStyle = chatBg.type === 'image'
@@ -828,7 +622,7 @@ const InboxContent = () => {
     : { backgroundColor: chatBg.value || '#E5DDD5' };
 
   return (
-    <div className="flex h-screen min-h-0 overflow-hidden bg-[#F0F2F5] font-sans">
+    <div className="flex h-screen overflow-hidden bg-[#F0F2F5] font-sans">
       <div className="flex w-80 flex-col border-r border-slate-200 bg-white lg:w-96">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-4">
           <div className="mb-4 flex items-center justify-between">
@@ -892,17 +686,13 @@ const InboxContent = () => {
                   <p className="truncate text-xs text-slate-500">{chat.lastMsg}</p>
                 )}
               </div>
-              {Number(chat.unread_count ?? chat.unread ?? 0) > 0 && (
-                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
-                  {Number(chat.unread_count ?? chat.unread ?? 0)}
-                </div>
-              )}
+              {chat.unread > 0 && <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">{chat.unread}</div>}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 flex-col" style={chatViewportStyle}>
+      <div className="relative flex flex-1 flex-col" style={chatViewportStyle}>
         {selectedChat ? (
           <>
             <div className="z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
@@ -940,7 +730,7 @@ const InboxContent = () => {
               </div>
             </div>
 
-            <div ref={messageScrollRef} className="custom-scrollbar relative min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+            <div className="custom-scrollbar relative flex-1 space-y-4 overflow-y-auto p-6">
               {messages.length === 0 && (
                 <div className="rounded-2xl bg-white/70 p-6 text-center text-sm font-semibold text-slate-500">
                   No messages in this chat yet.
@@ -967,7 +757,6 @@ const InboxContent = () => {
                 </div>
                 );
               })}
-              <div ref={messagesEndRef} />
             </div>
 
             {isGhostMode && (
@@ -1011,7 +800,7 @@ const InboxContent = () => {
                     <input
                       type="text"
                       placeholder={isGhostMode ? 'Ghost mode active: typing disabled' : (isPrivateNote ? 'Type a private team note...' : 'Reply to customer...')}
-                      disabled={isGhostMode || !canUseComposer}
+                      disabled={isGhostMode}
                       className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
                       value={message}
                       onChange={(event) => setMessage(event.target.value)}
@@ -1028,10 +817,59 @@ const InboxContent = () => {
             </div>
           </>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center p-8 text-center text-slate-400">
-            <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full border border-slate-100 bg-white shadow-sm"><MessageSquare size={40} className="text-slate-200" /></div>
-            <h2 className="text-xl font-bold text-slate-800">{conversations.length === 0 ? 'Your inbox is empty. Waiting for new patient chats...' : 'Your Unified Inbox'}</h2>
-            {conversations.length > 0 && <p className="mt-2 max-w-[280px] text-xs font-medium leading-relaxed">Select a conversation from the sidebar to start chatting with your patients.</p>}
+          <div className="flex flex-1 flex-col items-center justify-center bg-slate-50/50 p-8 text-center">
+            <div className="w-full max-w-3xl space-y-8 animate-in fade-in zoom-in-95 duration-300">
+              
+              <div className="flex flex-col items-center justify-center">
+                <div className="relative mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-blue-100/50 shadow-inner">
+                  <div className="absolute inset-0 rounded-full border-2 border-blue-200/50 animate-ping opacity-20"></div>
+                  <MessageSquare size={32} className="text-blue-600" />
+                </div>
+                <h3 className="text-2xl font-black tracking-tight text-slate-900">Welcome to Yogi Desk Live Inbox</h3>
+                <p className="mt-2 max-w-md text-sm font-medium leading-relaxed text-slate-500">
+                  Select a conversation from the sidebar to view history, reply to patients, or manage templates.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                    <MessageSquare size={20} />
+                  </div>
+                  <p className="text-3xl font-black text-slate-800">{conversations.filter(c => c.unread > 0).length}</p>
+                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Unread Chats</p>
+                </div>
+
+                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-green-50 text-green-600">
+                    <Clock3 size={20} />
+                  </div>
+                  <p className="text-3xl font-black text-slate-800">
+                    {conversations.filter(c => {
+                      const expiresAt = c.metadata?.whatsapp_window_expires_at || c.metadata?.window_expires_at;
+                      return expiresAt && new Date(expiresAt).getTime() > now;
+                    }).length}
+                  </p>
+                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Open 24h Windows</p>
+                </div>
+
+                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                    <User size={20} />
+                  </div>
+                  <p className="text-3xl font-black text-slate-800">{conversations.length}</p>
+                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Total Linked Patients</p>
+                </div>
+              </div>
+
+              <div className="mx-auto mt-4 flex max-w-2xl items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left shadow-sm">
+                <AlertCircle size={24} className="shrink-0 text-blue-500" />
+                <p className="text-xs font-semibold leading-relaxed text-blue-800">
+                  <span className="font-black uppercase tracking-wider text-blue-900">Meta Rule:</span> Free-form text fields remain open for 24 hours following a customer's inbound payload. Template restrictions apply thereafter.
+                </p>
+              </div>
+
+            </div>
           </div>
         )}
       </div>

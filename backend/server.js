@@ -2534,6 +2534,42 @@ const uploadTemplateMedia = async ({ db, userId, file }) => {
     return data?.publicUrl || '';
 };
 
+const uploadInboxMedia = async ({ db, userId, file }) => {
+    if (!file?.buffer?.length) throw new Error('Attach an image or PDF file.');
+    if (!db?.storage?.from) throw new Error('Supabase storage client unavailable.');
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowedTypes.includes(file.mimeType)) {
+        throw new Error('Only images and PDF files can be attached to a WhatsApp reply.');
+    }
+
+    const extensionByType = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp',
+        'application/pdf': 'pdf'
+    };
+    const extension = extensionByType[file.mimeType] || 'bin';
+    const safeFilename = String(file.filename || `attachment.${extension}`).replace(/[^\w.\-]+/g, '_').slice(0, 120);
+    const bucket = process.env.SUPABASE_INBOX_MEDIA_BUCKET || process.env.SUPABASE_TEMPLATE_MEDIA_BUCKET || 'template-media';
+    const storagePath = `${userId}/inbox/${Date.now()}-${crypto.randomUUID()}-${safeFilename}`;
+    const { error: uploadError } = await db.storage
+        .from(bucket)
+        .upload(storagePath, file.buffer, {
+            contentType: file.mimeType,
+            upsert: false
+        });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = db.storage.from(bucket).getPublicUrl(storagePath);
+    return {
+        url: data?.publicUrl || '',
+        mimeType: file.mimeType,
+        filename: safeFilename,
+        mediaType: file.mimeType === 'application/pdf' ? 'document' : 'image'
+    };
+};
+
 const getTemplateSubmitCredentials = async (userId) => {
     return getFreshTemplateSubmitCredentials(userId);
 };
@@ -3602,6 +3638,29 @@ app.get('/api/inbox/messages', async (req, res) => {
     }
 });
 
+app.post('/api/inbox/upload-media', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+
+        const multipartPayload = await parseMultipartForm(req, { maxBytes: 16 * 1024 * 1024 });
+        const requestBody = multipartPayload.fields || {};
+        const mediaFile = multipartPayload.files?.media || multipartPayload.files?.file || null;
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = requestBody.userId || sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+
+        const uploaded = await uploadInboxMedia({ db, userId, file: mediaFile });
+        if (!uploaded.url) throw new Error('Unable to generate a public media URL.');
+
+        return res.status(200).json({ success: true, media: uploaded });
+    } catch (error) {
+        const statusCode = error.statusCode || 400;
+        console.error('Inbox media upload failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to upload media.' });
+    }
+});
+
 app.post('/api/inbox/send-message', async (req, res) => {
     try {
         if (!supabase?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
@@ -3609,9 +3668,13 @@ app.post('/api/inbox/send-message', async (req, res) => {
         const userId = await resolveInboxRequestUserId(req);
         const chatId = String(req.body?.chatId || req.body?.activeChatId || '').trim();
         const messageText = String(req.body?.messageText || req.body?.text || req.body?.body || '').trim();
+        const mediaUrl = String(req.body?.mediaUrl || req.body?.fileUrl || '').trim();
+        const mediaType = String(req.body?.mediaType || '').trim().toLowerCase();
+        const mediaMimeType = String(req.body?.mimeType || '').trim();
+        const mediaFilename = String(req.body?.filename || req.body?.originalName || 'attachment').trim();
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
         if (!isUuid(chatId)) return res.status(400).json({ success: false, message: 'Valid chatId is required.' });
-        if (!messageText) return res.status(400).json({ success: false, message: 'Message text is required.' });
+        if (!messageText && !mediaUrl) return res.status(400).json({ success: false, message: 'Message text or media is required.' });
 
         const db = supabaseAdmin || supabase;
         let { data: activeChat, error: chatError } = await db
@@ -3642,13 +3705,29 @@ app.post('/api/inbox/send-message', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp phone number ID or access token for this doctor.' });
         }
 
+        const normalizedMediaType = mediaUrl
+            ? (mediaType === 'document' || mediaMimeType === 'application/pdf' || /\.pdf($|\?)/i.test(mediaUrl) ? 'document' : 'image')
+            : 'text';
         const payload = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             to: recipientPhone.trim(),
-            type: 'text',
-            text: { body: messageText }
+            type: normalizedMediaType
         };
+        if (normalizedMediaType === 'image') {
+            payload.image = removeUndefinedValues({
+                link: mediaUrl,
+                caption: messageText || undefined
+            });
+        } else if (normalizedMediaType === 'document') {
+            payload.document = removeUndefinedValues({
+                link: mediaUrl,
+                filename: mediaFilename || 'attachment.pdf',
+                caption: messageText || undefined
+            });
+        } else {
+            payload.text = { body: messageText };
+        }
 
         let metaResponse;
         try {
@@ -3671,6 +3750,8 @@ app.post('/api/inbox/send-message', async (req, res) => {
 
         const wamid = metaResponse.data?.messages?.[0]?.id || null;
         const nowIso = new Date().toISOString();
+        const messagePreview = messageText || mediaFilename || (normalizedMediaType === 'image' ? 'Image attachment' : normalizedMediaType === 'document' ? 'Document attachment' : mediaUrl);
+        const storedBodyContent = mediaUrl || messageText;
         const messageRow = {
             chat_id: activeChat.id,
             workspace_id: userId,
@@ -3678,13 +3759,13 @@ app.post('/api/inbox/send-message', async (req, res) => {
             sender: 'agent',
             from_me: true,
             type: 'public',
-            message_type: 'text',
+            message_type: normalizedMediaType,
             status: 'SENT',
-            body_content: messageText,
-            body: messageText,
-            text: messageText,
-            message_body: messageText,
-            message_text: messageText,
+            body_content: storedBodyContent,
+            body: storedBodyContent,
+            text: messageText || storedBodyContent,
+            message_body: messageText || storedBodyContent,
+            message_text: messageText || storedBodyContent,
             sender_phone: finalPhoneId,
             receiver_phone: recipientPhone,
             is_private_note: false,
@@ -3698,7 +3779,12 @@ app.post('/api/inbox/send-message', async (req, res) => {
                 whatsapp_phone_number_id: finalPhoneId,
                 whatsapp_business_account_id: credentials.businessAccountId || null,
                 meta_response: metaResponse.data,
-                free_form_reply: true
+                free_form_reply: true,
+                media_url: mediaUrl || null,
+                media_type: normalizedMediaType,
+                mime_type: mediaMimeType || null,
+                filename: mediaFilename || null,
+                caption: messageText || null
             },
             created_at: nowIso
         };
@@ -3717,7 +3803,7 @@ app.post('/api/inbox/send-message', async (req, res) => {
             db,
             chatId: activeChat.id,
             payload: {
-                last_message: messageText,
+                last_message: messagePreview,
                 status: 'SENT',
                 unread_count: 0,
                 updated_at: nowIso,
@@ -3727,7 +3813,9 @@ app.post('/api/inbox/send-message', async (req, res) => {
                         wamid,
                         message_id: wamid,
                         sent_at: nowIso,
-                        body_preview: messageText
+                        body_preview: messageText || mediaFilename || mediaUrl,
+                        media_url: mediaUrl || null,
+                        media_type: normalizedMediaType
                     }
                 }
             }
