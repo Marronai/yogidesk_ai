@@ -1643,16 +1643,16 @@ const handleWhatsAppWebhook = (req, res) => {
                 incomingCount,
                 entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
             });
+
+            if (incomingCount > 0) await processIncomingInboxMessagesWebhook(req.body);
+            if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
+            await processTemplateStatusWebhook(req.body);
+            await processFailedDeliveryWebhook(req.body);
             await logRawWhatsAppWebhookHit(req.body, {
                 fields: [...new Set(webhookFields)],
                 statusCount,
                 incomingCount
             });
-
-            if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
-            await processTemplateStatusWebhook(req.body);
-            await processIncomingInboxMessagesWebhook(req.body);
-            await processFailedDeliveryWebhook(req.body);
         })
         .catch((error) => {
             console.error('WhatsApp webhook background processing error:', error.message || error);
@@ -3555,7 +3555,7 @@ app.get('/api/inbox/messages', async (req, res) => {
 
         let result = await db
             .from('inbox_messages')
-            .select('id, chat_id, body_content, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
+            .select('id, chat_id, wamid, meta_message_id, message_id, body_content, body, text, message_body, message_text, sender, from_me, type, message_type, is_private_note, status, created_at, metadata')
             .eq('chat_id', chatId)
             .order('created_at', { ascending: true });
 

@@ -41,11 +41,23 @@ const resolveDeliveryStatus = (...statuses) => statuses
   .map(normalizeDeliveryStatus)
   .filter(Boolean)
   .sort((a, b) => deliveryStatusRank(b) - deliveryStatusRank(a))[0] || '';
+const resolveMessageText = (item = {}) => (
+  item.body_content ||
+  item.text ||
+  item.body ||
+  item.message_body ||
+  item.message_text ||
+  item.metadata?.body_content ||
+  item.metadata?.text ||
+  item.metadata?.message_text ||
+  ''
+);
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
-  meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
-  message_id: item.message_id || item.metadata?.message_id || item.metadata?.meta_message_id || '',
-  text: item.message_text || item.body_content || item.body || item.text || item.message_body || '',
+  meta_message_id: item.meta_message_id || item.wamid || item.metadata?.meta_message_id || item.metadata?.wamid || '',
+  message_id: item.message_id || item.wamid || item.metadata?.message_id || item.metadata?.wamid || item.metadata?.meta_message_id || '',
+  wamid: item.wamid || item.meta_message_id || item.message_id || item.metadata?.wamid || '',
+  text: resolveMessageText(item),
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
   from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
@@ -55,6 +67,28 @@ const mapStoredMessage = (item = {}) => ({
   created_at: item.created_at || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
+const getMessageDedupeKey = (message = {}) => (
+  message.wamid ||
+  message.meta_message_id ||
+  message.message_id ||
+  message.metadata?.wamid ||
+  message.metadata?.meta_message_id ||
+  message.metadata?.message_id ||
+  `${message.created_at || ''}|${message.sender || ''}|${message.from_me ? '1' : '0'}|${message.text || ''}`
+);
+const normalizeMessages = (items = []) => {
+  const byKey = new Map();
+  (Array.isArray(items) ? items : []).map(mapStoredMessage).forEach((message) => {
+    const key = getMessageDedupeKey(message);
+    const previous = byKey.get(key);
+    const previousText = resolveMessageText(previous);
+    const nextText = resolveMessageText(message);
+    if (!previous || (!previousText && nextText) || new Date(message.created_at || 0) >= new Date(previous.created_at || 0)) {
+      byKey.set(key, message);
+    }
+  });
+  return Array.from(byKey.values()).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+};
 const logInboxError = (error) => {
   const message = error?.message || error?.details || String(error || '');
   if (error?.code === 'PGRST205' || String(message).toLowerCase().includes('schema cache')) {
@@ -124,6 +158,7 @@ const InboxContent = () => {
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
   const messagesEndRef = useRef(null);
+  const messageScrollRef = useRef(null);
   const selectedChatRef = useRef(null);
   const navigate = useNavigate();
 
@@ -148,7 +183,12 @@ const InboxContent = () => {
   const canUseComposer = isPrivateNote || isReplyWindowOpen;
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const container = messageScrollRef.current;
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   useEffect(() => {
@@ -324,14 +364,14 @@ const InboxContent = () => {
 
   const loadMessages = useCallback(async (chat) => {
     const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
-    setMessages(storedMessages.map(mapStoredMessage));
+    setMessages(normalizeMessages(storedMessages));
 
     if (!chat?.id || String(chat.id).startsWith('message-')) return;
     const user = await getUser();
     try {
       const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
       if (apiResult.data?.success) {
-        setMessages((apiResult.data.messages || []).map(mapStoredMessage));
+        setMessages(normalizeMessages(apiResult.data.messages || []));
         return;
       }
     } catch (error) {
@@ -341,7 +381,7 @@ const InboxContent = () => {
     try {
       let result = await supabase
         .from('inbox_messages')
-        .select('id, chat_id, meta_message_id, message_id, body_content, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
+        .select('id, chat_id, wamid, meta_message_id, message_id, body_content, body, text, message_body, message_text, sender, from_me, type, is_private_note, status, metadata, created_at')
         .eq('chat_id', chat.id)
         .order('created_at', { ascending: true });
 
@@ -355,7 +395,7 @@ const InboxContent = () => {
 
       if (result.error) throw result.error;
       if (Array.isArray(result.data) && result.data.length > 0) {
-        setMessages(result.data.map(mapStoredMessage));
+        setMessages(normalizeMessages(result.data));
       }
     } catch (error) {
       logInboxError(error);
@@ -463,7 +503,7 @@ const InboxContent = () => {
           return { ...msg, ...nextMessage, status: nextStatus || msg.status };
         });
         const withInserted = replaced ? merged : [...merged, { ...nextMessage, status: nextStatus || nextMessage.status }];
-        return withInserted.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        return normalizeMessages(withInserted);
       });
     }
 
@@ -522,6 +562,18 @@ const InboxContent = () => {
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
+          table: 'inbox_messages',
+          filter: `sender_id=eq.${user.id}`,
+        }, (payload) => mergeRealtimeMessage(payload.new || {}))
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inbox_messages',
+          filter: `sender_id=eq.${user.id}`,
+        }, (payload) => mergeRealtimeMessage(payload.new || {}))
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
           table: 'inbox_chats',
           filter: `user_id=eq.${user.id}`,
         }, (payload) => mergeConversation(mapInboxChat(payload.new || {})))
@@ -530,6 +582,27 @@ const InboxContent = () => {
           schema: 'public',
           table: 'inbox_chats',
           filter: `user_id=eq.${user.id}`,
+        }, (payload) => {
+          const mapped = mapInboxChat(payload.new || {});
+          const isActive = String(selectedChatRef.current?.id || '') === String(mapped.id);
+          mergeConversation(mapped, isActive || Number(mapped.unread_count || 0) === 0);
+          if (isActive && Number(mapped.unread_count || 0) > 0) {
+            supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', mapped.id).then(({ error }) => {
+              if (error) logInboxError(error);
+            });
+          }
+        })
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'inbox_chats',
+          filter: `doctor_id=eq.${user.id}`,
+        }, (payload) => mergeConversation(mapInboxChat(payload.new || {})))
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inbox_chats',
+          filter: `doctor_id=eq.${user.id}`,
         }, (payload) => {
           const mapped = mapInboxChat(payload.new || {});
           const isActive = String(selectedChatRef.current?.id || '') === String(mapped.id);
@@ -710,7 +783,7 @@ const InboxContent = () => {
     : { backgroundColor: chatBg.value || '#E5DDD5' };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#F0F2F5] font-sans">
+    <div className="flex h-screen min-h-0 overflow-hidden bg-[#F0F2F5] font-sans">
       <div className="flex w-80 flex-col border-r border-slate-200 bg-white lg:w-96">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-4">
           <div className="mb-4 flex items-center justify-between">
@@ -784,7 +857,7 @@ const InboxContent = () => {
         </div>
       </div>
 
-      <div className="relative flex flex-1 flex-col" style={chatViewportStyle}>
+      <div className="relative flex min-h-0 flex-1 flex-col" style={chatViewportStyle}>
         {selectedChat ? (
           <>
             <div className="z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-6 shadow-sm">
@@ -822,7 +895,7 @@ const InboxContent = () => {
               </div>
             </div>
 
-            <div className="custom-scrollbar relative flex-1 space-y-4 overflow-y-auto p-6">
+            <div ref={messageScrollRef} className="custom-scrollbar relative min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
               {messages.length === 0 && (
                 <div className="rounded-2xl bg-white/70 p-6 text-center text-sm font-semibold text-slate-500">
                   No messages in this chat yet.
