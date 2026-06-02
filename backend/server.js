@@ -1590,65 +1590,65 @@ const verifyWhatsAppWebhook = (req, res) => {
     return res.sendStatus(403);
 };
 
-const handleWhatsAppWebhook = async (req, res) => {
-    if (!verifyMetaWebhookSignature(req)) {
-        const payloadShape = getWhatsAppWebhookPayloadShape(req.body);
-        const allowTestBypass = process.env.NODE_ENV === 'development' || isMetaDeveloperTestPayload(req.body);
-        const allowTemporaryWhatsAppBypass = canTemporarilyBypassMetaSignature(req.body);
-        const allowStructuredWhatsAppBypass = hasValidWhatsAppWebhookPayloadStructure(req.body);
-        if (allowTestBypass) {
-            console.warn('WhatsApp webhook signature bypassed for Meta developer test payload.', {
-                environment: process.env.NODE_ENV || 'unknown',
-                hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0
-            });
-        } else if (allowTemporaryWhatsAppBypass || allowStructuredWhatsAppBypass) {
-            console.warn('WhatsApp webhook signature mismatch allowed for structurally valid WhatsApp payload.', {
-                environment: process.env.NODE_ENV || 'unknown',
-                hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
-                hasEntry: Array.isArray(req.body?.entry),
-                hasMessagesField: payloadShape.hasMessagesField,
-                hasStatuses: payloadShape.hasStatuses,
-                hasWamid: payloadShape.hasWamid
-            });
-        } else {
-            console.warn('WhatsApp webhook signature mismatch received for non-WhatsApp payload; acknowledging to stop Meta retries.', {
-                environment: process.env.NODE_ENV || 'unknown',
-                hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
-                object: req.body?.object || null,
-                hasEntry: Array.isArray(req.body?.entry)
-            });
-            return res.status(200).send('EVENT_RECEIVED');
-        }
-    }
-
-    const webhookFields = [];
-    if (Array.isArray(req.body?.entry)) {
-        for (const entry of req.body.entry) {
-            for (const change of entry?.changes || []) {
-                if (change?.field) webhookFields.push(change.field);
-            }
-        }
-    }
-    const statusUpdates = extractMessageStatusUpdates(req.body);
-    const statusCount = statusUpdates.length;
-    const incomingCount = extractIncomingInboxMessages(req.body).length;
-    console.log('WhatsApp webhook POST hit:', {
-        object: req.body?.object || null,
-        fields: [...new Set(webhookFields)],
-        statusCount,
-        incomingCount,
-        entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
-    });
-    await logRawWhatsAppWebhookHit(req.body, {
-        fields: [...new Set(webhookFields)],
-        statusCount,
-        incomingCount
-    });
-
+const handleWhatsAppWebhook = (req, res) => {
     res.status(200).send('EVENT_RECEIVED');
 
     Promise.resolve()
         .then(async () => {
+            if (!verifyMetaWebhookSignature(req)) {
+                const payloadShape = getWhatsAppWebhookPayloadShape(req.body);
+                const allowTestBypass = process.env.NODE_ENV === 'development' || isMetaDeveloperTestPayload(req.body);
+                const allowTemporaryWhatsAppBypass = canTemporarilyBypassMetaSignature(req.body);
+                const allowStructuredWhatsAppBypass = hasValidWhatsAppWebhookPayloadStructure(req.body);
+                if (allowTestBypass) {
+                    console.warn('WhatsApp webhook signature bypassed for Meta developer test payload.', {
+                        environment: process.env.NODE_ENV || 'unknown',
+                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0
+                    });
+                } else if (allowTemporaryWhatsAppBypass || allowStructuredWhatsAppBypass) {
+                    console.warn('WhatsApp webhook signature mismatch allowed for structurally valid WhatsApp payload.', {
+                        environment: process.env.NODE_ENV || 'unknown',
+                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
+                        hasEntry: Array.isArray(req.body?.entry),
+                        hasMessagesField: payloadShape.hasMessagesField,
+                        hasStatuses: payloadShape.hasStatuses,
+                        hasWamid: payloadShape.hasWamid
+                    });
+                } else {
+                    console.warn('WhatsApp webhook signature mismatch received for non-WhatsApp payload; acknowledged without processing.', {
+                        environment: process.env.NODE_ENV || 'unknown',
+                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
+                        object: req.body?.object || null,
+                        hasEntry: Array.isArray(req.body?.entry)
+                    });
+                    return;
+                }
+            }
+
+            const webhookFields = [];
+            if (Array.isArray(req.body?.entry)) {
+                for (const entry of req.body.entry) {
+                    for (const change of entry?.changes || []) {
+                        if (change?.field) webhookFields.push(change.field);
+                    }
+                }
+            }
+            const statusUpdates = extractMessageStatusUpdates(req.body);
+            const statusCount = statusUpdates.length;
+            const incomingCount = extractIncomingInboxMessages(req.body).length;
+            console.log('WhatsApp webhook POST hit:', {
+                object: req.body?.object || null,
+                fields: [...new Set(webhookFields)],
+                statusCount,
+                incomingCount,
+                entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
+            });
+            await logRawWhatsAppWebhookHit(req.body, {
+                fields: [...new Set(webhookFields)],
+                statusCount,
+                incomingCount
+            });
+
             if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
             await processTemplateStatusWebhook(req.body);
             await processIncomingInboxMessagesWebhook(req.body);

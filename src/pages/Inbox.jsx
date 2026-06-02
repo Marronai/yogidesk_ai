@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -123,6 +123,8 @@ const InboxContent = () => {
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
+  const messagesEndRef = useRef(null);
+  const selectedChatRef = useRef(null);
   const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
@@ -144,6 +146,18 @@ const InboxContent = () => {
     : false;
   const isReplyWindowOpen = Boolean(isWindowOpen);
   const canUseComposer = isPrivateNote || isReplyWindowOpen;
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  };
+
+  useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages.length, selectedChat?.id]);
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -391,77 +405,140 @@ const InboxContent = () => {
     loadInbox();
   }, [loadInbox, reloadToken]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setReloadToken((value) => value + 1);
-    }, 30000);
-    return () => window.clearInterval(timer);
+  const mapInboxChat = useCallback((chat = {}) => {
+    const displayName = chat.name || chat.patient_name || 'Unknown Patient';
+    const count = Number(chat.unread_count || 0);
+    return {
+      id: chat.id,
+      name: displayName,
+      phone: chat?.phone || chat?.patient_phone || '',
+      lastMsg: chat.last_message || '',
+      time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      updated_at: chat.updated_at || '',
+      unread: count,
+      unread_count: count,
+      status: chat.status || 'Offline',
+      deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
+      scheduled_at: chat.scheduled_at || null,
+      assigned_agent_id: chat?.assigned_agent_id || null,
+      window_expires_at: chat.window_expires_at || chat.metadata?.window_expires_at || null,
+      whatsapp_window_expires_at: chat.whatsapp_window_expires_at || chat.metadata?.whatsapp_window_expires_at || null,
+      metadata: chat?.metadata || {},
+    };
   }, []);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_messages' }, (payload) => {
-        const updatedMessage = payload.new || {};
-        const nextStatus = String(updatedMessage.status || updatedMessage.metadata?.delivery_status || '').toUpperCase();
-        if (!['READ', 'DELIVERED'].includes(nextStatus)) return;
+  const mergeConversation = useCallback((nextChat, forceUnreadZero = false) => {
+    if (!nextChat?.id) return;
+    const chatPatch = forceUnreadZero ? { ...nextChat, unread: 0, unread_count: 0 } : nextChat;
+    setConversations((prev) => {
+      const existing = prev.some((chat) => String(chat.id) === String(chatPatch.id));
+      const merged = existing
+        ? prev.map((chat) => (String(chat.id) === String(chatPatch.id) ? { ...chat, ...chatPatch } : chat))
+        : [chatPatch, ...prev];
+      return merged.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    });
+    setSelectedChat((prev) => (String(prev?.id || '') === String(chatPatch.id) ? { ...prev, ...chatPatch } : prev));
+  }, []);
 
-        const nextMetaMessageId = updatedMessage.meta_message_id || updatedMessage.metadata?.meta_message_id || '';
-        const nextMessageId = updatedMessage.message_id || updatedMessage.metadata?.message_id || nextMetaMessageId;
+  const mergeRealtimeMessage = useCallback((row = {}) => {
+    if (!row.chat_id) return;
+    const activeChat = selectedChatRef.current;
+    const isActiveChat = String(activeChat?.id || '') === String(row.chat_id);
+    const nextMessage = mapStoredMessage(row);
+    const nextStatus = normalizeDeliveryStatus(nextMessage.status || row.status || row.metadata?.delivery_status);
+    const isInbound = nextStatus === 'INBOUND' || row.from_me === false || row.sender === 'user';
 
-        setMessages((prev) => prev.map((msg) => (
-          (msg.id === updatedMessage.id
+    if (isActiveChat) {
+      setMessages((prev) => {
+        const nextMetaMessageId = nextMessage.meta_message_id || nextMessage.metadata?.meta_message_id || '';
+        const nextMessageId = nextMessage.message_id || nextMessage.metadata?.message_id || nextMetaMessageId;
+        let replaced = false;
+        const merged = prev.map((msg) => {
+          const matches = msg.id === nextMessage.id
             || (nextMetaMessageId && (msg.meta_message_id === nextMetaMessageId || msg.metadata?.meta_message_id === nextMetaMessageId))
-            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId)))
-            ? {
-              ...msg,
-              status: nextStatus,
-              meta_message_id: nextMetaMessageId || msg.meta_message_id,
-              message_id: nextMessageId || msg.message_id,
-              metadata: updatedMessage.metadata || msg.metadata,
-            }
-            : msg
-        )));
+            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId))
+            || (msg.status === 'SENDING' && msg.from_me === true && nextMessage.from_me === true && msg.text === nextMessage.text);
+          if (!matches) return msg;
+          replaced = true;
+          return { ...msg, ...nextMessage, status: nextStatus || msg.status };
+        });
+        const withInserted = replaced ? merged : [...merged, { ...nextMessage, status: nextStatus || nextMessage.status }];
+        return withInserted.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+      });
+    }
 
-        if (updatedMessage.chat_id) {
-          setConversations((prev) => prev.map((chat) => (
-            chat.id === updatedMessage.chat_id
-              ? { ...chat, deliveryStatus: nextStatus, ...(nextStatus === 'READ' ? { unread: 0, unread_count: 0 } : {}) }
-              : chat
-          )));
-          if (nextStatus === 'READ') {
-            setSelectedChat((prev) => (
-              prev?.id === updatedMessage.chat_id ? { ...prev, unread: 0, unread_count: 0 } : prev
-            ));
-          }
-        }
-      })
-      .subscribe();
+    setConversations((prev) => prev.map((chat) => {
+      if (String(chat.id) !== String(row.chat_id)) return chat;
+      const shouldClearUnread = isActiveChat || nextStatus === 'READ' || nextStatus === 'SENT';
+      const nextUnread = shouldClearUnread
+        ? 0
+        : isInbound
+          ? Number(chat.unread_count ?? chat.unread ?? 0) + 1
+          : Number(chat.unread_count ?? chat.unread ?? 0);
+      return {
+        ...chat,
+        lastMsg: nextMessage.text || chat.lastMsg,
+        deliveryStatus: nextStatus || chat.deliveryStatus,
+        unread: nextUnread,
+        unread_count: nextUnread,
+        updated_at: row.created_at || chat.updated_at,
+        time: row.created_at ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : chat.time,
+      };
+    }));
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    if (isActiveChat || nextStatus === 'READ' || nextStatus === 'SENT') {
+      setSelectedChat((prev) => (
+        String(prev?.id || '') === String(row.chat_id) ? { ...prev, unread: 0, unread_count: 0 } : prev
+      ));
+    }
+
+    if (isActiveChat && isInbound) {
+      supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', row.chat_id).then(({ error }) => {
+        if (error) logInboxError(error);
+      });
+    }
   }, []);
 
   useEffect(() => {
     let channel;
     let active = true;
 
-    getUser().then((user) => {      
+    getUser().then((user) => {
       if (!active || !user?.id) return;
       channel = supabase
         .channel(`inbox-live-${user.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_chats' }, () => {
-          setReloadToken((value) => value + 1);
-        })
         .on('postgres_changes', {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
           table: 'inbox_messages',
           filter: `workspace_id=eq.${user.id}`,
-        }, () => {
-          setReloadToken((value) => value + 1);
-          if (selectedChat) loadMessages(selectedChat);
+        }, (payload) => mergeRealtimeMessage(payload.new || {}))
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inbox_messages',
+          filter: `workspace_id=eq.${user.id}`,
+        }, (payload) => mergeRealtimeMessage(payload.new || {}))
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'inbox_chats',
+          filter: `user_id=eq.${user.id}`,
+        }, (payload) => mergeConversation(mapInboxChat(payload.new || {})))
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inbox_chats',
+          filter: `user_id=eq.${user.id}`,
+        }, (payload) => {
+          const mapped = mapInboxChat(payload.new || {});
+          const isActive = String(selectedChatRef.current?.id || '') === String(mapped.id);
+          mergeConversation(mapped, isActive || Number(mapped.unread_count || 0) === 0);
+          if (isActive && Number(mapped.unread_count || 0) > 0) {
+            supabase.from('inbox_chats').update({ unread_count: 0 }).eq('id', mapped.id).then(({ error }) => {
+              if (error) logInboxError(error);
+            });
+          }
         })
         .subscribe();
     });
@@ -470,15 +547,7 @@ const InboxContent = () => {
       active = false;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [selectedChat, loadMessages]);
-
-  useEffect(() => {
-    if (!selectedChat?.id) return undefined;
-    const timer = window.setInterval(() => {
-      loadMessages(selectedChat);
-    }, 15000);
-    return () => window.clearInterval(timer);
-  }, [selectedChat, loadMessages]);
+  }, [getUser, mapInboxChat, mergeConversation, mergeRealtimeMessage]);
 
   const updateConversation = (chatId, patch) => {
     setConversations((prev) => prev.map((chat) => (chat.id === chatId ? { ...chat, ...patch } : chat)));
@@ -780,6 +849,7 @@ const InboxContent = () => {
                 </div>
                 );
               })}
+              <div ref={messagesEndRef} />
             </div>
 
             {isGhostMode && (
