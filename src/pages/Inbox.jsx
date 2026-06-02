@@ -520,6 +520,22 @@ const InboxContent = () => {
     setMessage('');
 
     try {
+      if (!isPrivateNote) {
+        const response = await api.post('/api/inbox/send-message', {
+          userId: (await getUser()).id,
+          chatId: selectedChat.id,
+          messageText: text,
+        });
+        const stored = response.data?.storedMessage;
+        if (stored?.id) {
+          setMessages((prev) => prev.map((item) => (
+            item.id === created.id ? mapStoredMessage(stored) : item
+          )));
+        }
+        updateConversation(selectedChat.id, { lastMsg: text, deliveryStatus: 'SENT' });
+        return;
+      }
+
       const storedMessage = {
         id: created.id,
         body: text,
@@ -548,6 +564,9 @@ const InboxContent = () => {
       });
     } catch (error) {
       logInboxError(error);
+      setMessages((prev) => prev.map((item) => (
+        item.id === created.id ? { ...item, status: 'FAILED', metadata: { ...(item.metadata || {}), send_error: error?.message || 'Send failed' } } : item
+      )));
     }
   };
 

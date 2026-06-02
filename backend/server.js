@@ -3553,6 +3553,143 @@ app.get('/api/inbox/messages', async (req, res) => {
     }
 });
 
+app.post('/api/inbox/send-message', async (req, res) => {
+    try {
+        if (!supabase?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+
+        const userId = await resolveInboxRequestUserId(req);
+        const chatId = String(req.body?.chatId || req.body?.activeChatId || '').trim();
+        const messageText = String(req.body?.messageText || req.body?.text || req.body?.body || '').trim();
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+        if (!isUuid(chatId)) return res.status(400).json({ success: false, message: 'Valid chatId is required.' });
+        if (!messageText) return res.status(400).json({ success: false, message: 'Message text is required.' });
+
+        const db = supabaseAdmin || supabase;
+        const { data: activeChat, error: chatError } = await db
+            .from('inbox_chats')
+            .select('id, user_id, doctor_id, phone, patient_phone, name, patient_name, metadata')
+            .eq('id', chatId)
+            .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
+            .maybeSingle();
+
+        if (chatError) throw chatError;
+        if (!activeChat?.id) return res.status(404).json({ success: false, message: 'Chat not found.' });
+
+        const recipientPhone = sanitizeMetaPhoneNumber(activeChat.patient_phone || activeChat.phone || '');
+        if (!recipientPhone) return res.status(400).json({ success: false, message: 'Patient phone number is missing.' });
+
+        const credentials = await getUserMetaCredentials(userId);
+        const finalToken = String(credentials.accessToken || '').trim();
+        const finalPhoneId = String(credentials.phoneNumberId || '').trim();
+        if (!finalPhoneId || !finalToken) {
+            return res.status(400).json({ success: false, message: 'Missing WhatsApp phone number ID or access token for this doctor.' });
+        }
+
+        const payload = {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: recipientPhone.trim(),
+            type: 'text',
+            text: { body: messageText }
+        };
+
+        let metaResponse;
+        try {
+            metaResponse = await axios.post(`https://graph.facebook.com/v20.0/${finalPhoneId}/messages`, payload, {
+                headers: {
+                    Authorization: `Bearer ${finalToken}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 15000
+            });
+        } catch (error) {
+            const providerMessage = error.response?.data?.error?.message || error.message || 'Meta free-form send failed.';
+            console.error('Meta free-form inbox send failed:', error.response?.data || providerMessage);
+            return res.status(error.response?.status || 400).json({
+                success: false,
+                message: providerMessage,
+                provider: error.response?.data || null
+            });
+        }
+
+        const wamid = metaResponse.data?.messages?.[0]?.id || null;
+        const nowIso = new Date().toISOString();
+        const messageRow = {
+            chat_id: activeChat.id,
+            workspace_id: userId,
+            sender_id: userId,
+            sender: 'agent',
+            from_me: true,
+            type: 'public',
+            message_type: 'text',
+            status: 'SENT',
+            body_content: messageText,
+            body: messageText,
+            text: messageText,
+            message_body: messageText,
+            message_text: messageText,
+            sender_phone: finalPhoneId,
+            receiver_phone: recipientPhone,
+            is_private_note: false,
+            wamid,
+            message_id: wamid,
+            meta_message_id: wamid,
+            metadata: {
+                wamid,
+                message_id: wamid,
+                meta_message_id: wamid,
+                whatsapp_phone_number_id: finalPhoneId,
+                whatsapp_business_account_id: credentials.businessAccountId || null,
+                meta_response: metaResponse.data,
+                free_form_reply: true
+            },
+            created_at: nowIso
+        };
+
+        const insertResult = await safeInsertRows({
+            table: 'inbox_messages',
+            rows: [messageRow],
+            pruneMissingColumns: true
+        });
+
+        if (!insertResult.success) {
+            return res.status(500).json({ success: false, message: 'Message sent to Meta, but inbox logging failed.' });
+        }
+
+        await writeInboxChatSafely({
+            db,
+            chatId: activeChat.id,
+            payload: {
+                last_message: messageText,
+                status: 'SENT',
+                unread_count: 0,
+                updated_at: nowIso,
+                metadata: {
+                    ...(activeChat.metadata || {}),
+                    last_free_form_reply: {
+                        wamid,
+                        message_id: wamid,
+                        sent_at: nowIso,
+                        body_preview: messageText
+                    }
+                }
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Message sent.',
+            wamid,
+            meta: metaResponse.data,
+            storedMessage: insertResult.data?.[0] || messageRow
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('Inbox free-form send API failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to send message.' });
+    }
+});
+
 app.post('/api/campaigns/send', async (req, res) => {
     try {
         if (!supabase) return res.status(500).json({ success: false, message: "Database connection unavailable" });
