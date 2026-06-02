@@ -817,56 +817,92 @@ const InboxContent = () => {
             </div>
           </>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center bg-slate-50/50 p-8 text-center">
-            <div className="w-full max-w-3xl space-y-8 animate-in fade-in zoom-in-95 duration-300">
+          <div className="flex flex-1 flex-col items-center justify-center bg-gradient-to-br from-slate-50 via-white to-blue-50/30 p-8 text-center">
+            <div className="w-full max-w-3xl space-y-10 animate-in fade-in zoom-in-95 duration-500">
               
-              <div className="flex flex-col items-center justify-center">
-                <div className="relative mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-blue-100/50 shadow-inner">
-                  <div className="absolute inset-0 rounded-full border-2 border-blue-200/50 animate-ping opacity-20"></div>
-                  <MessageSquare size={32} className="text-blue-600" />
-                </div>
-                <h3 className="text-2xl font-black tracking-tight text-slate-900">Welcome to Yogi Desk Live Inbox</h3>
-                <p className="mt-2 max-w-md text-sm font-medium leading-relaxed text-slate-500">
-                  Select a conversation from the sidebar to view history, reply to patients, or manage templates.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-                    <MessageSquare size={20} />
+              {/* HERO BLOCK */}
+              <div className="flex flex-col items-center justify-center space-y-4">
+                {/* Premium Icon Container */}
+                <div className="relative mb-2">
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 to-blue-200 opacity-20 blur-xl animate-pulse"></div>
+                  <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-blue-50 to-blue-100/50 ring-1 ring-blue-200/50 shadow-lg">
+                    <div className="absolute inset-0 rounded-full border border-blue-200/30 animate-spin opacity-20" style={{ animation: 'spin 20s linear infinite' }}></div>
+                    <MessageSquare size={40} className="text-blue-600" strokeWidth={1.5} />
                   </div>
-                  <p className="text-3xl font-black text-slate-800">{conversations.filter(c => c.unread > 0).length}</p>
-                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Unread Chats</p>
                 </div>
-
-                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-green-50 text-green-600">
-                    <Clock3 size={20} />
-                  </div>
-                  <p className="text-3xl font-black text-slate-800">
-                    {conversations.filter(c => {
-                      const expiresAt = c.metadata?.whatsapp_window_expires_at || c.metadata?.window_expires_at;
-                      return expiresAt && new Date(expiresAt).getTime() > now;
-                    }).length}
+                
+                {/* Heading */}
+                <div className="space-y-2.5">
+                  <h3 className="text-3xl font-black tracking-tight text-slate-900">Welcome to Yogi Desk Live Inbox</h3>
+                  <p className="mx-auto max-w-xl text-base font-semibold leading-relaxed text-slate-600">
+                    Select a conversation from the sidebar to view full patient history, reply instantly, or manage message templates.
                   </p>
-                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Open 24h Windows</p>
-                </div>
-
-                <div className="flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                    <User size={20} />
-                  </div>
-                  <p className="text-3xl font-black text-slate-800">{conversations.length}</p>
-                  <p className="mt-1 text-xs font-bold uppercase tracking-widest text-slate-400">Total Linked Patients</p>
                 </div>
               </div>
 
-              <div className="mx-auto mt-4 flex max-w-2xl items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left shadow-sm">
-                <AlertCircle size={24} className="shrink-0 text-blue-500" />
-                <p className="text-xs font-semibold leading-relaxed text-blue-800">
-                  <span className="font-black uppercase tracking-wider text-blue-900">Meta Rule:</span> Free-form text fields remain open for 24 hours following a customer's inbound payload. Template restrictions apply thereafter.
-                </p>
+              {/* STATS OVERVIEW CARDS */}
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                {/* Card A: Unread Chats */}
+                <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-orange-200/50 hover:bg-white">
+                  <div className="absolute inset-0 bg-gradient-to-br from-orange-50 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
+                  <div className="relative space-y-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-orange-50 to-orange-100/50 ring-1 ring-orange-200/30">
+                      <MessageSquare size={24} className="text-orange-600" strokeWidth={1.5} />
+                    </div>
+                    <div>
+                      <p className="text-4xl font-black text-slate-900">{conversations.filter(c => c.unread > 0).length}</p>
+                      <p className="mt-1.5 text-xs font-bold uppercase tracking-widest text-slate-500">Unread Chats</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card B: Open 24h Windows */}
+                <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-green-200/50 hover:bg-white">
+                  <div className="absolute inset-0 bg-gradient-to-br from-green-50 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
+                  <div className="relative space-y-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-50 to-green-100/50 ring-1 ring-green-200/30">
+                      <Clock3 size={24} className="text-green-600" strokeWidth={1.5} />
+                    </div>
+                    <div>
+                      <p className="text-4xl font-black text-slate-900">
+                        {conversations.filter(c => {
+                          const expiresAt = c.metadata?.whatsapp_window_expires_at || c.metadata?.window_expires_at;
+                          return expiresAt && new Date(expiresAt).getTime() > now;
+                        }).length}
+                      </p>
+                      <p className="mt-1.5 text-xs font-bold uppercase tracking-widest text-slate-500">Open 24h Windows</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card C: Total Linked Patients */}
+                <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 hover:shadow-lg hover:border-blue-200/50 hover:bg-white">
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></div>
+                  <div className="relative space-y-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-50 to-blue-100/50 ring-1 ring-blue-200/30">
+                      <User size={24} className="text-blue-600" strokeWidth={1.5} />
+                    </div>
+                    <div>
+                      <p className="text-4xl font-black text-slate-900">{conversations.length}</p>
+                      <p className="mt-1.5 text-xs font-bold uppercase tracking-widest text-slate-500">Total Linked Patients</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* COMPLIANCE BANNER */}
+              <div className="mx-auto mt-2 w-full max-w-2xl overflow-hidden rounded-2xl border border-blue-200/50 bg-gradient-to-br from-blue-50/80 to-blue-50/40 p-5 shadow-sm transition-all hover:shadow-md">
+                <div className="flex items-start gap-4">
+                  <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100/50">
+                    <AlertCircle size={20} className="text-blue-600" strokeWidth={1.5} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-sm font-bold leading-relaxed text-blue-900">
+                      <span className="font-black uppercase tracking-wider">Meta Rule:</span> Free-form text fields remain open for 24 hours following a customer's inbound payload. Template restrictions apply thereafter.
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-blue-700">Compliant messaging ensures better patient engagement and adherence to platform guidelines.</p>
+                  </div>
+                </div>
               </div>
 
             </div>
