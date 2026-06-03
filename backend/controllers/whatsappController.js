@@ -1,22 +1,24 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
+const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-// Dynamic path setup: Yeh automatically backend/config/google-creds.json ko target karega
+// Dynamic absolute path resolution
 const credentialsPath = path.join(__dirname, '../config/google-creds.json');
 
-// Quick dynamic debug log to see the exact absolute path on VPS
-console.log("[YogiDesk Debug] Resolved Credentials Path:", credentialsPath);
-
 if (!fs.existsSync(credentialsPath)) {
-    console.error(`[YogiDesk Error] File absolutely not found at: ${credentialsPath}`);
-} else {
-    // Google Cloud SDK ko dynamic path override de rahe hain
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+    console.error(`[YogiDesk Error] Critical: google-creds.json missing at ${credentialsPath}`);
 }
 
+// Direct configuration injection into the Google CX Client
+const sessionsClient = new SessionsClient({
+    keyFilename: credentialsPath,
+    apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
+});
+
+console.log("[YogiDesk Debug] Dialogflow CX SessionsClient successfully initialized with direct keyFilename mapping.");
+
 const axios = require('axios');
-const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 const { supabase, supabaseAdmin } = require('../config/supabase');
 
 const missingSubAccountConfigResponse = {
@@ -111,8 +113,6 @@ const getPhoneMatchParts = (value) => {
     return { digits, last10, variants: Array.from(variants).filter(Boolean) };
 };
 
-let dialogflowSessionsClient;
-
 const getDialogflowCxConfig = () => {
     const projectId = String(process.env.DIALOGFLOW_PROJECT_ID || process.env.GOOGLE_PROJECT_ID || '').trim();
     const location = String(process.env.DIALOGFLOW_LOCATION || 'global').trim();
@@ -127,16 +127,7 @@ const getDialogflowCxConfig = () => {
 };
 
 const getDialogflowSessionsClient = () => {
-    if (!dialogflowSessionsClient) {
-        const { location } = getDialogflowCxConfig();
-        const clientOptions = location && location !== 'global'
-            ? { apiEndpoint: `${location}-dialogflow.googleapis.com` }
-            : undefined;
-
-        dialogflowSessionsClient = new SessionsClient(clientOptions);
-    }
-
-    return dialogflowSessionsClient;
+    return sessionsClient;
 };
 
 const unwrapDialogflowValue = (value) => {
