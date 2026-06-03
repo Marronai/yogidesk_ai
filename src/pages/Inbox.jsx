@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -34,6 +34,7 @@ const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
 const normalizeDeliveryStatus = (status) => String(status || '').trim().toUpperCase();
 const deliveryStatusRank = (status) => ({
+  SENDING: 0,
   SENT: 1,
   DELIVERED: 2,
   READ: 3,
@@ -128,6 +129,7 @@ const InboxContent = () => {
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
   const [doctorAiPaused, setDoctorAiPaused] = useState(false);
   const [aiToggleLoading, setAiToggleLoading] = useState(false);
+  const bottomRef = useRef(null);
   const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
@@ -351,7 +353,19 @@ const InboxContent = () => {
     try {
       const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
       if (apiResult.data?.success) {
-        setMessages((apiResult.data.messages || []).map(mapStoredMessage));
+        const apiMessages = (apiResult.data.messages || []).map(mapStoredMessage);
+        setMessages((prev) => {
+          const pending = prev.filter((item) => (
+            item.chat_id === chat.id &&
+            normalizeDeliveryStatus(item.status) === 'SENDING' &&
+            !apiMessages.some((apiMessage) => (
+              String(apiMessage.id) === String(item.id) ||
+              (apiMessage.message_id && apiMessage.message_id === item.message_id) ||
+              (apiMessage.meta_message_id && apiMessage.meta_message_id === item.meta_message_id)
+            ))
+          ));
+          return [...apiMessages, ...pending].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
+        });
         return;
       }
     } catch (error) {
@@ -375,7 +389,11 @@ const InboxContent = () => {
 
       if (result.error) throw result.error;
       if (Array.isArray(result.data) && result.data.length > 0) {
-        setMessages(result.data.map(mapStoredMessage));
+        const dbMessages = result.data.map(mapStoredMessage);
+        setMessages((prev) => {
+          const pending = prev.filter((item) => item.chat_id === chat.id && normalizeDeliveryStatus(item.status) === 'SENDING');
+          return [...dbMessages, ...pending].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
+        });
       }
     } catch (error) {
       logInboxError(error);
@@ -414,6 +432,7 @@ const InboxContent = () => {
 
   const renderStatusBadge = (status) => {
     const normalized = normalizeDeliveryStatus(status);
+    if (normalized === 'SENDING') return <Loader size={12} className="animate-spin text-slate-400" />;
     if (normalized === 'SENT') return <Check size={13} className="text-slate-400" />;
     if (normalized === 'DELIVERED') return <CheckCheck size={14} className="text-slate-400" />;
     if (normalized === 'READ') return <CheckCheck size={14} className="text-sky-400" style={{ color: '#34B7F1' }} />;
@@ -428,6 +447,10 @@ const InboxContent = () => {
   useEffect(() => {
     loadAiSettings();
   }, [loadAiSettings]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, selectedChat?.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -592,20 +615,52 @@ const InboxContent = () => {
       return;
     }
 
+    const tempId = `tmp-${Date.now()}`;
+    const nowIso = new Date().toISOString();
     const created = {
-      id: Date.now(),
+      id: tempId,
+      chat_id: selectedChat.id,
       text,
       sender: 'agent',
       from_me: true,
       type: isPrivateNote ? 'private' : 'public',
       is_private_note: isPrivateNote,
+      status: isPrivateNote ? 'SENT' : 'SENDING',
+      created_at: nowIso,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      metadata: { optimistic: true, temp_id: tempId },
     };
 
     setMessages((prev) => [...prev, created]);
     setMessage('');
+    updateConversation(selectedChat.id, { lastMsg: isPrivateNote ? selectedChat.lastMsg : text, deliveryStatus: created.status });
 
     try {
+      if (!isPrivateNote) {
+        const user = await getUser();
+        const response = await api.post('/api/inbox/send-message', {
+          userId: user.id,
+          chatId: selectedChat.id,
+          messageText: text,
+          patientPhone: selectedChat.phone || selectedChat.patient_phone || '',
+        });
+
+        const confirmedMessage = mapStoredMessage(response.data?.storedMessage || {
+          ...created,
+          id: response.data?.wamid || tempId,
+          wamid: response.data?.wamid,
+          message_id: response.data?.wamid,
+          meta_message_id: response.data?.wamid,
+          status: 'SENT',
+        });
+
+        setMessages((prev) => prev.map((item) => (
+          item.id === tempId ? { ...confirmedMessage, status: confirmedMessage.status || 'SENT' } : item
+        )));
+        updateConversation(selectedChat.id, { lastMsg: text, deliveryStatus: confirmedMessage.status || 'SENT' });
+        return;
+      }
+
       const storedMessage = {
         id: created.id,
         body: text,
@@ -633,6 +688,12 @@ const InboxContent = () => {
         ...(isPrivateNote ? {} : { lastMsg: text }),
       });
     } catch (error) {
+      setMessages((prev) => prev.map((item) => (
+        item.id === tempId
+          ? { ...item, status: 'FAILED', metadata: { ...(item.metadata || {}), send_error: error?.response?.data?.message || error.message || 'Send failed' } }
+          : item
+      )));
+      updateConversation(selectedChat.id, { deliveryStatus: 'FAILED' });
       logInboxError(error);
     }
   };
@@ -845,6 +906,7 @@ const InboxContent = () => {
                 </div>
                 );
               })}
+              <div ref={bottomRef} aria-hidden="true" />
             </div>
 
             {isGhostMode && (

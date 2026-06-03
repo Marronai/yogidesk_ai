@@ -3912,7 +3912,7 @@ app.post('/api/inbox/upload-media', async (req, res) => {
     }
 });
 
-app.post('/api/inbox/send-message', async (req, res) => {
+const handleInboxSendMessage = async (req, res) => {
     try {
         if (!supabase?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
 
@@ -4050,6 +4050,21 @@ app.post('/api/inbox/send-message', async (req, res) => {
             return res.status(500).json({ success: false, message: 'Message sent to Meta, but inbox logging failed.' });
         }
 
+        await safeInsertOptionalRows({
+            table: 'messages',
+            rows: [{
+                ...messageRow,
+                user_id: userId,
+                doctor_id: userId,
+                patient_phone: recipientPhone,
+                phone: recipientPhone,
+                direction: 'outgoing',
+                role: 'assistant',
+                content: messageText || storedBodyContent
+            }],
+            pruneMissingColumns: true
+        });
+
         await writeInboxChatSafely({
             db,
             chatId: activeChat.id,
@@ -4085,7 +4100,10 @@ app.post('/api/inbox/send-message', async (req, res) => {
         console.error('Inbox free-form send API failed:', error.message || error);
         return res.status(statusCode).json({ success: false, message: error.message || 'Unable to send message.' });
     }
-});
+};
+
+app.post('/api/inbox/send-message', handleInboxSendMessage);
+app.post('/api/messages/send', handleInboxSendMessage);
 
 app.post('/api/campaigns/send', async (req, res) => {
     try {
