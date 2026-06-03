@@ -20,9 +20,8 @@ const verifySignature = (req) => {
   const signature = String(req.get('x-hub-signature-256') || '').trim();
   if (!secret || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
-  const rawBody = typeof req.rawBody === 'string'
-    ? req.rawBody
-    : JSON.stringify(req.body || {});
+  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
+  if (!rawBody) return false;
 
   const expected = `sha256=${crypto
     .createHmac('sha256', secret)

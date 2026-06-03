@@ -29,11 +29,13 @@ const {
 
 const app = express();
 
-const isMetaWebhookRequestPath = (url = '') => (
-    String(url || '').startsWith('/api/webhooks/whatsapp') ||
-    String(url || '').startsWith('/api/whatsapp-webhook') ||
-    String(url || '').startsWith('/api/webhook/meta')
-);
+const isMetaWebhookRequestPath = (url = '') => {
+    const path = String(url || '').toLowerCase();
+    return path.includes('/api/webhooks/whatsapp') ||
+        path.includes('/api/whatsapp-webhook') ||
+        path.includes('/api/webhook/meta') ||
+        path.includes('/whatsapp');
+};
 
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-Hub-Signature-256';
@@ -68,8 +70,15 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json({
     verify: (req, res, buf) => {
-        if (isMetaWebhookRequestPath(req.originalUrl || req.url)) {
-            req.rawBody = Buffer.from(buf || '').toString('utf8');
+        const candidateUrls = [
+            req.originalUrl,
+            req.url,
+            req.path,
+            `${req.baseUrl || ''}${req.path || ''}`
+        ];
+
+        if (candidateUrls.some(isMetaWebhookRequestPath)) {
+            req.rawBody = buf.toString('utf8');
         }
     }
 }));
@@ -1700,7 +1709,8 @@ const handleWhatsAppWebhook = (req, res) => {
                 fields: [...new Set(webhookFields)],
                 statusCount,
                 incomingCount,
-                entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0
+                entryCount: Array.isArray(req.body?.entry) ? req.body.entry.length : 0,
+                hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0
             });
             console.log('[YogiDesk Debug] GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
             console.log('[YogiDesk Debug] DIALOGFLOW_LOCATION:', process.env.DIALOGFLOW_LOCATION);
