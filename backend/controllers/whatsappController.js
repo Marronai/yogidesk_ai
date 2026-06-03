@@ -206,6 +206,13 @@ const getDialogflowCxConfig = () => {
         throw new Error('Dialogflow CX config missing. Set GOOGLE_PROJECT_ID/DIALOGFLOW_PROJECT_ID, DIALOGFLOW_LOCATION, and DIALOGFLOW_AGENT_ID.');
     }
 
+    if (googleCredsObject?.project_id && googleCredsObject.project_id !== projectId) {
+        console.warn('[YogiDesk Warning] Dialogflow project ID differs from service account project:', {
+            envProjectId: projectId,
+            credentialsProjectId: googleCredsObject.project_id
+        });
+    }
+
     return { projectId, location, agentId };
 };
 
