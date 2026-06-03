@@ -75,30 +75,10 @@ app.use((req, res, next) => {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-const metaWebhookRawBodyParser = express.raw({ type: '*/*', limit: '2mb' });
-app.use((req, res, next) => {
-    if (req.method !== 'POST' || !isMetaWebhookRequest(req)) return next();
-
-    return metaWebhookRawBodyParser(req, res, (error) => {
-        if (error) return next(error);
-
-        if (Buffer.isBuffer(req.body)) {
-            req.rawBody = req.body.toString('utf8');
-            try {
-                req.body = req.rawBody ? JSON.parse(req.rawBody) : {};
-            } catch (parseError) {
-                console.error('WhatsApp webhook raw body JSON parse failed:', parseError.message || parseError);
-                return res.status(400).send('Invalid JSON payload');
-            }
-        }
-
-        return next();
-    });
-});
-
 app.use(express.json({
     verify: (req, res, buf) => {
-        if (isMetaWebhookRequest(req)) {
+        const originalUrl = String(req.originalUrl || req.url || '');
+        if (originalUrl.includes('/api/webhooks/whatsapp') || originalUrl.includes('/whatsapp')) {
             req.rawBody = buf.toString('utf8');
         }
     }
@@ -926,19 +906,23 @@ const hasValidWhatsAppWebhookPayloadStructure = (payload = {}) => {
 const verifyMetaWebhookSignature = (req) => {
     const appSecret = getMetaWebhookAppSecret();
     const signature = String(req.get('x-hub-signature-256') || '').trim();
-    const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
+    const payload = req.rawBody || JSON.stringify(req.body || {});
 
     if (!appSecret) return false;
-    if (!rawBody || !signature || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
+    if (!payload || !signature || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
     const expected = `sha256=${crypto
         .createHmac('sha256', appSecret)
-        .update(rawBody, 'utf8')
+        .update(payload, 'utf8')
         .digest('hex')}`;
 
     const signatureBuffer = Buffer.from(signature, 'utf8');
     const expectedBuffer = Buffer.from(expected, 'utf8');
-    return signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+    const verified = signatureBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+    if (verified) {
+        console.log("[YogiDesk Security] Signature verified successfully. hasRawBody:", !!req.rawBody);
+    }
+    return verified;
 };
 
 const normalizeWebhookTemplateStatus = (status) => {

@@ -20,17 +20,21 @@ const verifySignature = (req) => {
   const signature = String(req.get('x-hub-signature-256') || '').trim();
   if (!secret || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
-  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
-  if (!rawBody) return false;
+  const payload = req.rawBody || JSON.stringify(req.body || {});
+  if (!payload) return false;
 
   const expected = `sha256=${crypto
     .createHmac('sha256', secret)
-    .update(rawBody, 'utf8')
+    .update(payload, 'utf8')
     .digest('hex')}`;
 
   const actual = Buffer.from(signature, 'utf8');
   const target = Buffer.from(expected, 'utf8');
-  return actual.length === target.length && crypto.timingSafeEqual(actual, target);
+  const verified = actual.length === target.length && crypto.timingSafeEqual(actual, target);
+  if (verified) {
+    console.log("[YogiDesk Security] Signature verified successfully. hasRawBody:", !!req.rawBody);
+  }
+  return verified;
 };
 
 const getWhatsAppWebhookPayloadShape = (payload = {}) => {
