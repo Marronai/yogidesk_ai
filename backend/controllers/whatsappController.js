@@ -1,28 +1,25 @@
 require('dotenv').config();
-const path = require('path');
-const fs = require('fs');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-// 1. Force fully clear the old infected env path to stop SDK fallback
+// 1. Completely clear out the environment variable fallback
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
-// 2. Build the correct absolute path dynamically based on this file's position
-// Assuming whatsappController.js is in backend/controllers/, '../config/google-creds.json' targets backend/config/
-const credentialsPath = path.resolve(__dirname, '../config/google-creds.json');
+// 2. Direct require to pull the credentials object into memory
+// Assuming whatsappController.js is in backend/controllers/, '../config/google-creds.json' is the correct relative require path
+const googleCredsObject = require('../config/google-creds.json');
 
-console.log("[YogiDesk Debug] Final Enforced Credentials Path:", credentialsPath);
+console.log("[YogiDesk Debug] Google credentials successfully loaded into memory as a direct object. Project:", googleCredsObject.project_id);
 
-if (!fs.existsSync(credentialsPath)) {
-    console.error(`[YogiDesk Error] File absolutely not found at resolved path: ${credentialsPath}`);
-}
-
-// 3. Inject the clean path directly into the client constructor
+// 3. Inject the credentials object directly into the client
 const sessionsClient = new SessionsClient({
-    keyFilename: credentialsPath,
+    credentials: {
+        client_email: googleCredsObject.client_email,
+        private_key: googleCredsObject.private_key
+    },
     apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
 });
 
-console.log("[YogiDesk Debug] SessionsClient hard-locked with dynamic absolute path.");
+console.log("[YogiDesk Debug] SessionsClient hard-locked with direct credentials object injection.");
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
