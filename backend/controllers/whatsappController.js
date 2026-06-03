@@ -3,47 +3,66 @@ const path = require('path');
 const fs = require('fs');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-// 1. Clean out Google default credential fallbacks so they cannot use stale paths.
+// 1. Clean out Google default credential fallbacks so stale paths cannot trigger ADC metadata lookup.
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
-// 2. Read credentials from the first valid VPS/local path and inject them directly.
-const credentialCandidatePaths = [
-    '/var/www/backend/config/google-creds.json',
+const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
+const credentialCandidatePaths = uniqueValues([
+    path.resolve('/var/www/backend/config/google-creds.json'),
     path.resolve(__dirname, '../config/google-creds.json'),
     path.resolve(process.cwd(), 'config/google-creds.json'),
     path.resolve(process.cwd(), 'backend/config/google-creds.json')
-];
+]);
 
-let googleCredsObject = null;
-let loadedCredsPath = null;
-
-for (const candidatePath of credentialCandidatePaths) {
-    try {
-        if (!fs.existsSync(candidatePath)) continue;
-
-        const rawContent = fs.readFileSync(candidatePath, 'utf8');
-        googleCredsObject = JSON.parse(rawContent);
-        loadedCredsPath = candidatePath;
-        break;
-    } catch (readErr) {
-        console.error("[YogiDesk Error] Failed to read google-creds.json candidate:", candidatePath, readErr.message);
+const validateGoogleCredsObject = (credentials, sourceLabel) => {
+    if (!credentials || typeof credentials !== 'object') {
+        throw new Error(`Invalid credentials payload from ${sourceLabel}.`);
     }
-}
+    if (!credentials.client_email || !credentials.private_key || !credentials.project_id) {
+        throw new Error(`Credentials from ${sourceLabel} are missing client_email/private_key/project_id.`);
+    }
+    if (!String(credentials.client_email).endsWith('.gserviceaccount.com')) {
+        throw new Error(`Credentials from ${sourceLabel} do not look like a Google service account.`);
+    }
+    if (!String(credentials.private_key).includes('BEGIN PRIVATE KEY')) {
+        throw new Error(`Credentials from ${sourceLabel} do not contain a valid private key block.`);
+    }
+};
+
+const loadDialogflowCredentials = () => {
+    const inlineJson = process.env.DIALOGFLOW_CREDENTIALS_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (inlineJson) {
+        const parsed = JSON.parse(inlineJson);
+        validateGoogleCredsObject(parsed, 'secure inline env JSON');
+        return { credentials: parsed, source: 'secure inline env JSON' };
+    }
+
+    for (const candidatePath of credentialCandidatePaths) {
+        try {
+            if (!fs.existsSync(candidatePath)) continue;
+
+            const rawContent = fs.readFileSync(candidatePath, 'utf8');
+            const parsed = JSON.parse(rawContent);
+            validateGoogleCredsObject(parsed, candidatePath);
+            return { credentials: parsed, source: candidatePath };
+        } catch (readErr) {
+            console.error("[YogiDesk Error] Failed to load Dialogflow credentials candidate:", candidatePath, readErr.message);
+        }
+    }
+
+    return { credentials: null, source: null };
+};
+
+const loadedDialogflowCredentials = loadDialogflowCredentials();
+const googleCredsObject = loadedDialogflowCredentials.credentials;
+let sessionsClient = null;
 
 if (googleCredsObject) {
-    console.log("[YogiDesk Debug] Google credentials loaded for Dialogflow CX from:", loadedCredsPath, "Project:", googleCredsObject.project_id);
+    console.log("[YogiDesk Debug] Google credentials loaded for Dialogflow CX from:", loadedDialogflowCredentials.source, "Project:", googleCredsObject.project_id);
 } else {
-    console.error("[YogiDesk Error] Critical: google-creds.json not found in any expected location:", credentialCandidatePaths);
+    console.error("[YogiDesk Error] Critical: google-creds.json not found or invalid. Checked:", credentialCandidatePaths);
 }
-
-// 3. Initialize the SessionsClient globally with explicit credentials when available.
-const sessionsClient = new SessionsClient({
-    ...(googleCredsObject ? { credentials: googleCredsObject } : {}),
-    apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
-});
-
-console.log("[YogiDesk Debug] Dialogflow CX SessionsClient mounted with explicit credential object resolution.");
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
@@ -151,6 +170,22 @@ const getDialogflowCxConfig = () => {
     }
 
     return { projectId, location, agentId };
+};
+
+const getDialogflowSessionsClient = () => {
+    if (!googleCredsObject) {
+        throw new Error(`Dialogflow CX credentials missing or invalid. Checked: ${credentialCandidatePaths.join(', ')}`);
+    }
+
+    if (!sessionsClient) {
+        sessionsClient = new SessionsClient({
+            credentials: googleCredsObject,
+            apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
+        });
+        console.log("[YogiDesk Debug] Dialogflow CX SessionsClient mounted with validated explicit credentials.");
+    }
+
+    return sessionsClient;
 };
 
 const unwrapDialogflowValue = (value) => {
@@ -301,11 +336,8 @@ const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode
     if (!fromPhone || !text) {
         throw new Error('Dialogflow CX dispatch requires both fromPhone and text.');
     }
-    if (!googleCredsObject) {
-        throw new Error(`Dialogflow CX credentials missing. Checked: ${credentialCandidatePaths.join(', ')}`);
-    }
-
     const { projectId, location, agentId } = getDialogflowCxConfig();
+    const sessionsClient = getDialogflowSessionsClient();
     const sessionId = sanitizeDialogflowPathSegment(phoneDigitsOnly(fromPhone));
     const session = sessionsClient.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
 
