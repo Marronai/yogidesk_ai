@@ -417,6 +417,7 @@ const extractWhatsAppInboundTextMessages = (payload = {}) => {
                         patientName: contactsByWaId.get(String(message.from || ''))?.profile?.name || null,
                         text: String(text || '').trim(),
                         phoneNumberId: String(metadata.phone_number_id || '').trim(),
+                        displayPhoneNumber: phoneDigitsOnly(metadata.display_phone_number || ''),
                         businessAccountId: String(metadata.whatsapp_business_account_id || metadata.waba_id || entry.id || '').trim(),
                         raw: message
                     };
@@ -494,47 +495,80 @@ const normalizeAiPlan = (doctor = {}) => {
     return 'Basic';
 };
 
-const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, patientPhone }) => {
+const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPhoneNumber, patientPhone }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return null;
+    const doctorNumber = phoneDigitsOnly(displayPhoneNumber || phoneNumberId || '');
 
-    const runProfileQuery = async (filter) => {
-        const { data, error } = await db
-            .from('doctor_profiles')
-            .select('*')
-            .or(filter)
-            .limit(1)
-            .maybeSingle();
-        if (error) {
-            console.warn('Doctor AI config lookup failed:', error.message || error);
+    if (doctorNumber) {
+        try {
+            const { data, error } = await db
+                .from('doctors')
+                .select('*')
+                .eq('whatsapp_number', doctorNumber)
+                .single();
+            if (!error && data?.id) return { ...data, _aiTable: 'doctors' };
+            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') {
+                console.warn('Doctor AI config lookup from doctors.whatsapp_number failed:', error.message || error);
+            }
+        } catch (error) {
+            console.warn('Doctor AI config doctors lookup crashed:', error.message || error);
+        }
+    }
+
+    const runProfileQuery = async (table, filter) => {
+        try {
+            const { data, error } = await db
+                .from(table)
+                .select('*')
+                .or(filter)
+                .limit(1)
+                .maybeSingle();
+            if (error) {
+                if (!isSchemaCacheError(error) && error.code !== 'PGRST205') {
+                    console.warn(`Doctor AI config lookup failed in ${table}:`, error.message || error);
+                }
+                return null;
+            }
+            return data ? { ...data, _aiTable: table } : null;
+        } catch (error) {
+            console.warn(`Doctor AI config lookup crashed in ${table}:`, error.message || error);
             return null;
         }
-        return data || null;
     };
 
     if (businessAccountId) {
-        const row = await runProfileQuery(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`);
+        const row = await runProfileQuery('doctor_profiles', `meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`) ||
+            await runProfileQuery('profiles', `meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`);
         if (row?.id) return row;
     }
 
     if (phoneNumberId) {
-        const row = await runProfileQuery(`meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`);
+        const row = await runProfileQuery('doctor_profiles', `meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`) ||
+            await runProfileQuery('profiles', `meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`);
         if (row?.id) return row;
     }
 
     const ownerId = await resolveDialogflowInboxOwner({ businessAccountId, phoneNumberId, patientPhone });
     if (!ownerId) return null;
 
-    const { data, error } = await db
-        .from('doctor_profiles')
-        .select('*')
-        .eq('id', ownerId)
-        .maybeSingle();
-    if (error) {
-        console.warn('Doctor AI config lookup by owner failed:', error.message || error);
-        return null;
+    for (const table of ['doctor_profiles', 'profiles', 'doctors']) {
+        try {
+            const { data, error } = await db
+                .from(table)
+                .select('*')
+                .eq('id', ownerId)
+                .maybeSingle();
+            if (!error && data?.id) return { ...data, _aiTable: table };
+            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST205') {
+                console.warn(`Doctor AI config lookup by owner failed in ${table}:`, error.message || error);
+            }
+        } catch (error) {
+            console.warn(`Doctor AI config owner lookup crashed in ${table}:`, error.message || error);
+        }
     }
-    return data || null;
+
+    return null;
 };
 
 const getDoctorAiEligibility = (doctor = {}) => {
@@ -661,26 +695,17 @@ const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
         .catch((error) => console.error('Gemini appointment async save crashed:', error.message || error));
 };
 
-const incrementDoctorTokenUsage = async ({ doctorId, incrementBy = 1 }) => {
+const incrementDoctorTokenUsage = async ({ doctorId, currentUsed = 0, table = 'doctors', incrementBy = 1 }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !doctorId) return;
 
-    const { data, error } = await db
-        .from('doctor_profiles')
-        .select('token_used')
-        .eq('id', doctorId)
-        .maybeSingle();
-    if (error) {
-        console.warn('Gemini token usage lookup failed:', error.message || error);
-        return;
-    }
-
-    const nextUsed = Number(data?.token_used || 0) + Math.max(1, Number(incrementBy || 1));
+    const safeTable = ['doctors', 'doctor_profiles', 'profiles'].includes(table) ? table : 'doctors';
+    const nextUsed = Number(currentUsed || 0) + Math.max(1, Number(incrementBy || 1));
     const update = await db
-        .from('doctor_profiles')
+        .from(safeTable)
         .update({ token_used: nextUsed })
         .eq('id', doctorId);
-    if (update.error) console.warn('Gemini token usage increment failed:', update.error.message || update.error);
+    if (update.error) console.warn(`Gemini token usage increment failed in ${safeTable}:`, update.error.message || update.error);
 };
 
 const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCode = 'hi' }) => {
@@ -1145,6 +1170,7 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
             const doctor = await fetchDoctorAiConfig({
                 businessAccountId: inbound.businessAccountId,
                 phoneNumberId: inbound.phoneNumberId,
+                displayPhoneNumber: inbound.displayPhoneNumber,
                 patientPhone: inbound.fromPhone
             });
 
@@ -1183,11 +1209,6 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                     languageCode
                 });
 
-                await incrementDoctorTokenUsage({
-                    doctorId: doctor.id,
-                    incrementBy: geminiResult.tokenIncrement
-                });
-
                 const { cleanText, booking } = parseGeminiBookingConfirmation(geminiResult.replyText);
                 if (booking) saveGeminiAppointmentAsync({ doctor, inbound, booking });
 
@@ -1217,6 +1238,12 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                             credentials: metaReply?._yogidesk || {},
                             phoneNumberId: inbound.phoneNumberId,
                             businessAccountId: inbound.businessAccountId
+                        });
+                        await incrementDoctorTokenUsage({
+                            doctorId: doctor.id,
+                            currentUsed: doctor.token_used ?? doctor.tokenUsed ?? 0,
+                            table: doctor._aiTable || 'doctors',
+                            incrementBy: 1
                         });
                         result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
                     } catch (sendError) {

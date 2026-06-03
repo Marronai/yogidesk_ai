@@ -1,28 +1,46 @@
-alter table if exists public.doctor_profiles
-  add column if not exists plan text not null default 'Basic',
-  add column if not exists ai_enabled boolean not null default false,
-  add column if not exists token_limit integer not null default 0,
-  add column if not exists token_used integer not null default 0,
-  add column if not exists is_ai_paused boolean not null default false;
-
 do $$
+declare
+  target_table text;
 begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'doctor_profiles_plan_check'
-      and conrelid = 'public.doctor_profiles'::regclass
-  ) then
-    alter table public.doctor_profiles
-      add constraint doctor_profiles_plan_check
-      check (plan in ('Basic', 'Growth', 'Multi-Specialty'));
-  end if;
-end $$;
+  foreach target_table in array array['doctor_profiles', 'doctors', 'profiles']
+  loop
+    if to_regclass(format('public.%I', target_table)) is not null then
+      execute format('alter table public.%I add column if not exists plan text not null default %L', target_table, 'Basic');
+      execute format('alter table public.%I add column if not exists ai_enabled boolean not null default false', target_table);
+      execute format('alter table public.%I add column if not exists token_limit integer not null default 0', target_table);
+      execute format('alter table public.%I add column if not exists token_used integer not null default 0', target_table);
+      execute format('alter table public.%I add column if not exists is_ai_paused boolean not null default false', target_table);
 
-update public.doctor_profiles
-set
-  plan = coalesce(plan, 'Basic'),
-  ai_enabled = coalesce(ai_enabled, false),
-  token_limit = coalesce(token_limit, 0),
-  token_used = coalesce(token_used, 0),
-  is_ai_paused = coalesce(is_ai_paused, false);
+      execute format(
+        'update public.%I set plan = case when lower(coalesce(plan, %L)) like %L then %L when lower(coalesce(plan, %L)) like %L then %L when lower(coalesce(plan, %L)) like %L then %L else %L end, ai_enabled = coalesce(ai_enabled, false), token_limit = coalesce(token_limit, 0), token_used = coalesce(token_used, 0), is_ai_paused = coalesce(is_ai_paused, false)',
+        target_table,
+        'Basic',
+        '%multi%',
+        'Multi-Specialty',
+        'Basic',
+        '%growth%',
+        'Growth',
+        'Basic',
+        '%basic%',
+        'Basic',
+        'Basic'
+      );
+
+      if not exists (
+        select 1
+        from pg_constraint
+        where conname = format('%s_plan_check', target_table)
+          and conrelid = format('public.%I', target_table)::regclass
+      ) then
+        execute format(
+          'alter table public.%I add constraint %I check (plan in (%L, %L, %L))',
+          target_table,
+          format('%s_plan_check', target_table),
+          'Basic',
+          'Growth',
+          'Multi-Specialty'
+        );
+      end if;
+    end if;
+  end loop;
+end $$;
