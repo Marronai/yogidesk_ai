@@ -308,6 +308,8 @@ exports.verifyWebhook = (req, res) => {
 };
 
 exports.handleWebhook = async (req, res) => {
+  console.log("Incoming Webhook Payload:", JSON.stringify(req.body));
+
   if (!verifySignature(req)) {
     return res.status(403).send(getAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
   }

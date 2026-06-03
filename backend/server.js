@@ -1530,41 +1530,62 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
                 });
                 continue;
             }
+            const incomingInboxMessageRow = {
+                chat_id: chatId,
+                workspace_id: userId,
+                sender_phone: incoming.fromPhone,
+                receiver_phone: incoming.clinicMetaId,
+                sender: 'user',
+                from_me: false,
+                type: 'public',
+                message_type: 'text',
+                status: 'INBOUND',
+                message_id: incoming.messageId,
+                meta_message_id: incoming.messageId,
+                wamid: incoming.messageId,
+                body: incoming.text,
+                text: incoming.text,
+                body_content: incoming.text,
+                message_body: incoming.text,
+                message_text: incoming.text,
+                is_private_note: false,
+                metadata: {
+                    meta_message_id: incoming.messageId,
+                    message_id: incoming.messageId,
+                    wamid: incoming.messageId,
+                    whatsapp_business_account_id: incoming.businessAccountId || null,
+                    whatsapp_phone_number_id: incoming.phoneNumberId || null,
+                    display_phone_number: incoming.displayPhoneNumber || null,
+                    inbound: true,
+                    raw: incoming.raw
+                },
+                created_at: nowIso
+            };
+
             const insertResult = await safeInsertRows({
                 table: 'inbox_messages',
+                rows: [incomingInboxMessageRow],
+                pruneMissingColumns: true
+            });
+
+            const messageInsertResult = await safeInsertOptionalRows({
+                table: 'messages',
                 rows: [{
+                    ...incomingInboxMessageRow,
+                    user_id: userId,
+                    doctor_id: userId,
                     chat_id: chatId,
-                    workspace_id: userId,
-                    sender_phone: incoming.fromPhone,
-                    receiver_phone: incoming.clinicMetaId,
-                    sender: 'user',
-                    from_me: false,
-                    type: 'public',
-                    message_type: 'text',
-                    status: 'INBOUND',
-                    message_id: incoming.messageId,
-                    meta_message_id: incoming.messageId,
-                    wamid: incoming.messageId,
-                    body: incoming.text,
-                    text: incoming.text,
-                    body_content: incoming.text,
-                    message_body: incoming.text,
-                    message_text: incoming.text,
-                    is_private_note: false,
-                    metadata: {
-                        meta_message_id: incoming.messageId,
-                        message_id: incoming.messageId,
-                        wamid: incoming.messageId,
-                        whatsapp_business_account_id: incoming.businessAccountId || null,
-                        whatsapp_phone_number_id: incoming.phoneNumberId || null,
-                        display_phone_number: incoming.displayPhoneNumber || null,
-                        inbound: true,
-                        raw: incoming.raw
-                    },
-                    created_at: nowIso
+                    patient_phone: incoming.fromPhone,
+                    phone: incoming.fromPhone,
+                    direction: 'inbound',
+                    role: 'user',
+                    content: incoming.text
                 }],
                 pruneMissingColumns: true
             });
+            if (!messageInsertResult.success && !messageInsertResult.skipped) {
+                console.warn('Incoming webhook messages table insert skipped/failed:', messageInsertResult.error?.message || messageInsertResult.error || 'unknown error');
+            }
 
             await writeInboxChatSafely({
                 db,
@@ -1612,6 +1633,8 @@ const verifyWhatsAppWebhook = (req, res) => {
 };
 
 const handleWhatsAppWebhook = (req, res) => {
+    console.log("Incoming Webhook Payload:", JSON.stringify(req.body));
+
     if (!verifyMetaWebhookSignature(req)) {
         return res.status(403).send(getMetaWebhookAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
     }
@@ -3527,6 +3550,40 @@ const safeInsertRows = async ({ table, rows, pruneMissingColumns = true }) => {
     }
 
     return { success: false };
+};
+
+const isMissingOptionalTableError = (error, table) => {
+    const normalized = String(`${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`).toLowerCase();
+    return error?.code === 'PGRST205' ||
+        normalized.includes('schema cache') && normalized.includes(String(table || '').toLowerCase()) ||
+        normalized.includes(`relation "public.${table}" does not exist`) ||
+        normalized.includes(`relation "${table}" does not exist`);
+};
+
+const safeInsertOptionalRows = async ({ table, rows, pruneMissingColumns = true }) => {
+    if (!supabase?.from || !Array.isArray(rows) || rows.length === 0) return { success: false, skipped: true };
+    let payload = rows.map((row) => removeUndefinedValues(row || {}));
+    const removedColumns = new Set();
+
+    while (payload.length && Object.keys(payload[0] || {}).length) {
+        const { data, error } = await supabase.from(table).insert(payload).select();
+        if (!error) return { success: true, data };
+        if (isMissingOptionalTableError(error, table)) return { success: false, skipped: true, error };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (pruneMissingColumns && missingColumn && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            payload = payload.map((row) => {
+                const { [missingColumn]: _removed, ...nextRow } = row;
+                return nextRow;
+            });
+            continue;
+        }
+
+        return { success: false, error };
+    }
+
+    return { success: false, skipped: true };
 };
 
 const resolveInboxRequestUserId = async (req) => {
