@@ -198,7 +198,11 @@ const getGeminiModel = () => {
     if (geminiModel) return geminiModel;
     const apiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
     if (!apiKey) throw new Error('Gemini API key missing. Set GEMINI_API_KEY.');
-    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const geminiSdk = require('@google/generative-ai');
+    const GoogleGenerativeAI = geminiSdk.GoogleGenerativeAI || geminiSdk.default?.GoogleGenerativeAI;
+    if (typeof GoogleGenerativeAI !== 'function') {
+        throw new Error('Gemini SDK initialization failed. Expected GoogleGenerativeAI constructor from @google/generative-ai.');
+    }
     const genAI = new GoogleGenerativeAI(apiKey);
     geminiModel = genAI.getGenerativeModel({
         model: GEMINI_MODEL_NAME,
@@ -401,10 +405,14 @@ const extractWhatsAppInboundTextMessages = (payload = {}) => {
             ? entry.changes.flatMap((change) => {
                 if (change.field !== 'messages') return [];
                 const value = change.value || {};
+                if (!Array.isArray(value.messages) || value.messages.length === 0) {
+                    console.log("[YogiDesk Webhook] Received status or non-message event. Skipping AI trigger.");
+                    return [];
+                }
                 const metadata = value.metadata || {};
                 const contactsByWaId = new Map((value.contacts || []).map((contact) => [String(contact.wa_id || ''), contact]));
 
-                return (value.messages || []).map((message) => {
+                return value.messages.map((message) => {
                     const text = message.text?.body ||
                         message.button?.text ||
                         message.interactive?.button_reply?.title ||
@@ -500,22 +508,6 @@ const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPh
     if (!db?.from) return null;
     const doctorNumber = phoneDigitsOnly(displayPhoneNumber || phoneNumberId || '');
 
-    if (doctorNumber) {
-        try {
-            const { data, error } = await db
-                .from('doctors')
-                .select('*')
-                .eq('whatsapp_number', doctorNumber)
-                .single();
-            if (!error && data?.id) return { ...data, _aiTable: 'doctors' };
-            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') {
-                console.warn('Doctor AI config lookup from doctors.whatsapp_number failed:', error.message || error);
-            }
-        } catch (error) {
-            console.warn('Doctor AI config doctors lookup crashed:', error.message || error);
-        }
-    }
-
     const runProfileQuery = async (table, filter) => {
         try {
             const { data, error } = await db
@@ -536,6 +528,26 @@ const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPh
             return null;
         }
     };
+
+    if (doctorNumber) {
+        const row = await runProfileQuery('doctor_profiles', `whatsapp_number.eq.${doctorNumber},meta_phone_number_id.eq.${doctorNumber},whatsapp_phone_number_id.eq.${doctorNumber}`) ||
+            await runProfileQuery('profiles', `whatsapp_number.eq.${doctorNumber},meta_phone_number_id.eq.${doctorNumber},whatsapp_phone_number_id.eq.${doctorNumber}`);
+        if (row?.id) return row;
+
+        try {
+            const { data, error } = await db
+                .from('doctors')
+                .select('*')
+                .eq('whatsapp_number', doctorNumber)
+                .single();
+            if (!error && data?.id) return { ...data, _aiTable: 'doctors' };
+            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') {
+                console.warn('Doctor AI config lookup from doctors.whatsapp_number failed:', error.message || error);
+            }
+        } catch (error) {
+            console.warn('Doctor AI config doctors lookup crashed:', error.message || error);
+        }
+    }
 
     if (businessAccountId) {
         const row = await runProfileQuery('doctor_profiles', `meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`) ||
@@ -1148,6 +1160,11 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
     const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
     const results = [];
 
+    if (!Array.isArray(inboundMessages) || inboundMessages.length === 0) {
+        console.log("[YogiDesk Webhook] Received status or non-message event. Skipping AI trigger.");
+        return results;
+    }
+
     for (const inbound of inboundMessages) {
         const dedupeKey = buildDialogflowDedupeKey({ ...inbound, languageCode });
         const now = Date.now();
@@ -1291,6 +1308,28 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
     }
 
     return results;
+};
+
+const handleWhatsAppGeminiWebhook = async (req, res) => {
+    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
+    if (!value || !Array.isArray(value.messages) || value.messages.length === 0) {
+        console.log("[YogiDesk Webhook] Received status or non-message event. Skipping AI trigger.");
+        return res.sendStatus(200);
+    }
+
+    try {
+        Promise.resolve()
+            .then(() => handleGeminiWhatsAppMessage({
+                payload: req.body,
+                languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'hi',
+                sendReplies: true
+            }))
+            .catch((error) => console.error('Gemini WhatsApp webhook background processing failed:', error.message || error));
+        return res.sendStatus(200);
+    } catch (error) {
+        console.error('Gemini WhatsApp webhook receiver failed:', error.message || error);
+        return res.sendStatus(200);
+    }
 };
 
 const resolveScheduledIso = (scheduledFor, index = 0) => {
@@ -2196,4 +2235,5 @@ exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
 exports.runDialogflowCxForWhatsAppMessage = runDialogflowCxForWhatsAppMessage;
 exports.handleGeminiWhatsAppMessage = handleGeminiWhatsAppMessage;
 exports.handleDialogflowCxWhatsAppMessage = handleGeminiWhatsAppMessage;
+exports.handleWhatsAppGeminiWebhook = handleWhatsAppGeminiWebhook;
 exports.sendDialogflowWhatsAppTextReply = sendDialogflowWhatsAppTextReply;
