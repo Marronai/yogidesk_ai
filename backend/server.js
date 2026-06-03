@@ -36,6 +36,12 @@ const isMetaWebhookRequestPath = (url = '') => {
         path.includes('/api/webhook/meta') ||
         path.includes('/whatsapp');
 };
+const isMetaWebhookRequest = (req = {}) => ([
+    req.originalUrl,
+    req.url,
+    req.path,
+    `${req.baseUrl || ''}${req.path || ''}`
+].some(isMetaWebhookRequestPath));
 
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-Hub-Signature-256';
@@ -68,16 +74,31 @@ app.use((req, res, next) => {
 });
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+
+const metaWebhookRawBodyParser = express.raw({ type: '*/*', limit: '2mb' });
+app.use((req, res, next) => {
+    if (req.method !== 'POST' || !isMetaWebhookRequest(req)) return next();
+
+    return metaWebhookRawBodyParser(req, res, (error) => {
+        if (error) return next(error);
+
+        if (Buffer.isBuffer(req.body)) {
+            req.rawBody = req.body.toString('utf8');
+            try {
+                req.body = req.rawBody ? JSON.parse(req.rawBody) : {};
+            } catch (parseError) {
+                console.error('WhatsApp webhook raw body JSON parse failed:', parseError.message || parseError);
+                return res.status(400).send('Invalid JSON payload');
+            }
+        }
+
+        return next();
+    });
+});
+
 app.use(express.json({
     verify: (req, res, buf) => {
-        const candidateUrls = [
-            req.originalUrl,
-            req.url,
-            req.path,
-            `${req.baseUrl || ''}${req.path || ''}`
-        ];
-
-        if (candidateUrls.some(isMetaWebhookRequestPath)) {
+        if (isMetaWebhookRequest(req)) {
             req.rawBody = buf.toString('utf8');
         }
     }
