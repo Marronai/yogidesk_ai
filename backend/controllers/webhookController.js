@@ -310,11 +310,16 @@ exports.verifyWebhook = (req, res) => {
 exports.handleWebhook = async (req, res) => {
   console.log("Incoming Webhook Payload:", JSON.stringify(req.body));
 
-  if (!verifySignature(req)) {
-    return res.status(403).send(getAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
-  }
+  res.status(200).send('EVENT_RECEIVED');
 
-  res.sendStatus(200);
+  if (!verifySignature(req)) {
+    console.warn('WhatsApp routed webhook signature rejected after ACK; payload will not be processed.', {
+      hasAppSecret: Boolean(getAppSecret()),
+      hasSignature: Boolean(String(req.get('x-hub-signature-256') || '').trim()),
+      hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0
+    });
+    return;
+  }
 
   try {
     const db = supabaseAdmin || supabase;

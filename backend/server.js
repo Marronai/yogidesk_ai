@@ -130,6 +130,15 @@ const buildPhoneOrFilter = (columns = [], value) => {
     }
     return filters.join(',');
 };
+const isSchemaCacheError = (error) => {
+    const normalized = String(`${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`).toLowerCase();
+    return error?.code === 'PGRST204' ||
+        error?.code === 'PGRST205' ||
+        error?.code === '42703' ||
+        normalized.includes('schema cache') ||
+        normalized.includes('column') && normalized.includes('does not exist') ||
+        normalized.includes('could not find');
+};
 const phonesReferToSameContact = (left, right) => {
     const leftParts = getPhoneMatchParts(left);
     const rightParts = getPhoneMatchParts(right);
@@ -1403,32 +1412,56 @@ const extractIncomingInboxMessages = (payload = {}) => {
     return messages;
 };
 
-const resolveInboxOwnerForIncoming = async ({ clinicMetaId, businessAccountId, patientPhone }) => {
+const findOwnerIdByColumnValue = async ({ table, column, value }) => {
+    const db = supabaseAdmin || supabase;
+    const safeValue = String(value || '').trim();
+    if (!db?.from || !table || !column || !safeValue) return null;
+
+    try {
+        const { data, error } = await db
+            .from(table)
+            .select('id')
+            .eq(column, safeValue)
+            .limit(1)
+            .maybeSingle();
+
+        if (data?.id) return data.id;
+        if (error && !isSchemaCacheError(error) && error.code !== '42703' && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+            console.warn(`Incoming webhook owner lookup failed in ${table}.${column}:`, error.message || error);
+        }
+    } catch (error) {
+        console.warn(`Incoming webhook owner lookup crashed in ${table}.${column}:`, error.message || error);
+    }
+
+    return null;
+};
+
+const resolveInboxOwnerForIncoming = async ({ clinicMetaId, businessAccountId, phoneNumberId, displayPhoneNumber, patientPhone }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return null;
 
     if (businessAccountId) {
-        const { data, error } = await db
-            .from('doctor_profiles')
-            .select('id')
-            .or(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`)
-            .limit(1)
-            .maybeSingle();
-
-        if (data?.id) return data.id;
-        if (error) console.warn('Incoming webhook owner lookup by WABA failed:', error.message || error);
+        for (const table of ['doctor_profiles', 'profiles', 'doctors']) {
+            for (const column of ['meta_waba_id', 'whatsapp_business_account_id', 'business_account_id', 'waba_id']) {
+                const ownerId = await findOwnerIdByColumnValue({ table, column, value: businessAccountId });
+                if (ownerId) return ownerId;
+            }
+        }
     }
 
-    if (clinicMetaId) {
-        const { data, error } = await db
-            .from('doctor_profiles')
-            .select('id')
-            .or(`meta_phone_number_id.eq.${clinicMetaId},whatsapp_phone_number_id.eq.${clinicMetaId}`)
-            .limit(1)
-            .maybeSingle();
-
-        if (data?.id) return data.id;
-        if (error) console.warn('Incoming webhook owner lookup by Meta phone failed:', error.message || error);
+    const clinicCandidates = [...new Set([
+        clinicMetaId,
+        phoneNumberId,
+        displayPhoneNumber,
+        sanitizeMetaPhoneNumber(displayPhoneNumber)
+    ].map((item) => String(item || '').trim()).filter(Boolean))];
+    for (const clinicCandidate of clinicCandidates) {
+        for (const table of ['doctor_profiles', 'profiles', 'doctors']) {
+            for (const column of ['meta_phone_number_id', 'whatsapp_phone_number_id', 'phone_number_id', 'whatsapp_number', 'phone']) {
+                const ownerId = await findOwnerIdByColumnValue({ table, column, value: clinicCandidate });
+                if (ownerId) return ownerId;
+            }
+        }
     }
 
     if (patientPhone) {
@@ -1457,6 +1490,8 @@ const processIncomingInboxMessagesWebhook = async (payload = {}) => {
             const userId = await resolveInboxOwnerForIncoming({
                 clinicMetaId: incoming.clinicMetaId,
                 businessAccountId: incoming.businessAccountId,
+                phoneNumberId: incoming.phoneNumberId,
+                displayPhoneNumber: incoming.displayPhoneNumber,
                 patientPhone: incoming.fromPhone
             });
             if (!userId) {
@@ -1635,14 +1670,20 @@ const verifyWhatsAppWebhook = (req, res) => {
 const handleWhatsAppWebhook = (req, res) => {
     console.log("Incoming Webhook Payload:", JSON.stringify(req.body));
 
-    if (!verifyMetaWebhookSignature(req)) {
-        return res.status(403).send(getMetaWebhookAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
-    }
-
     res.status(200).send('EVENT_RECEIVED');
 
     Promise.resolve()
         .then(async () => {
+            if (!verifyMetaWebhookSignature(req)) {
+                console.warn('WhatsApp webhook signature rejected after ACK; payload will not be processed.', {
+                    hasAppSecret: Boolean(getMetaWebhookAppSecret()),
+                    hasSignature: Boolean(String(req.get('x-hub-signature-256') || '').trim()),
+                    hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
+                    path: req.originalUrl || req.url
+                });
+                return;
+            }
+
             const webhookFields = [];
             if (Array.isArray(req.body?.entry)) {
                 for (const entry of req.body.entry) {
@@ -1667,11 +1708,20 @@ const handleWhatsAppWebhook = (req, res) => {
 
             if (incomingCount > 0) {
                 await processIncomingInboxMessagesWebhook(req.body);
-                await handleDialogflowCxWhatsAppMessage({
+                const aiResults = await handleDialogflowCxWhatsAppMessage({
                     payload: req.body,
                     languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'hi',
                     sendReplies: true
                 });
+                console.log('WhatsApp AI processing result:', (aiResults || []).map((result) => ({
+                    messageId: result.messageId,
+                    fromPhone: result.fromPhone,
+                    doctorId: result.doctorId || null,
+                    skipped: result.ai?.skipped ?? false,
+                    reason: result.ai?.reason || result.ai?.error || null,
+                    replyCount: Array.isArray(result.replyTexts) ? result.replyTexts.length : 0,
+                    metaReplies: Array.isArray(result.metaReplies) ? result.metaReplies.length : 0
+                })));
             }
             if (statusUpdates.length > 0) await updateInboxMessageDeliveryStatuses(req.body);
             await processTemplateStatusWebhook(req.body);
