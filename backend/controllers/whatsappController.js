@@ -197,13 +197,13 @@ const getPhoneMatchParts = (value) => {
 };
 
 const getDialogflowCxConfig = () => {
-    const projectId = String(process.env.DIALOGFLOW_PROJECT_ID || process.env.GOOGLE_PROJECT_ID || '').trim();
+    const projectId = String(process.env.GOOGLE_PROJECT_ID || '').trim();
     const location = String(process.env.DIALOGFLOW_LOCATION || 'global').trim();
     const rawAgentId = String(process.env.DIALOGFLOW_AGENT_ID || '').trim();
     const agentId = rawAgentId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || rawAgentId;
 
     if (!projectId || !location || !agentId) {
-        throw new Error('Dialogflow CX config missing. Set GOOGLE_PROJECT_ID/DIALOGFLOW_PROJECT_ID, DIALOGFLOW_LOCATION, and DIALOGFLOW_AGENT_ID.');
+        throw new Error('Dialogflow CX config missing. Set GOOGLE_PROJECT_ID, DIALOGFLOW_LOCATION, and DIALOGFLOW_AGENT_ID.');
     }
 
     if (googleCredsObject?.project_id && googleCredsObject.project_id !== projectId) {
@@ -383,7 +383,7 @@ const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode
     const { projectId, location, agentId } = getDialogflowCxConfig();
     const sessionsClient = getDialogflowSessionsClient();
     const sessionId = sanitizeDialogflowPathSegment(phoneDigitsOnly(fromPhone));
-    const session = sessionsClient.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
+    const session = `projects/${process.env.GOOGLE_PROJECT_ID}/locations/${process.env.DIALOGFLOW_LOCATION}/agents/${agentId}/sessions/${sessionId}`;
 
     console.log('[YogiDesk Debug] GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
     console.log('[YogiDesk Debug] DIALOGFLOW_LOCATION:', process.env.DIALOGFLOW_LOCATION);
