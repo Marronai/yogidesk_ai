@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -44,6 +44,7 @@ const resolveDeliveryStatus = (...statuses) => statuses
   .map(normalizeDeliveryStatus)
   .filter(Boolean)
   .sort((a, b) => deliveryStatusRank(b) - deliveryStatusRank(a))[0] || '';
+const normalizeMessageText = (value) => String(value || '').trim().replace(/\s+/g, ' ');
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
@@ -59,6 +60,47 @@ const mapStoredMessage = (item = {}) => ({
   created_at: item.created_at || '',
   time: item.created_at ? new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time || '',
 });
+const messageIdentity = (message = {}) => (
+  message.meta_message_id ||
+  message.message_id ||
+  message.wamid ||
+  message.metadata?.meta_message_id ||
+  message.metadata?.message_id ||
+  message.metadata?.wamid ||
+  message.id ||
+  ''
+);
+const isSameMessage = (left = {}, right = {}) => {
+  const leftIdentity = messageIdentity(left);
+  const rightIdentity = messageIdentity(right);
+  if (leftIdentity && rightIdentity && String(leftIdentity) === String(rightIdentity)) return true;
+  const leftText = normalizeMessageText(left.text || left.body || left.message_body);
+  const rightText = normalizeMessageText(right.text || right.body || right.message_body);
+  if (!leftText || leftText !== rightText) return false;
+  const sameDirection = Boolean(left.from_me) === Boolean(right.from_me) || String(left.sender || '') === String(right.sender || '');
+  const leftTime = left.created_at ? new Date(left.created_at).getTime() : 0;
+  const rightTime = right.created_at ? new Date(right.created_at).getTime() : 0;
+  return sameDirection && (!leftTime || !rightTime || Math.abs(leftTime - rightTime) < 120000);
+};
+const mergeMessageLists = (existing = [], incoming = []) => {
+  const merged = [...existing];
+  for (const next of incoming) {
+    const matchIndex = merged.findIndex((item) => isSameMessage(item, next));
+    if (matchIndex >= 0) {
+      const previous = merged[matchIndex];
+      merged[matchIndex] = {
+        ...previous,
+        ...next,
+        id: messageIdentity(next) || previous.id,
+        status: resolveDeliveryStatus(next.status, previous.status),
+        metadata: { ...(previous.metadata || {}), ...(next.metadata || {}) },
+      };
+    } else {
+      merged.push(next);
+    }
+  }
+  return merged.sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
+};
 const logInboxError = (error) => {
   const message = error?.message || error?.details || String(error || '');
   if (error?.code === 'PGRST205' || String(message).toLowerCase().includes('schema cache')) {
@@ -130,6 +172,7 @@ const InboxContent = () => {
   const [doctorAiPaused, setDoctorAiPaused] = useState(false);
   const [aiToggleLoading, setAiToggleLoading] = useState(false);
   const bottomRef = useRef(null);
+  const messagesViewportRef = useRef(null);
   const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
@@ -346,26 +389,16 @@ const InboxContent = () => {
 
   const loadMessages = useCallback(async (chat) => {
     const storedMessages = Array.isArray(chat?.metadata?.messages) ? chat.metadata.messages : [];
-    setMessages(storedMessages.map(mapStoredMessage));
-
-    if (!chat?.id || String(chat.id).startsWith('message-')) return;
+    if (!chat?.id || String(chat.id).startsWith('message-')) {
+      setMessages(storedMessages.map(mapStoredMessage));
+      return;
+    }
     const user = await getUser();
     try {
       const apiResult = await api.get('/api/inbox/messages', { params: { userId: user.id, chatId: chat.id } });
       if (apiResult.data?.success) {
         const apiMessages = (apiResult.data.messages || []).map(mapStoredMessage);
-        setMessages((prev) => {
-          const pending = prev.filter((item) => (
-            item.chat_id === chat.id &&
-            normalizeDeliveryStatus(item.status) === 'SENDING' &&
-            !apiMessages.some((apiMessage) => (
-              String(apiMessage.id) === String(item.id) ||
-              (apiMessage.message_id && apiMessage.message_id === item.message_id) ||
-              (apiMessage.meta_message_id && apiMessage.meta_message_id === item.meta_message_id)
-            ))
-          ));
-          return [...apiMessages, ...pending].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
-        });
+        setMessages((prev) => mergeMessageLists(prev.filter((item) => item.chat_id === chat.id || normalizeDeliveryStatus(item.status) === 'SENDING'), apiMessages));
         return;
       }
     } catch (error) {
@@ -390,10 +423,7 @@ const InboxContent = () => {
       if (result.error) throw result.error;
       if (Array.isArray(result.data) && result.data.length > 0) {
         const dbMessages = result.data.map(mapStoredMessage);
-        setMessages((prev) => {
-          const pending = prev.filter((item) => item.chat_id === chat.id && normalizeDeliveryStatus(item.status) === 'SENDING');
-          return [...dbMessages, ...pending].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
-        });
+        setMessages((prev) => mergeMessageLists(prev.filter((item) => item.chat_id === chat.id || normalizeDeliveryStatus(item.status) === 'SENDING'), dbMessages));
       }
     } catch (error) {
       logInboxError(error);
@@ -448,9 +478,23 @@ const InboxContent = () => {
     loadAiSettings();
   }, [loadAiSettings]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, selectedChat?.id]);
+  const messagesScrollKey = useMemo(() => (
+    (Array.isArray(messages) ? messages : [])
+      .map((item) => `${messageIdentity(item)}:${item.status || ''}`)
+      .join('|')
+  ), [messages]);
+
+  useLayoutEffect(() => {
+    const scrollToBottom = (behavior = 'auto') => {
+      if (messagesViewportRef.current) {
+        messagesViewportRef.current.scrollTop = messagesViewportRef.current.scrollHeight;
+      }
+      bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+    };
+    scrollToBottom('auto');
+    const frame = window.requestAnimationFrame(() => scrollToBottom('smooth'));
+    return () => window.cancelAnimationFrame(frame);
+  }, [messagesScrollKey, selectedChat?.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -470,19 +514,12 @@ const InboxContent = () => {
         const nextMetaMessageId = updatedMessage.meta_message_id || updatedMessage.metadata?.meta_message_id || '';
         const nextMessageId = updatedMessage.message_id || updatedMessage.metadata?.message_id || nextMetaMessageId;
 
-        setMessages((prev) => prev.map((msg) => (
-          (msg.id === updatedMessage.id
-            || (nextMetaMessageId && (msg.meta_message_id === nextMetaMessageId || msg.metadata?.meta_message_id === nextMetaMessageId))
-            || (nextMessageId && (msg.message_id === nextMessageId || msg.metadata?.message_id === nextMessageId)))
-            ? {
-              ...msg,
-              status: nextStatus,
-              meta_message_id: nextMetaMessageId || msg.meta_message_id,
-              message_id: nextMessageId || msg.message_id,
-              metadata: updatedMessage.metadata || msg.metadata,
-            }
-            : msg
-        )));
+        setMessages((prev) => mergeMessageLists(prev, [{
+          ...mapStoredMessage(updatedMessage),
+          status: nextStatus,
+          meta_message_id: nextMetaMessageId,
+          message_id: nextMessageId,
+        }]));
 
         if (updatedMessage.chat_id) {
           setConversations((prev) => prev.map((chat) => (
@@ -519,19 +556,7 @@ const InboxContent = () => {
           setReloadToken((value) => value + 1);
 
           if (selectedChat?.id && String(nextRow.chat_id || '') === String(selectedChat.id)) {
-            setMessages((prev) => {
-              const alreadyExists = prev.some((msg) => (
-                String(msg.id) === String(mappedMessage.id) ||
-                (mappedMessage.message_id && String(msg.message_id || '') === String(mappedMessage.message_id)) ||
-                (mappedMessage.meta_message_id && String(msg.meta_message_id || '') === String(mappedMessage.meta_message_id))
-              ));
-              if (alreadyExists) {
-                return prev.map((msg) => (
-                  String(msg.id) === String(mappedMessage.id) ? { ...msg, ...mappedMessage } : msg
-                ));
-              }
-              return [...prev, mappedMessage].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
-            });
+            setMessages((prev) => mergeMessageLists(prev, [mappedMessage]));
 
             if (nextRow.sender === 'bot' || nextRow.metadata?.dialogflow_reply || nextRow.metadata?.outbound) {
               setConversations((prev) => prev.map((chat) => (
@@ -631,7 +656,7 @@ const InboxContent = () => {
       metadata: { optimistic: true, temp_id: tempId },
     };
 
-    setMessages((prev) => [...prev, created]);
+    setMessages((prev) => mergeMessageLists(prev, [created]));
     setMessage('');
     updateConversation(selectedChat.id, { lastMsg: isPrivateNote ? selectedChat.lastMsg : text, deliveryStatus: created.status });
 
@@ -654,9 +679,7 @@ const InboxContent = () => {
           status: 'SENT',
         });
 
-        setMessages((prev) => prev.map((item) => (
-          item.id === tempId ? { ...confirmedMessage, status: confirmedMessage.status || 'SENT' } : item
-        )));
+        setMessages((prev) => mergeMessageLists(prev.filter((item) => item.id !== tempId), [{ ...confirmedMessage, status: confirmedMessage.status || 'SENT' }]));
         updateConversation(selectedChat.id, { lastMsg: text, deliveryStatus: confirmedMessage.status || 'SENT' });
         return;
       }
@@ -879,7 +902,7 @@ const InboxContent = () => {
               </div>
             </div>
 
-            <div className="custom-scrollbar relative flex-1 space-y-4 overflow-y-auto p-6">
+            <div ref={messagesViewportRef} className="custom-scrollbar relative flex-1 space-y-4 overflow-y-auto p-6">
               {messages.length === 0 && (
                 <div className="rounded-2xl bg-white/70 p-6 text-center text-sm font-semibold text-slate-500">
                   No messages in this chat yet.

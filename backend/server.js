@@ -3938,7 +3938,8 @@ const handleInboxSendMessage = async (req, res) => {
         if (chatError) throw chatError;
         if (!activeChat?.id) return res.status(404).json({ success: false, message: 'Chat not found.' });
 
-        const recipientPhone = sanitizeMetaPhoneNumber(activeChat.patient_phone || activeChat.phone || '');
+        const requestedPatientPhone = sanitizeMetaPhoneNumber(req.body?.patientPhone || req.body?.to || req.body?.recipientPhone || '');
+        const recipientPhone = sanitizeMetaPhoneNumber(activeChat.patient_phone || activeChat.phone || requestedPatientPhone || '');
         if (!recipientPhone) return res.status(400).json({ success: false, message: 'Patient phone number is missing.' });
         const { data: canonicalChat } = await selectInboxChatByPhone(db, recipientPhone, userId);
         if (canonicalChat?.id) {
@@ -3982,6 +3983,13 @@ const handleInboxSendMessage = async (req, res) => {
 
         let metaResponse;
         try {
+            console.log('Meta free-form inbox send attempt:', {
+                chatId: activeChat.id,
+                to: payload.to,
+                phoneNumberId: finalPhoneId,
+                hasToken: Boolean(finalToken),
+                type: normalizedMediaType
+            });
             metaResponse = await axios.post(`https://graph.facebook.com/v20.0/${finalPhoneId}/messages`, payload, {
                 headers: {
                     Authorization: `Bearer ${finalToken}`,
@@ -4447,16 +4455,26 @@ const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
     try {
-        const { data, error } = await supabase
-            .from('doctor_profiles')
-            .select('*')
-            .eq('id', userId)
-            .maybeSingle();
+        let data = null;
+        for (const table of ['doctor_profiles', 'profiles', 'doctors']) {
+            const result = await supabase
+                .from(table)
+                .select('*')
+                .eq('id', userId)
+                .maybeSingle();
+            if (!result.error && result.data) {
+                data = result.data;
+                break;
+            }
+            if (result.error && !isSchemaCacheError(result.error) && result.error.code !== 'PGRST205') {
+                console.warn(`Meta credential lookup skipped ${table}:`, result.error.message || result.error);
+            }
+        }
 
-        if (error || !data) return {};
+        if (!data) return {};
         const finalToken = data.system_user_token || data.whatsapp_access_token || null;
-        const finalPhoneId = data.meta_phone_number_id || data.whatsapp_phone_number_id || null;
-        const finalBusinessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || null;
+        const finalPhoneId = data.meta_phone_number_id || data.whatsapp_phone_number_id || data.phone_number_id || null;
+        const finalBusinessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || data.business_account_id || data.waba_id || null;
         console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
 
         return {
