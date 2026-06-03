@@ -3,20 +3,26 @@ const path = require('path');
 const fs = require('fs');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-// Dynamic absolute path resolution
-const credentialsPath = path.join(__dirname, '../config/google-creds.json');
+// 1. Force fully clear the old infected env path to stop SDK fallback
+delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+// 2. Build the correct absolute path dynamically based on this file's position
+// Assuming whatsappController.js is in backend/controllers/, '../config/google-creds.json' targets backend/config/
+const credentialsPath = path.resolve(__dirname, '../config/google-creds.json');
+
+console.log("[YogiDesk Debug] Final Enforced Credentials Path:", credentialsPath);
 
 if (!fs.existsSync(credentialsPath)) {
-    console.error(`[YogiDesk Error] Critical: google-creds.json missing at ${credentialsPath}`);
+    console.error(`[YogiDesk Error] File absolutely not found at resolved path: ${credentialsPath}`);
 }
 
-// Direct configuration injection into the Google CX Client
+// 3. Inject the clean path directly into the client constructor
 const sessionsClient = new SessionsClient({
     keyFilename: credentialsPath,
     apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
 });
 
-console.log("[YogiDesk Debug] Dialogflow CX SessionsClient successfully initialized with direct keyFilename mapping.");
+console.log("[YogiDesk Debug] SessionsClient hard-locked with dynamic absolute path.");
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
