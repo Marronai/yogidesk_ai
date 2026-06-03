@@ -1,7 +1,35 @@
 require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-let dialogflowSessionsClient;
+// 1. Clear out default env variables
+delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+// 2. Build a solid absolute path from the server's root directory (/var/www/backend/config/google-creds.json)
+const absoluteCredsPath = path.resolve('/var/www/backend/config/google-creds.json');
+
+console.log("[YogiDesk Debug] Attempting to read JSON credentials from direct absolute path:", absoluteCredsPath);
+
+let googleCredsObject;
+try {
+    const rawData = fs.readFileSync(absoluteCredsPath, 'utf8');
+    googleCredsObject = JSON.parse(rawData);
+    console.log("[YogiDesk Debug] Google credentials JSON successfully parsed from absolute path. Project:", googleCredsObject.project_id);
+} catch (fileErr) {
+    console.error("[YogiDesk Error] Critical: Failed to read google-creds.json at absolute path!", fileErr.message);
+}
+
+// 3. Initialize client with the parsed memory object
+const sessionsClient = new SessionsClient({
+    credentials: {
+        client_email: googleCredsObject?.client_email,
+        private_key: googleCredsObject?.private_key
+    },
+    apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
+});
+
+console.log("[YogiDesk Debug] SessionsClient successfully initialized using dynamic filesystem memory injection.");
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
@@ -112,27 +140,7 @@ const getDialogflowCxConfig = () => {
 };
 
 const getDialogflowSessionsClient = () => {
-    if (!dialogflowSessionsClient) {
-        // Completely clear out the environment variable fallback before Google auth is initialized.
-        delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-        // Direct require pulls the credentials object into memory, bypassing keyFilename path validation.
-        const googleCredsObject = require('../config/google-creds.json');
-
-        console.log("[YogiDesk Debug] Google credentials successfully loaded into memory as a direct object. Project:", googleCredsObject.project_id);
-
-        dialogflowSessionsClient = new SessionsClient({
-            credentials: {
-                client_email: googleCredsObject.client_email,
-                private_key: googleCredsObject.private_key
-            },
-            apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
-        });
-
-        console.log("[YogiDesk Debug] SessionsClient hard-locked with direct credentials object injection.");
-    }
-
-    return dialogflowSessionsClient;
+    return sessionsClient;
 };
 
 const unwrapDialogflowValue = (value) => {
