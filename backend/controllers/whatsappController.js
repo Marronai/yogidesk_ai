@@ -1,106 +1,8 @@
 require('dotenv').config();
-const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
-const { SessionsClient } = require('@google-cloud/dialogflow-cx');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
-const normalizeCredentialPath = (value) => String(value || '').trim().replace(/^["']|["']$/g, '');
-const envCredentialPath = normalizeCredentialPath(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-
-// 1. Clean out Google default credential fallbacks so stale paths cannot trigger ADC metadata lookup.
-delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-delete process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-
-const allowedCredentialDirs = uniqueValues([
-    path.resolve('/var/www/backend/config'),
-    path.resolve('/var/www/backend/backend/config'),
-    path.resolve(__dirname, '../config/google-creds.json'),
-    path.resolve(process.cwd(), 'config'),
-    path.resolve(process.cwd(), 'backend/config')
-].map((candidate) => candidate.endsWith('.json') ? path.dirname(candidate) : candidate));
-
-const isPathInsideAllowedCredentialDir = (candidatePath) => {
-    const resolvedPath = path.resolve(candidatePath);
-    return allowedCredentialDirs.some((allowedDir) => {
-        const relative = path.relative(allowedDir, resolvedPath);
-        return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
-    });
-};
-
-const credentialCandidatePaths = uniqueValues([
-    envCredentialPath && isPathInsideAllowedCredentialDir(envCredentialPath) ? path.resolve(envCredentialPath) : null,
-    path.resolve('/var/www/backend/config/google-creds.json'),
-    path.resolve('/var/www/backend/backend/config/google-creds.json'),
-    path.resolve(__dirname, '../config/google-creds.json'),
-    path.resolve(process.cwd(), 'config/google-creds.json'),
-    path.resolve(process.cwd(), 'backend/config/google-creds.json')
-]);
-
-const validateGoogleCredsObject = (credentials, sourceLabel) => {
-    if (!credentials || typeof credentials !== 'object') {
-        throw new Error(`Invalid credentials payload from ${sourceLabel}.`);
-    }
-    if (!credentials.client_email || !credentials.private_key || !credentials.project_id) {
-        throw new Error(`Credentials from ${sourceLabel} are missing client_email/private_key/project_id.`);
-    }
-    if (!String(credentials.client_email).endsWith('.gserviceaccount.com')) {
-        throw new Error(`Credentials from ${sourceLabel} do not look like a Google service account.`);
-    }
-    if (!String(credentials.private_key).includes('BEGIN PRIVATE KEY')) {
-        throw new Error(`Credentials from ${sourceLabel} do not contain a valid private key block.`);
-    }
-};
-
-const loadDialogflowCredentials = () => {
-    const inlineJson = process.env.DIALOGFLOW_CREDENTIALS_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-    if (inlineJson) {
-        const parsed = JSON.parse(inlineJson);
-        validateGoogleCredsObject(parsed, 'secure inline env JSON');
-        return { credentials: parsed, source: 'secure inline env JSON' };
-    }
-
-    const inlineBase64 = process.env.DIALOGFLOW_CREDENTIALS_BASE64 || process.env.GOOGLE_SERVICE_ACCOUNT_BASE64;
-    if (inlineBase64) {
-        const decoded = Buffer.from(inlineBase64, 'base64').toString('utf8');
-        const parsed = JSON.parse(decoded);
-        validateGoogleCredsObject(parsed, 'secure inline env base64');
-        return { credentials: parsed, source: 'secure inline env base64' };
-    }
-
-    for (const candidatePath of credentialCandidatePaths) {
-        try {
-            if (!fs.existsSync(candidatePath)) continue;
-
-            const stat = fs.statSync(candidatePath);
-            if (!stat.isFile()) {
-                throw new Error('Credential path exists but is not a file.');
-            }
-            if (process.platform !== 'win32' && (stat.mode & 0o077)) {
-                console.warn("[YogiDesk Security] google-creds.json should be chmod 600 so group/others cannot read it:", candidatePath);
-            }
-
-            const rawContent = fs.readFileSync(candidatePath, 'utf8');
-            const parsed = JSON.parse(rawContent);
-            validateGoogleCredsObject(parsed, candidatePath);
-            return { credentials: parsed, source: candidatePath };
-        } catch (readErr) {
-            console.error("[YogiDesk Error] Failed to load Dialogflow credentials candidate:", candidatePath, readErr.message);
-        }
-    }
-
-    return { credentials: null, source: null };
-};
-
-const loadedDialogflowCredentials = loadDialogflowCredentials();
-const googleCredsObject = loadedDialogflowCredentials.credentials;
-let sessionsClient = null;
-
-if (googleCredsObject) {
-    console.log("[YogiDesk Debug] Google credentials loaded for Dialogflow CX from:", loadedDialogflowCredentials.source, "Project:", googleCredsObject.project_id);
-} else {
-    console.error("[YogiDesk Error] Critical: google-creds.json not found or invalid. Checked:", credentialCandidatePaths);
-}
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
@@ -182,36 +84,29 @@ const insertInboxMessageWithSchemaFallback = async (row = {}, dbClient = supabas
 
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
-const sanitizeDialogflowPathSegment = (value) => String(value || '').trim().replace(/[^\w.-]/g, '_');
 const removeUndefinedValues = (value = {}) => Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined)
 );
-const DIALOGFLOW_BOUNCE_WINDOW_MS = 2000;
-const DIALOGFLOW_RESULT_CACHE_MS = 30000;
-const dialogflowProcessingCache = new Map();
-const dialogflowResultCache = new Map();
+const GEMINI_BOUNCE_WINDOW_MS = 2000;
+const GEMINI_RESULT_CACHE_MS = 30000;
+const geminiProcessingCache = new Map();
+const geminiResultCache = new Map();
 const GEMINI_MODEL_NAME = 'gemini-1.5-flash';
 const GEMINI_SYSTEM_INSTRUCTION = 'You are an empathetic medical assistant for Yogi Desk. Collect Patient Name, Appointment Date, and Time naturally in Hinglish. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.';
 let geminiModel = null;
 
 const getGeminiModel = () => {
     if (geminiModel) return geminiModel;
-    const apiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+    const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) throw new Error('Gemini API key missing. Set GEMINI_API_KEY.');
-    const geminiSdk = require('@google/generative-ai');
-    const GoogleGenerativeAI = geminiSdk.GoogleGenerativeAI || geminiSdk.default?.GoogleGenerativeAI;
-    if (typeof GoogleGenerativeAI !== 'function') {
-        throw new Error('Gemini SDK initialization failed. Expected GoogleGenerativeAI constructor from @google/generative-ai.');
-    }
     const genAI = new GoogleGenerativeAI(apiKey);
     geminiModel = genAI.getGenerativeModel({
-        model: GEMINI_MODEL_NAME,
-        systemInstruction: GEMINI_SYSTEM_INSTRUCTION
+        model: GEMINI_MODEL_NAME
     });
     return geminiModel;
 };
 
-const buildDialogflowDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
+const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
     const normalizedPayload = JSON.stringify({
         messageId: String(messageId || '').trim(),
         fromPhone: phoneDigitsOnly(fromPhone),
@@ -223,12 +118,12 @@ const buildDialogflowDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, b
     return crypto.createHash('sha256').update(normalizedPayload).digest('hex');
 };
 
-const pruneDialogflowCaches = (now = Date.now()) => {
-    for (const [key, entry] of dialogflowProcessingCache.entries()) {
-        if (!entry?.startedAt || now - entry.startedAt > DIALOGFLOW_BOUNCE_WINDOW_MS) dialogflowProcessingCache.delete(key);
+const pruneGeminiCaches = (now = Date.now()) => {
+    for (const [key, entry] of geminiProcessingCache.entries()) {
+        if (!entry?.startedAt || now - entry.startedAt > GEMINI_BOUNCE_WINDOW_MS) geminiProcessingCache.delete(key);
     }
-    for (const [key, entry] of dialogflowResultCache.entries()) {
-        if (!entry?.storedAt || now - entry.storedAt > DIALOGFLOW_RESULT_CACHE_MS) dialogflowResultCache.delete(key);
+    for (const [key, entry] of geminiResultCache.entries()) {
+        if (!entry?.storedAt || now - entry.storedAt > GEMINI_RESULT_CACHE_MS) geminiResultCache.delete(key);
     }
 };
 const getPhoneMatchParts = (value) => {
@@ -243,74 +138,6 @@ const getPhoneMatchParts = (value) => {
         variants.add(`+1${last10}`);
     }
     return { digits, last10, variants: Array.from(variants).filter(Boolean) };
-};
-
-const getDialogflowCxConfig = () => {
-    const projectId = String(process.env.GOOGLE_PROJECT_ID || '').trim();
-    const location = String(process.env.DIALOGFLOW_LOCATION || 'global').trim();
-    const rawAgentId = String(process.env.DIALOGFLOW_AGENT_ID || '').trim();
-    const agentId = rawAgentId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || rawAgentId;
-
-    if (!projectId || !location || !agentId) {
-        throw new Error('Dialogflow CX config missing. Set GOOGLE_PROJECT_ID, DIALOGFLOW_LOCATION, and DIALOGFLOW_AGENT_ID.');
-    }
-
-    if (googleCredsObject?.project_id && googleCredsObject.project_id !== projectId) {
-        console.warn('[YogiDesk Warning] Dialogflow project ID differs from service account project:', {
-            envProjectId: projectId,
-            credentialsProjectId: googleCredsObject.project_id
-        });
-    }
-
-    return { projectId, location, agentId };
-};
-
-const getDialogflowSessionsClient = () => {
-    if (!googleCredsObject) {
-        throw new Error(`Dialogflow CX credentials missing or invalid. Checked: ${credentialCandidatePaths.join(', ')}`);
-    }
-
-    if (!sessionsClient) {
-        sessionsClient = new SessionsClient({
-            credentials: googleCredsObject,
-            apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
-        });
-        console.log("[YogiDesk Debug] Dialogflow CX SessionsClient mounted with validated explicit credentials.");
-    }
-
-    return sessionsClient;
-};
-
-const unwrapDialogflowValue = (value) => {
-    if (!value || typeof value !== 'object') return value;
-    if (Object.prototype.hasOwnProperty.call(value, 'stringValue')) return value.stringValue;
-    if (Object.prototype.hasOwnProperty.call(value, 'numberValue')) return value.numberValue;
-    if (Object.prototype.hasOwnProperty.call(value, 'boolValue')) return value.boolValue;
-    if (Object.prototype.hasOwnProperty.call(value, 'nullValue')) return null;
-    if (value.listValue?.values) return value.listValue.values.map(unwrapDialogflowValue);
-    if (value.structValue?.fields) return unwrapDialogflowStruct(value.structValue);
-    return value;
-};
-
-const unwrapDialogflowStruct = (struct = {}) => {
-    if (!struct?.fields || typeof struct.fields !== 'object') return struct || {};
-    return Object.fromEntries(
-        Object.entries(struct.fields).map(([key, value]) => [key, unwrapDialogflowValue(value)])
-    );
-};
-
-const normalizeDialogflowParameters = (parameters = {}) => (
-    parameters?.fields ? unwrapDialogflowStruct(parameters) : parameters || {}
-);
-
-const extractDialogflowTextResponses = (queryResult = {}) => {
-    const responseMessages = Array.isArray(queryResult.responseMessages) ? queryResult.responseMessages : [];
-    const texts = responseMessages.flatMap((message) => {
-        const text = message.text?.text;
-        return Array.isArray(text) ? text : [];
-    });
-
-    return texts.map((text) => String(text || '').trim()).filter(Boolean);
 };
 
 const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } = {}) => {
@@ -353,13 +180,13 @@ const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } 
     }
 };
 
-const sendDialogflowWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId }) => {
+const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId }) => {
     const safeText = String(text || '').trim();
     if (!toPhone || !safeText) return null;
 
     const credentials = await resolveMetaReplyCredentials({ phoneNumberId, businessAccountId });
     if (!credentials.phoneNumberId || !credentials.accessToken) {
-        throw new Error('Missing Meta phone number ID or access token for Dialogflow WhatsApp reply.');
+        throw new Error('Missing Meta phone number ID or access token for Gemini WhatsApp reply.');
     }
 
     const url = `https://graph.facebook.com/v20.0/${credentials.phoneNumberId}/messages`;
@@ -374,7 +201,7 @@ const sendDialogflowWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, b
         }
     };
 
-    console.log('[YogiDesk Debug] Sending Dialogflow reply through Meta:', {
+    console.log('[YogiDesk Debug] Sending Gemini reply through Meta:', {
         to: payload.to,
         phoneNumberId: credentials.phoneNumberId,
         textLength: safeText.length
@@ -435,72 +262,8 @@ const extractWhatsAppInboundTextMessages = (payload = {}) => {
     ));
 };
 
-const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode = 'hi' }) => {
-    if (!fromPhone || !text) {
-        throw new Error('Dialogflow CX dispatch requires both fromPhone and text.');
-    }
-    const { projectId, location, agentId } = getDialogflowCxConfig();
-    const sessionsClient = getDialogflowSessionsClient();
-    const sessionId = sanitizeDialogflowPathSegment(phoneDigitsOnly(fromPhone));
-    const session = `projects/${process.env.GOOGLE_PROJECT_ID}/locations/${process.env.DIALOGFLOW_LOCATION}/agents/${agentId}/sessions/${sessionId}`;
-
-    console.log('[YogiDesk Debug] GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
-    console.log('[YogiDesk Debug] DIALOGFLOW_LOCATION:', process.env.DIALOGFLOW_LOCATION);
-    console.log('[YogiDesk Debug] DIALOGFLOW_AGENT_ID:', process.env.DIALOGFLOW_AGENT_ID);
-    console.log('[YogiDesk Debug] Dialogflow CX session path:', session);
-
-    let response;
-    try {
-        [response] = await sessionsClient.detectIntent({
-            session,
-            queryInput: {
-                text: { text: String(text).slice(0, 2048) },
-                languageCode
-            }
-        });
-        console.log("[YogiDesk Debug] Full Dialogflow Raw Response:", JSON.stringify(response, null, 2));
-    } catch (error) {
-        console.error('[YogiDesk Debug] Dialogflow detectIntent failed:', {
-            session,
-            fromPhone: phoneDigitsOnly(fromPhone),
-            languageCode,
-            error: error.message || error
-        });
-        throw error;
-    }
-
-    const queryResult = response?.queryResult || {};
-    const sessionParameters = normalizeDialogflowParameters(
-        queryResult.currentPage?.playbookInfo?.sessionParameters || queryResult.parameters || {}
-    );
-    const bookingPayload = {
-        patient_name: sessionParameters.patient_name || null,
-        appointment_date: sessionParameters.appointment_date || null,
-        appointment_time: sessionParameters.appointment_time || null,
-        whatsapp_phone: phoneDigitsOnly(fromPhone)
-    };
-    const bookingReady = Boolean(
-        bookingPayload.patient_name &&
-        bookingPayload.appointment_date &&
-        bookingPayload.appointment_time
-    );
-
-    return {
-        success: true,
-        session,
-        replyTexts: extractDialogflowTextResponses(queryResult),
-        sessionParameters,
-        bookingReady,
-        bookingPayload: bookingReady ? bookingPayload : null,
-        rawResponse: response
-    };
-};
-
 const normalizeAiPlan = (doctor = {}) => {
-    const rawPlan = String(doctor.plan || doctor.current_plan || doctor.plan_tier || doctor.subscription_tier || 'Basic').trim().toLowerCase();
-    if (rawPlan.includes('multi')) return 'Multi-Specialty';
-    if (rawPlan.includes('growth')) return 'Growth';
-    return 'Basic';
+    return String(doctor.subscription_tier || doctor.current_plan || doctor.plan || '').trim().toUpperCase();
 };
 
 const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPhoneNumber, patientPhone }) => {
@@ -508,76 +271,57 @@ const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPh
     if (!db?.from) return null;
     const doctorNumber = phoneDigitsOnly(displayPhoneNumber || phoneNumberId || '');
 
-    const runProfileQuery = async (table, filter) => {
+    const runProfileQuery = async (filter) => {
         try {
             const { data, error } = await db
-                .from(table)
+                .from('doctor_profiles')
                 .select('*')
                 .or(filter)
                 .limit(1)
                 .maybeSingle();
             if (error) {
                 if (!isSchemaCacheError(error) && error.code !== 'PGRST205') {
-                    console.warn(`Doctor AI config lookup failed in ${table}:`, error.message || error);
+                    console.warn('Doctor AI config lookup failed in doctor_profiles:', error.message || error);
                 }
                 return null;
             }
-            return data ? { ...data, _aiTable: table } : null;
+            return data ? { ...data, _aiTable: 'doctor_profiles' } : null;
         } catch (error) {
-            console.warn(`Doctor AI config lookup crashed in ${table}:`, error.message || error);
+            console.warn('Doctor AI config lookup crashed in doctor_profiles:', error.message || error);
             return null;
         }
     };
 
     if (doctorNumber) {
-        const row = await runProfileQuery('doctor_profiles', `whatsapp_number.eq.${doctorNumber},meta_phone_number_id.eq.${doctorNumber},whatsapp_phone_number_id.eq.${doctorNumber}`) ||
-            await runProfileQuery('profiles', `whatsapp_number.eq.${doctorNumber},meta_phone_number_id.eq.${doctorNumber},whatsapp_phone_number_id.eq.${doctorNumber}`);
+        const row = await runProfileQuery(`whatsapp_number.eq.${doctorNumber},meta_phone_number_id.eq.${doctorNumber},whatsapp_phone_number_id.eq.${doctorNumber}`);
         if (row?.id) return row;
-
-        try {
-            const { data, error } = await db
-                .from('doctors')
-                .select('*')
-                .eq('whatsapp_number', doctorNumber)
-                .single();
-            if (!error && data?.id) return { ...data, _aiTable: 'doctors' };
-            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') {
-                console.warn('Doctor AI config lookup from doctors.whatsapp_number failed:', error.message || error);
-            }
-        } catch (error) {
-            console.warn('Doctor AI config doctors lookup crashed:', error.message || error);
-        }
     }
 
     if (businessAccountId) {
-        const row = await runProfileQuery('doctor_profiles', `meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`) ||
-            await runProfileQuery('profiles', `meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`);
+        const row = await runProfileQuery(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`);
         if (row?.id) return row;
     }
 
     if (phoneNumberId) {
-        const row = await runProfileQuery('doctor_profiles', `meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`) ||
-            await runProfileQuery('profiles', `meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`);
+        const row = await runProfileQuery(`meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`);
         if (row?.id) return row;
     }
 
-    const ownerId = await resolveDialogflowInboxOwner({ businessAccountId, phoneNumberId, patientPhone });
+    const ownerId = await resolveGeminiInboxOwner({ businessAccountId, phoneNumberId, patientPhone });
     if (!ownerId) return null;
 
-    for (const table of ['doctor_profiles', 'profiles', 'doctors']) {
-        try {
-            const { data, error } = await db
-                .from(table)
-                .select('*')
-                .eq('id', ownerId)
-                .maybeSingle();
-            if (!error && data?.id) return { ...data, _aiTable: table };
-            if (error && !isSchemaCacheError(error) && error.code !== 'PGRST205') {
-                console.warn(`Doctor AI config lookup by owner failed in ${table}:`, error.message || error);
-            }
-        } catch (error) {
-            console.warn(`Doctor AI config owner lookup crashed in ${table}:`, error.message || error);
+    try {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('*')
+            .eq('id', ownerId)
+            .maybeSingle();
+        if (!error && data?.id) return { ...data, _aiTable: 'doctor_profiles' };
+        if (error && !isSchemaCacheError(error) && error.code !== 'PGRST205') {
+            console.warn('Doctor AI config lookup by owner failed in doctor_profiles:', error.message || error);
         }
+    } catch (error) {
+        console.warn('Doctor AI config owner lookup crashed in doctor_profiles:', error.message || error);
     }
 
     return null;
@@ -590,7 +334,7 @@ const getDoctorAiEligibility = (doctor = {}) => {
     const tokenUsed = Number(doctor.token_used ?? doctor.tokenUsed ?? 0);
     const isAiPaused = Boolean(doctor.is_ai_paused ?? doctor.isAiPaused);
 
-    if (plan === 'Basic') return { eligible: false, reason: 'basic_plan', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    if (plan !== 'GROWTH') return { eligible: false, reason: 'growth_plan_required', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
     if (!aiEnabled) return { eligible: false, reason: 'ai_disabled', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
     if (isAiPaused) return { eligible: false, reason: 'human_takeover', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
     if (tokenLimit <= 0 || tokenUsed >= tokenLimit) return { eligible: false, reason: 'token_limit_reached', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
@@ -748,113 +492,6 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
     };
 };
 
-const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
-    const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
-    const results = [];
-
-    for (const inbound of inboundMessages) {
-        const dedupeKey = buildDialogflowDedupeKey({ ...inbound, languageCode });
-        const now = Date.now();
-        pruneDialogflowCaches(now);
-
-        const cachedResult = dialogflowResultCache.get(dedupeKey);
-        if (cachedResult && now - cachedResult.storedAt <= DIALOGFLOW_RESULT_CACHE_MS) {
-            results.push({
-                ...cachedResult.result,
-                dedupe: { cacheHit: true, suppressedDuplicate: true }
-            });
-            continue;
-        }
-
-        const activeProcessing = dialogflowProcessingCache.get(dedupeKey);
-        if (activeProcessing && now - activeProcessing.startedAt <= DIALOGFLOW_BOUNCE_WINDOW_MS) {
-            const sharedResult = await activeProcessing.promise;
-            results.push({
-                ...sharedResult,
-                dedupe: { cacheHit: false, suppressedDuplicate: true }
-            });
-            continue;
-        }
-
-        const processingPromise = (async () => {
-        try {
-            const dialogflowResult = await runDialogflowCxForWhatsAppMessage({
-                fromPhone: inbound.fromPhone,
-                text: inbound.text,
-                languageCode
-            });
-
-            const result = {
-                ...inbound,
-                dialogflow: dialogflowResult,
-                replyTexts: dialogflowResult.replyTexts,
-                bookingReady: dialogflowResult.bookingReady,
-                bookingPayload: dialogflowResult.bookingPayload,
-                metaReplies: []
-            };
-
-            if (sendReplies) {
-                for (const replyText of dialogflowResult.replyTexts) {
-                    try {
-                        const metaReply = await sendDialogflowWhatsAppTextReply({
-                            toPhone: inbound.fromPhone,
-                            text: replyText,
-                            phoneNumberId: inbound.phoneNumberId,
-                            businessAccountId: inbound.businessAccountId
-                        });
-                        const inboxCommit = await commitDialogflowOutboundReply({
-                            inbound,
-                            replyText,
-                            metaReply,
-                            credentials: metaReply?._yogidesk || {},
-                            phoneNumberId: inbound.phoneNumberId,
-                            businessAccountId: inbound.businessAccountId
-                        });
-                        result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
-                    } catch (sendError) {
-                        console.error('[YogiDesk Debug] Meta reply send failed:', {
-                            messageId: inbound.messageId,
-                            fromPhone: inbound.fromPhone,
-                            error: sendError.response?.data || sendError.message || sendError
-                        });
-                        result.metaReplies.push({
-                            success: false,
-                            error: sendError.response?.data || sendError.message || 'Meta reply send failed.'
-                        });
-                    }
-                }
-            }
-
-            return result;
-        } catch (error) {
-            console.error('Dialogflow CX WhatsApp runtime failed:', {
-                messageId: inbound.messageId,
-                fromPhone: inbound.fromPhone,
-                error: error.message || error
-            });
-
-            return {
-                ...inbound,
-                dialogflow: { success: false, error: error.message || 'Dialogflow CX runtime failed.' },
-                replyTexts: [],
-                bookingReady: false,
-                bookingPayload: null
-            };
-        }
-        })();
-
-        dialogflowProcessingCache.set(dedupeKey, { startedAt: now, promise: processingPromise });
-        try {
-            const result = await processingPromise;
-            dialogflowResultCache.set(dedupeKey, { storedAt: Date.now(), result });
-            results.push(result);
-        } finally {
-            dialogflowProcessingCache.delete(dedupeKey);
-        }
-    }
-
-    return results;
-};
 const phonesReferToSameContact = (left, right) => {
     const leftParts = getPhoneMatchParts(left);
     const rightParts = getPhoneMatchParts(right);
@@ -931,7 +568,7 @@ const writeTemplateDispatchChat = async ({ ownerId, activePhone, activeName, mes
     return data?.id ? data : existingChat || null;
 };
 
-const writeDialogflowInboxChatSafely = async ({ db, chatId, payload }) => {
+const writeGeminiInboxChatSafely = async ({ db, chatId, payload }) => {
     let nextPayload = removeUndefinedValues(payload);
     const removedColumns = new Set();
 
@@ -944,21 +581,21 @@ const writeDialogflowInboxChatSafely = async ({ db, chatId, payload }) => {
 
         const missingColumn = getMissingSchemaColumn(error);
         if (missingColumn && Object.prototype.hasOwnProperty.call(nextPayload, missingColumn) && !removedColumns.has(missingColumn)) {
-            console.warn(`Dialogflow inbox chat write retrying without stale schema column: ${missingColumn}`);
+            console.warn(`Gemini inbox chat write retrying without stale schema column: ${missingColumn}`);
             removedColumns.add(missingColumn);
             const { [missingColumn]: _removed, ...strippedPayload } = nextPayload;
             nextPayload = strippedPayload;
             continue;
         }
 
-        console.error('Dialogflow inbox chat write failed:', error.message || error);
+        console.error('Gemini inbox chat write failed:', error.message || error);
         return null;
     }
 
     return null;
 };
 
-const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, patientPhone }) => {
+const resolveGeminiInboxOwner = async ({ businessAccountId, phoneNumberId, patientPhone }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return null;
 
@@ -970,7 +607,7 @@ const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, p
             .limit(1)
             .maybeSingle();
         if (data?.id) return data.id;
-        if (error) console.warn('Dialogflow reply owner lookup by WABA failed:', error.message || error);
+        if (error) console.warn('Gemini reply owner lookup by WABA failed:', error.message || error);
     }
 
     if (phoneNumberId) {
@@ -981,7 +618,7 @@ const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, p
             .limit(1)
             .maybeSingle();
         if (data?.id) return data.id;
-        if (error) console.warn('Dialogflow reply owner lookup by Meta phone failed:', error.message || error);
+        if (error) console.warn('Gemini reply owner lookup by Meta phone failed:', error.message || error);
     }
 
     if (patientPhone) {
@@ -991,7 +628,7 @@ const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, p
             .order('updated_at', { ascending: false })
             .limit(500);
         if (error) {
-            console.warn('Dialogflow reply owner lookup by patient phone failed:', error.message || error);
+            console.warn('Gemini reply owner lookup by patient phone failed:', error.message || error);
         } else {
             const existingChat = (data || []).find((chat) => (
                 phonesReferToSameContact(chat.phone, patientPhone) ||
@@ -1004,7 +641,7 @@ const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, p
     return null;
 };
 
-const findDialogflowReplyChat = async ({ db, ownerId, patientPhone }) => {
+const findGeminiReplyChat = async ({ db, ownerId, patientPhone }) => {
     if (!db?.from || !patientPhone) return null;
 
     let query = db
@@ -1017,7 +654,7 @@ const findDialogflowReplyChat = async ({ db, ownerId, patientPhone }) => {
 
     const { data, error } = await query;
     if (error) {
-        console.warn('Dialogflow reply chat lookup failed:', error.message || error);
+        console.warn('Gemini reply chat lookup failed:', error.message || error);
         return null;
     }
 
@@ -1027,7 +664,7 @@ const findDialogflowReplyChat = async ({ db, ownerId, patientPhone }) => {
     )) || null;
 };
 
-const commitDialogflowOutboundReply = async ({
+const commitGeminiOutboundReply = async ({
     inbound = {},
     replyText,
     metaReply,
@@ -1045,18 +682,18 @@ const commitDialogflowOutboundReply = async ({
 
     const finalPhoneNumberId = String(credentials.phoneNumberId || phoneNumberId || inbound.phoneNumberId || '').trim();
     const finalBusinessAccountId = String(businessAccountId || inbound.businessAccountId || '').trim();
-    const ownerId = await resolveDialogflowInboxOwner({
+    const ownerId = await resolveGeminiInboxOwner({
         businessAccountId: finalBusinessAccountId,
         phoneNumberId: finalPhoneNumberId,
         patientPhone
     });
     const nowIso = new Date().toISOString();
-    const existingChat = await findDialogflowReplyChat({ db, ownerId, patientPhone });
+    const existingChat = await findGeminiReplyChat({ db, ownerId, patientPhone });
     const chatMetadata = existingChat?.metadata || {};
 
     let chatId = existingChat?.id || null;
     if (!chatId && ownerId) {
-        const createdChat = await writeDialogflowInboxChatSafely({
+        const createdChat = await writeGeminiInboxChatSafely({
             db,
             payload: {
                 user_id: ownerId,
@@ -1081,7 +718,7 @@ const commitDialogflowOutboundReply = async ({
     }
 
     if (!isUuid(chatId)) {
-        console.error('Dialogflow outbound reply skipped inbox_messages insert: no valid chat id resolved.', {
+        console.error('Gemini outbound reply skipped inbox_messages insert: no valid chat id resolved.', {
             wamid,
             ownerId,
             patientPhone
@@ -1116,7 +753,7 @@ const commitDialogflowOutboundReply = async ({
             whatsapp_business_account_id: finalBusinessAccountId || null,
             whatsapp_phone_number_id: finalPhoneNumberId || null,
             inbound_message_id: inbound.messageId || null,
-            dialogflow_reply: true,
+            gemini_reply: true,
             outbound: true,
             meta_response: metaReply
         },
@@ -1125,11 +762,11 @@ const commitDialogflowOutboundReply = async ({
 
     const insertResult = await insertInboxMessageWithSchemaFallback(row, db);
     if (!insertResult.success) {
-        console.error('Dialogflow outbound reply inbox_messages insert failed:', insertResult.error?.message || insertResult.error || insertResult.reason);
+        console.error('Gemini outbound reply inbox_messages insert failed:', insertResult.error?.message || insertResult.error || insertResult.reason);
         return { success: false, reason: 'message_insert_failed', error: insertResult.error, wamid, chatId };
     }
 
-    await writeDialogflowInboxChatSafely({
+    await writeGeminiInboxChatSafely({
         db,
         chatId,
         payload: {
@@ -1166,18 +803,18 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
     }
 
     for (const inbound of inboundMessages) {
-        const dedupeKey = buildDialogflowDedupeKey({ ...inbound, languageCode });
+        const dedupeKey = buildGeminiDedupeKey({ ...inbound, languageCode });
         const now = Date.now();
-        pruneDialogflowCaches(now);
+        pruneGeminiCaches(now);
 
-        const cachedResult = dialogflowResultCache.get(dedupeKey);
-        if (cachedResult && now - cachedResult.storedAt <= DIALOGFLOW_RESULT_CACHE_MS) {
+        const cachedResult = geminiResultCache.get(dedupeKey);
+        if (cachedResult && now - cachedResult.storedAt <= GEMINI_RESULT_CACHE_MS) {
             results.push({ ...cachedResult.result, dedupe: { cacheHit: true, suppressedDuplicate: true } });
             continue;
         }
 
-        const activeProcessing = dialogflowProcessingCache.get(dedupeKey);
-        if (activeProcessing && now - activeProcessing.startedAt <= DIALOGFLOW_BOUNCE_WINDOW_MS) {
+        const activeProcessing = geminiProcessingCache.get(dedupeKey);
+        if (activeProcessing && now - activeProcessing.startedAt <= GEMINI_BOUNCE_WINDOW_MS) {
             const sharedResult = await activeProcessing.promise;
             results.push({ ...sharedResult, dedupe: { cacheHit: false, suppressedDuplicate: true } });
             continue;
@@ -1212,7 +849,7 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
             }
 
             const db = supabaseAdmin || supabase;
-            const existingChat = await findDialogflowReplyChat({
+            const existingChat = await findGeminiReplyChat({
                 db,
                 ownerId: doctor.id,
                 patientPhone: inbound.fromPhone
@@ -1242,13 +879,13 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
 
                 if (sendReplies && finalReplyText) {
                     try {
-                        const metaReply = await sendDialogflowWhatsAppTextReply({
+                        const metaReply = await sendGeminiWhatsAppTextReply({
                             toPhone: inbound.fromPhone,
                             text: finalReplyText,
                             phoneNumberId: inbound.phoneNumberId,
                             businessAccountId: inbound.businessAccountId
                         });
-                        const inboxCommit = await commitDialogflowOutboundReply({
+                        const inboxCommit = await commitGeminiOutboundReply({
                             inbound,
                             replyText: finalReplyText,
                             metaReply,
@@ -1263,6 +900,7 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                             incrementBy: 1
                         });
                         result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
+                        console.log('[YogiDesk AI] Response successfully sent to patient.');
                     } catch (sendError) {
                         console.error('[YogiDesk Debug] Gemini Meta reply send failed:', {
                             messageId: inbound.messageId,
@@ -1295,15 +933,29 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                     metaReplies: []
                 };
             }
-        })();
+        })().catch((error) => {
+            console.error('[YogiDesk AI] WhatsApp processing failed:', {
+                messageId: inbound.messageId,
+                fromPhone: inbound.fromPhone,
+                error: error.message || error
+            });
+            return {
+                ...inbound,
+                ai: { provider: 'gemini', success: false, error: error.message || 'Gemini processing failed.' },
+                replyTexts: [],
+                bookingReady: false,
+                bookingPayload: null,
+                metaReplies: []
+            };
+        });
 
-        dialogflowProcessingCache.set(dedupeKey, { startedAt: now, promise: processingPromise });
+        geminiProcessingCache.set(dedupeKey, { startedAt: now, promise: processingPromise });
         try {
             const result = await processingPromise;
-            dialogflowResultCache.set(dedupeKey, { storedAt: Date.now(), result });
+            geminiResultCache.set(dedupeKey, { storedAt: Date.now(), result });
             results.push(result);
         } finally {
-            dialogflowProcessingCache.delete(dedupeKey);
+            geminiProcessingCache.delete(dedupeKey);
         }
     }
 
@@ -1321,7 +973,7 @@ const handleWhatsAppGeminiWebhook = async (req, res) => {
         Promise.resolve()
             .then(() => handleGeminiWhatsAppMessage({
                 payload: req.body,
-                languageCode: process.env.DIALOGFLOW_LANGUAGE_CODE || 'hi',
+                languageCode: process.env.GEMINI_LANGUAGE_CODE || 'hi',
                 sendReplies: true
             }))
             .catch((error) => console.error('Gemini WhatsApp webhook background processing failed:', error.message || error));
@@ -2232,8 +1884,6 @@ exports.insertQueuedInboxChatRows = insertQueuedInboxChatRows;
 exports.safeInsertInboxRows = safeInsertInboxRows;
 exports.logInboxDatabaseError = logInboxDatabaseError;
 exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
-exports.runDialogflowCxForWhatsAppMessage = runDialogflowCxForWhatsAppMessage;
 exports.handleGeminiWhatsAppMessage = handleGeminiWhatsAppMessage;
-exports.handleDialogflowCxWhatsAppMessage = handleGeminiWhatsAppMessage;
 exports.handleWhatsAppGeminiWebhook = handleWhatsAppGeminiWebhook;
-exports.sendDialogflowWhatsAppTextReply = sendDialogflowWhatsAppTextReply;
+exports.sendGeminiWhatsAppTextReply = sendGeminiWhatsAppTextReply;
