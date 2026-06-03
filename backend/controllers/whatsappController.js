@@ -1,25 +1,7 @@
 require('dotenv').config();
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
-// 1. Completely clear out the environment variable fallback
-delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-// 2. Direct require to pull the credentials object into memory
-// Assuming whatsappController.js is in backend/controllers/, '../config/google-creds.json' is the correct relative require path
-const googleCredsObject = require('../config/google-creds.json');
-
-console.log("[YogiDesk Debug] Google credentials successfully loaded into memory as a direct object. Project:", googleCredsObject.project_id);
-
-// 3. Inject the credentials object directly into the client
-const sessionsClient = new SessionsClient({
-    credentials: {
-        client_email: googleCredsObject.client_email,
-        private_key: googleCredsObject.private_key
-    },
-    apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
-});
-
-console.log("[YogiDesk Debug] SessionsClient hard-locked with direct credentials object injection.");
+let dialogflowSessionsClient;
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
@@ -130,7 +112,27 @@ const getDialogflowCxConfig = () => {
 };
 
 const getDialogflowSessionsClient = () => {
-    return sessionsClient;
+    if (!dialogflowSessionsClient) {
+        // Completely clear out the environment variable fallback before Google auth is initialized.
+        delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+        // Direct require pulls the credentials object into memory, bypassing keyFilename path validation.
+        const googleCredsObject = require('../config/google-creds.json');
+
+        console.log("[YogiDesk Debug] Google credentials successfully loaded into memory as a direct object. Project:", googleCredsObject.project_id);
+
+        dialogflowSessionsClient = new SessionsClient({
+            credentials: {
+                client_email: googleCredsObject.client_email,
+                private_key: googleCredsObject.private_key
+            },
+            apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
+        });
+
+        console.log("[YogiDesk Debug] SessionsClient hard-locked with direct credentials object injection.");
+    }
+
+    return dialogflowSessionsClient;
 };
 
 const unwrapDialogflowValue = (value) => {
