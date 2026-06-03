@@ -3,13 +3,34 @@ const path = require('path');
 const fs = require('fs');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
+const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
+const normalizeCredentialPath = (value) => String(value || '').trim().replace(/^["']|["']$/g, '');
+const envCredentialPath = normalizeCredentialPath(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
 // 1. Clean out Google default credential fallbacks so stale paths cannot trigger ADC metadata lookup.
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 delete process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
 
-const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
+const allowedCredentialDirs = uniqueValues([
+    path.resolve('/var/www/backend/config'),
+    path.resolve('/var/www/backend/backend/config'),
+    path.resolve(__dirname, '../config/google-creds.json'),
+    path.resolve(process.cwd(), 'config'),
+    path.resolve(process.cwd(), 'backend/config')
+].map((candidate) => candidate.endsWith('.json') ? path.dirname(candidate) : candidate));
+
+const isPathInsideAllowedCredentialDir = (candidatePath) => {
+    const resolvedPath = path.resolve(candidatePath);
+    return allowedCredentialDirs.some((allowedDir) => {
+        const relative = path.relative(allowedDir, resolvedPath);
+        return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+    });
+};
+
 const credentialCandidatePaths = uniqueValues([
+    envCredentialPath && isPathInsideAllowedCredentialDir(envCredentialPath) ? path.resolve(envCredentialPath) : null,
     path.resolve('/var/www/backend/config/google-creds.json'),
+    path.resolve('/var/www/backend/backend/config/google-creds.json'),
     path.resolve(__dirname, '../config/google-creds.json'),
     path.resolve(process.cwd(), 'config/google-creds.json'),
     path.resolve(process.cwd(), 'backend/config/google-creds.json')
@@ -38,9 +59,25 @@ const loadDialogflowCredentials = () => {
         return { credentials: parsed, source: 'secure inline env JSON' };
     }
 
+    const inlineBase64 = process.env.DIALOGFLOW_CREDENTIALS_BASE64 || process.env.GOOGLE_SERVICE_ACCOUNT_BASE64;
+    if (inlineBase64) {
+        const decoded = Buffer.from(inlineBase64, 'base64').toString('utf8');
+        const parsed = JSON.parse(decoded);
+        validateGoogleCredsObject(parsed, 'secure inline env base64');
+        return { credentials: parsed, source: 'secure inline env base64' };
+    }
+
     for (const candidatePath of credentialCandidatePaths) {
         try {
             if (!fs.existsSync(candidatePath)) continue;
+
+            const stat = fs.statSync(candidatePath);
+            if (!stat.isFile()) {
+                throw new Error('Credential path exists but is not a file.');
+            }
+            if (process.platform !== 'win32' && (stat.mode & 0o077)) {
+                console.warn("[YogiDesk Security] google-creds.json should be chmod 600 so group/others cannot read it:", candidatePath);
+            }
 
             const rawContent = fs.readFileSync(candidatePath, 'utf8');
             const parsed = JSON.parse(rawContent);
