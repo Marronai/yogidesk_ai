@@ -1,4 +1,20 @@
 require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+// Dynamic path setup: Yeh automatically backend/config/google-creds.json ko target karega
+const credentialsPath = path.join(__dirname, '../config/google-creds.json');
+
+// Quick dynamic debug log to see the exact absolute path on VPS
+console.log("[YogiDesk Debug] Resolved Credentials Path:", credentialsPath);
+
+if (!fs.existsSync(credentialsPath)) {
+    console.error(`[YogiDesk Error] File absolutely not found at: ${credentialsPath}`);
+} else {
+    // Google Cloud SDK ko dynamic path override de rahe hain
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+}
+
 const axios = require('axios');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 const { supabase, supabaseAdmin } = require('../config/supabase');
