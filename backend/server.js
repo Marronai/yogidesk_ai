@@ -804,12 +804,11 @@ const getMetaWebhookVerifyToken = () => (
     'YogiDesk_Doctor_Secure_2026'
 );
 
-const getMetaWebhookAppSecret = () => (
-    process.env.META_WEBHOOK_APP_SECRET ||
-    process.env.META_APP_SECRET ||
-    process.env.WHATSAPP_APP_SECRET ||
-    ''
-);
+const getMetaWebhookAppSecret = () => String(process.env.WHATSAPP_APP_SECRET || '').trim();
+
+if (!getMetaWebhookAppSecret()) {
+    console.warn('[YogiDesk Security] WHATSAPP_APP_SECRET is not configured. WhatsApp webhook POST ingestion will reject unsigned requests until the app secret is set.');
+}
 
 const isMetaDeveloperTestPayload = (payload = {}) => {
     if (!payload || typeof payload !== 'object') return false;
@@ -890,7 +889,7 @@ const verifyMetaWebhookSignature = (req) => {
     const signature = String(req.get('x-hub-signature-256') || '').trim();
     const rawBody = typeof req.rawBody === 'string' ? req.rawBody : '';
 
-    if (!appSecret) return true;
+    if (!appSecret) return false;
     if (!rawBody || !signature || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
     const expected = `sha256=${crypto
@@ -1613,40 +1612,14 @@ const verifyWhatsAppWebhook = (req, res) => {
 };
 
 const handleWhatsAppWebhook = (req, res) => {
+    if (!verifyMetaWebhookSignature(req)) {
+        return res.status(403).send(getMetaWebhookAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
+    }
+
     res.status(200).send('EVENT_RECEIVED');
 
     Promise.resolve()
         .then(async () => {
-            if (!verifyMetaWebhookSignature(req)) {
-                const payloadShape = getWhatsAppWebhookPayloadShape(req.body);
-                const allowTestBypass = process.env.NODE_ENV === 'development' || isMetaDeveloperTestPayload(req.body);
-                const allowTemporaryWhatsAppBypass = canTemporarilyBypassMetaSignature(req.body);
-                const allowStructuredWhatsAppBypass = hasValidWhatsAppWebhookPayloadStructure(req.body);
-                if (allowTestBypass) {
-                    console.warn('WhatsApp webhook signature bypassed for Meta developer test payload.', {
-                        environment: process.env.NODE_ENV || 'unknown',
-                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0
-                    });
-                } else if (allowTemporaryWhatsAppBypass || allowStructuredWhatsAppBypass) {
-                    console.warn('WhatsApp webhook signature mismatch allowed for structurally valid WhatsApp payload.', {
-                        environment: process.env.NODE_ENV || 'unknown',
-                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
-                        hasEntry: Array.isArray(req.body?.entry),
-                        hasMessagesField: payloadShape.hasMessagesField,
-                        hasStatuses: payloadShape.hasStatuses,
-                        hasWamid: payloadShape.hasWamid
-                    });
-                } else {
-                    console.warn('WhatsApp webhook signature mismatch received for non-WhatsApp payload; acknowledged without processing.', {
-                        environment: process.env.NODE_ENV || 'unknown',
-                        hasRawBody: typeof req.rawBody === 'string' && req.rawBody.length > 0,
-                        object: req.body?.object || null,
-                        hasEntry: Array.isArray(req.body?.entry)
-                    });
-                    return;
-                }
-            }
-
             const webhookFields = [];
             if (Array.isArray(req.body?.entry)) {
                 for (const entry of req.body.entry) {
@@ -3716,6 +3689,81 @@ app.get('/api/inbox/messages', async (req, res) => {
         const statusCode = error.statusCode || 500;
         console.error('Inbox messages API failed:', error.message || error);
         return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load messages.' });
+    }
+});
+
+app.get('/api/ai/settings', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+
+        const userId = await resolveInboxRequestUserId(req);
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id, plan, current_plan, plan_tier, subscription_tier, ai_enabled, token_limit, token_used, is_ai_paused')
+            .eq('id', userId)
+            .maybeSingle();
+
+        if (error) throw error;
+        const plan = data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'Basic';
+
+        return res.status(200).json({
+            success: true,
+            settings: {
+                plan,
+                aiEnabled: Boolean(data?.ai_enabled),
+                tokenLimit: Number(data?.token_limit || 0),
+                tokenUsed: Number(data?.token_used || 0),
+                isAiPaused: Boolean(data?.is_ai_paused)
+            }
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('AI settings fetch failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load AI settings.' });
+    }
+});
+
+app.post('/api/chat/toggle-ai', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+
+        const userId = await resolveInboxRequestUserId(req);
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+
+        const explicitPaused = req.body?.isAiPaused;
+        let nextPaused = typeof explicitPaused === 'boolean' ? explicitPaused : null;
+
+        if (nextPaused === null) {
+            const { data: current, error: readError } = await db
+                .from('doctor_profiles')
+                .select('is_ai_paused')
+                .eq('id', userId)
+                .maybeSingle();
+            if (readError) throw readError;
+            nextPaused = !Boolean(current?.is_ai_paused);
+        }
+
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .update({ is_ai_paused: nextPaused })
+            .eq('id', userId)
+            .select('id, is_ai_paused')
+            .maybeSingle();
+
+        if (error) throw error;
+
+        return res.status(200).json({
+            success: true,
+            isAiPaused: Boolean(data?.is_ai_paused ?? nextPaused)
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('AI pause toggle failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to toggle AI mode.' });
     }
 });
 

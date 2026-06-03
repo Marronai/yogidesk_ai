@@ -1,0 +1,145 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Bot, CreditCard, Gauge, PauseCircle, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import api from '../utils/api';
+import { supabase } from '../config/supabaseClient';
+
+const defaultSettings = {
+  plan: 'Basic',
+  aiEnabled: false,
+  tokenLimit: 0,
+  tokenUsed: 0,
+  isAiPaused: false,
+};
+
+const AISettings = () => {
+  const navigate = useNavigate();
+  const [settings, setSettings] = useState(defaultSettings);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const usagePercent = useMemo(() => {
+    const limit = Number(settings.tokenLimit || 0);
+    if (!limit) return 0;
+    return Math.min(100, Math.round((Number(settings.tokenUsed || 0) / limit) * 100));
+  }, [settings]);
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const { data: userResult } = await supabase.auth.getUser();
+      const userId = userResult?.user?.id || localStorage.getItem('user_id');
+      const response = await api.get('/api/ai/settings', { params: { userId } });
+      if (response.data?.success) setSettings({ ...defaultSettings, ...(response.data.settings || {}) });
+    } catch (err) {
+      setError(err?.response?.data?.message || err.message || 'Unable to load AI settings.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const planLabel = String(settings.plan || 'Basic').replace(/_/g, ' ');
+  const assistantEnabled = settings.aiEnabled && !settings.isAiPaused;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:flex-row md:items-center">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+            <Bot size={26} />
+          </div>
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Appointments</p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">Gemini Assistant Settings</h1>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={loadSettings}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50"
+        >
+          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+          {error}
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <ShieldCheck size={22} />
+            </div>
+            <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-widest ${assistantEnabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+              {assistantEnabled ? 'Active' : 'Paused'}
+            </span>
+          </div>
+          <p className="text-xs font-black uppercase tracking-widest text-slate-400">Current Plan</p>
+          <p className="mt-2 text-3xl font-black text-slate-950">{planLabel}</p>
+          <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
+            {settings.aiEnabled ? 'AI appointment automation is enabled for this workspace.' : 'AI automation is not enabled on this plan.'}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                <Gauge size={22} />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Usage</p>
+                <p className="text-sm font-bold text-slate-700">Tokens/Messages Used: {Number(settings.tokenUsed || 0)} / {Number(settings.tokenLimit || 0)}</p>
+              </div>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{usagePercent}%</span>
+          </div>
+          <div className="h-4 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-orange-500 transition-all" style={{ width: `${usagePercent}%` }} />
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/pricing')}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 hover:bg-orange-700"
+          >
+            <CreditCard size={18} />
+            Recharge / Upgrade Limit
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-3">
+            <Settings2 size={18} className="text-slate-500" />
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-600">Assistant Gate</h2>
+          </div>
+          <p className="text-sm font-semibold leading-6 text-slate-500">
+            Basic plans, disabled AI, exhausted usage, and human takeover all bypass Gemini so patients remain in the inbox for manual reply.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex items-center gap-3">
+            <PauseCircle size={18} className="text-slate-500" />
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-600">Human Takeover</h2>
+          </div>
+          <p className="text-sm font-semibold leading-6 text-slate-500">
+            Use the live inbox header switch to pause or resume AI instantly while the doctor is chatting.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AISettings;

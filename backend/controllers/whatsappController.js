@@ -1,6 +1,7 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { SessionsClient } = require('@google-cloud/dialogflow-cx');
 
 const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
@@ -141,7 +142,7 @@ const getMissingSchemaColumn = (error) => {
     return '';
 };
 
-const insertInboxMessageWithSchemaFallback = async (row = {}) => {
+const insertInboxMessageWithSchemaFallback = async (row = {}, dbClient = supabase) => {
     const stableMetadata = {
         ...(row.metadata || {}),
         ...(row.message_id ? { message_id: row.message_id } : {}),
@@ -151,7 +152,7 @@ const insertInboxMessageWithSchemaFallback = async (row = {}) => {
     const removedColumns = new Set();
 
     for (let attempt = 0; attempt < 4; attempt += 1) {
-        const { error } = await supabase.from('inbox_messages').insert(payload);
+        const { error } = await dbClient.from('inbox_messages').insert(payload);
         if (!error) return { success: true };
 
         const missingColumn = getMissingSchemaColumn(error);
@@ -182,6 +183,50 @@ const insertInboxMessageWithSchemaFallback = async (row = {}) => {
 const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
 const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
 const sanitizeDialogflowPathSegment = (value) => String(value || '').trim().replace(/[^\w.-]/g, '_');
+const removeUndefinedValues = (value = {}) => Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined)
+);
+const DIALOGFLOW_BOUNCE_WINDOW_MS = 2000;
+const DIALOGFLOW_RESULT_CACHE_MS = 30000;
+const dialogflowProcessingCache = new Map();
+const dialogflowResultCache = new Map();
+const GEMINI_MODEL_NAME = 'gemini-1.5-flash';
+const GEMINI_SYSTEM_INSTRUCTION = 'You are an empathetic medical assistant for Yogi Desk. Collect Patient Name, Appointment Date, and Time naturally in Hinglish. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.';
+let geminiModel = null;
+
+const getGeminiModel = () => {
+    if (geminiModel) return geminiModel;
+    const apiKey = String(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+    if (!apiKey) throw new Error('Gemini API key missing. Set GEMINI_API_KEY.');
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    geminiModel = genAI.getGenerativeModel({
+        model: GEMINI_MODEL_NAME,
+        systemInstruction: GEMINI_SYSTEM_INSTRUCTION
+    });
+    return geminiModel;
+};
+
+const buildDialogflowDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
+    const normalizedPayload = JSON.stringify({
+        messageId: String(messageId || '').trim(),
+        fromPhone: phoneDigitsOnly(fromPhone),
+        phoneNumberId: String(phoneNumberId || '').trim(),
+        businessAccountId: String(businessAccountId || '').trim(),
+        languageCode: String(languageCode || '').trim(),
+        text: String(text || '').trim()
+    });
+    return crypto.createHash('sha256').update(normalizedPayload).digest('hex');
+};
+
+const pruneDialogflowCaches = (now = Date.now()) => {
+    for (const [key, entry] of dialogflowProcessingCache.entries()) {
+        if (!entry?.startedAt || now - entry.startedAt > DIALOGFLOW_BOUNCE_WINDOW_MS) dialogflowProcessingCache.delete(key);
+    }
+    for (const [key, entry] of dialogflowResultCache.entries()) {
+        if (!entry?.storedAt || now - entry.storedAt > DIALOGFLOW_RESULT_CACHE_MS) dialogflowResultCache.delete(key);
+    }
+};
 const getPhoneMatchParts = (value) => {
     const digits = phoneDigitsOnly(value);
     const last10 = digits.length >= 10 ? digits.slice(-10) : digits;
@@ -340,7 +385,12 @@ const sendDialogflowWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, b
     });
 
     console.log('[YogiDesk Debug] Meta reply response:', JSON.stringify(response.data, null, 2));
-    return response.data;
+    return {
+        ...response.data,
+        _yogidesk: {
+            phoneNumberId: credentials.phoneNumberId
+        }
+    };
 };
 
 const extractWhatsAppInboundTextMessages = (payload = {}) => {
@@ -437,11 +487,259 @@ const runDialogflowCxForWhatsAppMessage = async ({ fromPhone, text, languageCode
     };
 };
 
+const normalizeAiPlan = (doctor = {}) => {
+    const rawPlan = String(doctor.plan || doctor.current_plan || doctor.plan_tier || doctor.subscription_tier || 'Basic').trim().toLowerCase();
+    if (rawPlan.includes('multi')) return 'Multi-Specialty';
+    if (rawPlan.includes('growth')) return 'Growth';
+    return 'Basic';
+};
+
+const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, patientPhone }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return null;
+
+    const runProfileQuery = async (filter) => {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('*')
+            .or(filter)
+            .limit(1)
+            .maybeSingle();
+        if (error) {
+            console.warn('Doctor AI config lookup failed:', error.message || error);
+            return null;
+        }
+        return data || null;
+    };
+
+    if (businessAccountId) {
+        const row = await runProfileQuery(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`);
+        if (row?.id) return row;
+    }
+
+    if (phoneNumberId) {
+        const row = await runProfileQuery(`meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`);
+        if (row?.id) return row;
+    }
+
+    const ownerId = await resolveDialogflowInboxOwner({ businessAccountId, phoneNumberId, patientPhone });
+    if (!ownerId) return null;
+
+    const { data, error } = await db
+        .from('doctor_profiles')
+        .select('*')
+        .eq('id', ownerId)
+        .maybeSingle();
+    if (error) {
+        console.warn('Doctor AI config lookup by owner failed:', error.message || error);
+        return null;
+    }
+    return data || null;
+};
+
+const getDoctorAiEligibility = (doctor = {}) => {
+    const plan = normalizeAiPlan(doctor);
+    const aiEnabled = Boolean(doctor.ai_enabled ?? doctor.aiEnabled);
+    const tokenLimit = Number(doctor.token_limit ?? doctor.tokenLimit ?? 0);
+    const tokenUsed = Number(doctor.token_used ?? doctor.tokenUsed ?? 0);
+    const isAiPaused = Boolean(doctor.is_ai_paused ?? doctor.isAiPaused);
+
+    if (plan === 'Basic') return { eligible: false, reason: 'basic_plan', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    if (!aiEnabled) return { eligible: false, reason: 'ai_disabled', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    if (isAiPaused) return { eligible: false, reason: 'human_takeover', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    if (tokenLimit <= 0 || tokenUsed >= tokenLimit) return { eligible: false, reason: 'token_limit_reached', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    return { eligible: true, plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+};
+
+const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit = 12 }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return [];
+
+    let query = db
+        .from('inbox_messages')
+        .select('sender, from_me, body_content, body, text, message_body, message_text, created_at, sender_phone, receiver_phone')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+    if (chatId) {
+        query = query.eq('chat_id', chatId);
+    } else if (ownerId) {
+        query = query.eq('workspace_id', ownerId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+        console.warn('Gemini conversation history lookup failed:', error.message || error);
+        return [];
+    }
+
+    const safePatientPhone = phoneDigitsOnly(patientPhone);
+    return (data || [])
+        .filter((message) => {
+            if (!safePatientPhone || chatId) return true;
+            return phoneDigitsOnly(message.sender_phone).endsWith(safePatientPhone.slice(-10)) ||
+                phoneDigitsOnly(message.receiver_phone).endsWith(safePatientPhone.slice(-10));
+        })
+        .reverse()
+        .map((message) => {
+            const body = message.message_text || message.message_body || message.body_content || message.body || message.text || '';
+            const role = message.from_me || ['agent', 'bot'].includes(String(message.sender || '').toLowerCase()) ? 'Assistant' : 'Patient';
+            return `${role}: ${String(body || '').trim()}`;
+        })
+        .filter(Boolean);
+};
+
+const parseGeminiBookingConfirmation = (replyText = '') => {
+    const match = String(replyText || '').match(/\[CONFIRM_BOOKING:\s*([^|\]]+)\s*\|\s*([^|\]]+)\s*\|\s*([^\]]+)\]/i);
+    if (!match) {
+        return { cleanText: String(replyText || '').trim(), booking: null };
+    }
+
+    const booking = {
+        patientName: match[1].trim(),
+        appointmentDate: match[2].trim(),
+        appointmentTime: match[3].trim()
+    };
+    const cleanText = String(replyText || '').replace(match[0], '').trim();
+    return { cleanText, booking };
+};
+
+const insertWithSchemaFallback = async ({ table, row, dbClient = supabaseAdmin || supabase }) => {
+    if (!dbClient?.from || !table || !row) return { success: false, reason: 'database_unavailable' };
+    let payload = removeUndefinedValues(row);
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        const { data, error } = await dbClient.from(table).insert([payload]).select().maybeSingle();
+        if (!error) return { success: true, data };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        return { success: false, error };
+    }
+
+    return { success: false, reason: 'empty_payload' };
+};
+
+const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
+    if (!booking?.patientName || !booking?.appointmentDate || !booking?.appointmentTime) return;
+
+    Promise.resolve()
+        .then(async () => {
+            const db = supabaseAdmin || supabase;
+            const nowIso = new Date().toISOString();
+            const result = await insertWithSchemaFallback({
+                table: 'appointments',
+                dbClient: db,
+                row: {
+                    user_id: doctor?.id || null,
+                    doctor_id: doctor?.id || null,
+                    patient_name: booking.patientName,
+                    patient_phone: phoneDigitsOnly(inbound.fromPhone || ''),
+                    appointment_date: booking.appointmentDate,
+                    appointment_time: booking.appointmentTime,
+                    status: 'Pending',
+                    source: 'whatsapp_gemini',
+                    metadata: {
+                        inbound_message_id: inbound.messageId || null,
+                        whatsapp_business_account_id: inbound.businessAccountId || null,
+                        whatsapp_phone_number_id: inbound.phoneNumberId || null,
+                        created_by_ai: true
+                    },
+                    created_at: nowIso,
+                    updated_at: nowIso
+                }
+            });
+            if (!result.success) console.error('Gemini appointment save failed:', result.error?.message || result.error || result.reason);
+        })
+        .catch((error) => console.error('Gemini appointment async save crashed:', error.message || error));
+};
+
+const incrementDoctorTokenUsage = async ({ doctorId, incrementBy = 1 }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !doctorId) return;
+
+    const { data, error } = await db
+        .from('doctor_profiles')
+        .select('token_used')
+        .eq('id', doctorId)
+        .maybeSingle();
+    if (error) {
+        console.warn('Gemini token usage lookup failed:', error.message || error);
+        return;
+    }
+
+    const nextUsed = Number(data?.token_used || 0) + Math.max(1, Number(incrementBy || 1));
+    const update = await db
+        .from('doctor_profiles')
+        .update({ token_used: nextUsed })
+        .eq('id', doctorId);
+    if (update.error) console.warn('Gemini token usage increment failed:', update.error.message || update.error);
+};
+
+const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCode = 'hi' }) => {
+    const history = await fetchConversationHistory({
+        chatId,
+        ownerId: doctor?.id,
+        patientPhone: inbound.fromPhone
+    });
+    const prompt = [
+        GEMINI_SYSTEM_INSTRUCTION,
+        '',
+        'Conversation so far:',
+        history.length ? history.join('\n') : 'No earlier messages.',
+        '',
+        `Latest Patient Message: ${String(inbound.text || '').slice(0, 2048)}`,
+        `Preferred language: ${languageCode}.`
+    ].join('\n');
+
+    const response = await getGeminiModel().generateContent(prompt);
+    const replyText = String(response?.response?.text?.() || '').trim();
+    const usageMetadata = response?.response?.usageMetadata || {};
+    return {
+        success: true,
+        model: GEMINI_MODEL_NAME,
+        replyText,
+        usageMetadata,
+        tokenIncrement: Number(usageMetadata.totalTokenCount || usageMetadata.candidatesTokenCount || 1) || 1
+    };
+};
+
 const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
     const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
     const results = [];
 
     for (const inbound of inboundMessages) {
+        const dedupeKey = buildDialogflowDedupeKey({ ...inbound, languageCode });
+        const now = Date.now();
+        pruneDialogflowCaches(now);
+
+        const cachedResult = dialogflowResultCache.get(dedupeKey);
+        if (cachedResult && now - cachedResult.storedAt <= DIALOGFLOW_RESULT_CACHE_MS) {
+            results.push({
+                ...cachedResult.result,
+                dedupe: { cacheHit: true, suppressedDuplicate: true }
+            });
+            continue;
+        }
+
+        const activeProcessing = dialogflowProcessingCache.get(dedupeKey);
+        if (activeProcessing && now - activeProcessing.startedAt <= DIALOGFLOW_BOUNCE_WINDOW_MS) {
+            const sharedResult = await activeProcessing.promise;
+            results.push({
+                ...sharedResult,
+                dedupe: { cacheHit: false, suppressedDuplicate: true }
+            });
+            continue;
+        }
+
+        const processingPromise = (async () => {
         try {
             const dialogflowResult = await runDialogflowCxForWhatsAppMessage({
                 fromPhone: inbound.fromPhone,
@@ -467,7 +765,15 @@ const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCod
                             phoneNumberId: inbound.phoneNumberId,
                             businessAccountId: inbound.businessAccountId
                         });
-                        result.metaReplies.push({ success: true, response: metaReply });
+                        const inboxCommit = await commitDialogflowOutboundReply({
+                            inbound,
+                            replyText,
+                            metaReply,
+                            credentials: metaReply?._yogidesk || {},
+                            phoneNumberId: inbound.phoneNumberId,
+                            businessAccountId: inbound.businessAccountId
+                        });
+                        result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
                     } catch (sendError) {
                         console.error('[YogiDesk Debug] Meta reply send failed:', {
                             messageId: inbound.messageId,
@@ -482,7 +788,7 @@ const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCod
                 }
             }
 
-            results.push(result);
+            return result;
         } catch (error) {
             console.error('Dialogflow CX WhatsApp runtime failed:', {
                 messageId: inbound.messageId,
@@ -490,13 +796,23 @@ const handleDialogflowCxWhatsAppMessage = async ({ payload, message, languageCod
                 error: error.message || error
             });
 
-            results.push({
+            return {
                 ...inbound,
                 dialogflow: { success: false, error: error.message || 'Dialogflow CX runtime failed.' },
                 replyTexts: [],
                 bookingReady: false,
                 bookingPayload: null
-            });
+            };
+        }
+        })();
+
+        dialogflowProcessingCache.set(dedupeKey, { startedAt: now, promise: processingPromise });
+        try {
+            const result = await processingPromise;
+            dialogflowResultCache.set(dedupeKey, { storedAt: Date.now(), result });
+            results.push(result);
+        } finally {
+            dialogflowProcessingCache.delete(dedupeKey);
         }
     }
 
@@ -576,6 +892,378 @@ const writeTemplateDispatchChat = async ({ ownerId, activePhone, activeName, mes
     }
 
     return data?.id ? data : existingChat || null;
+};
+
+const writeDialogflowInboxChatSafely = async ({ db, chatId, payload }) => {
+    let nextPayload = removeUndefinedValues(payload);
+    const removedColumns = new Set();
+
+    while (Object.keys(nextPayload).length > 0) {
+        const query = chatId
+            ? db.from('inbox_chats').update(nextPayload).eq('id', chatId).select('id, metadata').maybeSingle()
+            : db.from('inbox_chats').insert([nextPayload]).select('id, metadata').maybeSingle();
+        const { data, error } = await query;
+        if (!error) return data;
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(nextPayload, missingColumn) && !removedColumns.has(missingColumn)) {
+            console.warn(`Dialogflow inbox chat write retrying without stale schema column: ${missingColumn}`);
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...strippedPayload } = nextPayload;
+            nextPayload = strippedPayload;
+            continue;
+        }
+
+        console.error('Dialogflow inbox chat write failed:', error.message || error);
+        return null;
+    }
+
+    return null;
+};
+
+const resolveDialogflowInboxOwner = async ({ businessAccountId, phoneNumberId, patientPhone }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return null;
+
+    if (businessAccountId) {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id')
+            .or(`meta_waba_id.eq.${businessAccountId},whatsapp_business_account_id.eq.${businessAccountId}`)
+            .limit(1)
+            .maybeSingle();
+        if (data?.id) return data.id;
+        if (error) console.warn('Dialogflow reply owner lookup by WABA failed:', error.message || error);
+    }
+
+    if (phoneNumberId) {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('id')
+            .or(`meta_phone_number_id.eq.${phoneNumberId},whatsapp_phone_number_id.eq.${phoneNumberId}`)
+            .limit(1)
+            .maybeSingle();
+        if (data?.id) return data.id;
+        if (error) console.warn('Dialogflow reply owner lookup by Meta phone failed:', error.message || error);
+    }
+
+    if (patientPhone) {
+        const { data, error } = await db
+            .from('inbox_chats')
+            .select('user_id, doctor_id, phone, patient_phone, updated_at')
+            .order('updated_at', { ascending: false })
+            .limit(500);
+        if (error) {
+            console.warn('Dialogflow reply owner lookup by patient phone failed:', error.message || error);
+        } else {
+            const existingChat = (data || []).find((chat) => (
+                phonesReferToSameContact(chat.phone, patientPhone) ||
+                phonesReferToSameContact(chat.patient_phone, patientPhone)
+            ));
+            if (existingChat?.user_id || existingChat?.doctor_id) return existingChat.user_id || existingChat.doctor_id;
+        }
+    }
+
+    return null;
+};
+
+const findDialogflowReplyChat = async ({ db, ownerId, patientPhone }) => {
+    if (!db?.from || !patientPhone) return null;
+
+    let query = db
+        .from('inbox_chats')
+        .select('id, user_id, doctor_id, phone, patient_phone, name, patient_name, metadata, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(500);
+
+    if (ownerId) query = query.or(`user_id.eq.${ownerId},doctor_id.eq.${ownerId}`);
+
+    const { data, error } = await query;
+    if (error) {
+        console.warn('Dialogflow reply chat lookup failed:', error.message || error);
+        return null;
+    }
+
+    return (data || []).find((chat) => (
+        phonesReferToSameContact(chat.phone, patientPhone) ||
+        phonesReferToSameContact(chat.patient_phone, patientPhone)
+    )) || null;
+};
+
+const commitDialogflowOutboundReply = async ({
+    inbound = {},
+    replyText,
+    metaReply,
+    credentials = {},
+    phoneNumberId,
+    businessAccountId
+}) => {
+    const wamid = metaReply?.messages?.[0]?.id || metaReply?.message_id || metaReply?.wamid || null;
+    const safeText = String(replyText || '').trim();
+    const patientPhone = phoneDigitsOnly(inbound.fromPhone || inbound.toPhone || '');
+    if (!wamid || !safeText || !patientPhone) return { success: false, reason: 'missing_required_reply_fields' };
+
+    const db = supabaseAdmin || supabase;
+    if (!db?.from) return { success: false, reason: 'database_unavailable' };
+
+    const finalPhoneNumberId = String(credentials.phoneNumberId || phoneNumberId || inbound.phoneNumberId || '').trim();
+    const finalBusinessAccountId = String(businessAccountId || inbound.businessAccountId || '').trim();
+    const ownerId = await resolveDialogflowInboxOwner({
+        businessAccountId: finalBusinessAccountId,
+        phoneNumberId: finalPhoneNumberId,
+        patientPhone
+    });
+    const nowIso = new Date().toISOString();
+    const existingChat = await findDialogflowReplyChat({ db, ownerId, patientPhone });
+    const chatMetadata = existingChat?.metadata || {};
+
+    let chatId = existingChat?.id || null;
+    if (!chatId && ownerId) {
+        const createdChat = await writeDialogflowInboxChatSafely({
+            db,
+            payload: {
+                user_id: ownerId,
+                doctor_id: ownerId,
+                name: inbound.patientName || 'Patient',
+                patient_name: inbound.patientName || 'Patient',
+                phone: patientPhone,
+                patient_phone: patientPhone,
+                last_message: safeText,
+                status: 'SENT',
+                unread_count: 0,
+                updated_at: nowIso,
+                metadata: {
+                    whatsapp_business_account_id: finalBusinessAccountId || null,
+                    whatsapp_phone_number_id: finalPhoneNumberId || null,
+                    conversation_state: 'BOT_REPLIED',
+                    last_bot_reply: { wamid, sent_at: nowIso, body_preview: safeText.slice(0, 500) }
+                }
+            }
+        });
+        chatId = createdChat?.id || null;
+    }
+
+    if (!isUuid(chatId)) {
+        console.error('Dialogflow outbound reply skipped inbox_messages insert: no valid chat id resolved.', {
+            wamid,
+            ownerId,
+            patientPhone
+        });
+        return { success: false, reason: 'chat_not_resolved', wamid };
+    }
+
+    const row = {
+        chat_id: chatId,
+        workspace_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+        sender_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+        sender_phone: finalPhoneNumberId || null,
+        receiver_phone: patientPhone,
+        sender: 'bot',
+        from_me: true,
+        type: 'public',
+        message_type: 'text',
+        status: 'SENT',
+        message_id: wamid,
+        meta_message_id: wamid,
+        wamid,
+        body: safeText,
+        text: safeText,
+        body_content: safeText,
+        message_body: safeText,
+        message_text: safeText,
+        is_private_note: false,
+        metadata: {
+            wamid,
+            message_id: wamid,
+            meta_message_id: wamid,
+            whatsapp_business_account_id: finalBusinessAccountId || null,
+            whatsapp_phone_number_id: finalPhoneNumberId || null,
+            inbound_message_id: inbound.messageId || null,
+            dialogflow_reply: true,
+            outbound: true,
+            meta_response: metaReply
+        },
+        created_at: nowIso
+    };
+
+    const insertResult = await insertInboxMessageWithSchemaFallback(row, db);
+    if (!insertResult.success) {
+        console.error('Dialogflow outbound reply inbox_messages insert failed:', insertResult.error?.message || insertResult.error || insertResult.reason);
+        return { success: false, reason: 'message_insert_failed', error: insertResult.error, wamid, chatId };
+    }
+
+    await writeDialogflowInboxChatSafely({
+        db,
+        chatId,
+        payload: {
+            last_message: safeText,
+            status: 'SENT',
+            unread_count: 0,
+            updated_at: nowIso,
+            metadata: {
+                ...chatMetadata,
+                whatsapp_business_account_id: finalBusinessAccountId || chatMetadata.whatsapp_business_account_id || null,
+                whatsapp_phone_number_id: finalPhoneNumberId || chatMetadata.whatsapp_phone_number_id || null,
+                conversation_state: 'BOT_REPLIED',
+                last_bot_reply: {
+                    wamid,
+                    message_id: wamid,
+                    sent_at: nowIso,
+                    body_preview: safeText.slice(0, 500),
+                    inbound_message_id: inbound.messageId || null
+                }
+            }
+        }
+    });
+
+    return { success: true, wamid, chatId };
+};
+
+const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
+    const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
+    const results = [];
+
+    for (const inbound of inboundMessages) {
+        const dedupeKey = buildDialogflowDedupeKey({ ...inbound, languageCode });
+        const now = Date.now();
+        pruneDialogflowCaches(now);
+
+        const cachedResult = dialogflowResultCache.get(dedupeKey);
+        if (cachedResult && now - cachedResult.storedAt <= DIALOGFLOW_RESULT_CACHE_MS) {
+            results.push({ ...cachedResult.result, dedupe: { cacheHit: true, suppressedDuplicate: true } });
+            continue;
+        }
+
+        const activeProcessing = dialogflowProcessingCache.get(dedupeKey);
+        if (activeProcessing && now - activeProcessing.startedAt <= DIALOGFLOW_BOUNCE_WINDOW_MS) {
+            const sharedResult = await activeProcessing.promise;
+            results.push({ ...sharedResult, dedupe: { cacheHit: false, suppressedDuplicate: true } });
+            continue;
+        }
+
+        const processingPromise = (async () => {
+            const doctor = await fetchDoctorAiConfig({
+                businessAccountId: inbound.businessAccountId,
+                phoneNumberId: inbound.phoneNumberId,
+                patientPhone: inbound.fromPhone
+            });
+
+            if (!doctor?.id) {
+                return {
+                    ...inbound,
+                    ai: { provider: 'gemini', skipped: true, reason: 'doctor_not_found' },
+                    replyTexts: [],
+                    metaReplies: []
+                };
+            }
+
+            const eligibility = getDoctorAiEligibility(doctor);
+            if (!eligibility.eligible) {
+                return {
+                    ...inbound,
+                    doctorId: doctor.id,
+                    ai: { provider: 'gemini', skipped: true, reason: eligibility.reason, eligibility },
+                    replyTexts: [],
+                    metaReplies: []
+                };
+            }
+
+            const db = supabaseAdmin || supabase;
+            const existingChat = await findDialogflowReplyChat({
+                db,
+                ownerId: doctor.id,
+                patientPhone: inbound.fromPhone
+            });
+
+            try {
+                const geminiResult = await runGeminiForWhatsAppMessage({
+                    inbound,
+                    doctor,
+                    chatId: existingChat?.id || null,
+                    languageCode
+                });
+
+                await incrementDoctorTokenUsage({
+                    doctorId: doctor.id,
+                    incrementBy: geminiResult.tokenIncrement
+                });
+
+                const { cleanText, booking } = parseGeminiBookingConfirmation(geminiResult.replyText);
+                if (booking) saveGeminiAppointmentAsync({ doctor, inbound, booking });
+
+                const finalReplyText = cleanText || geminiResult.replyText;
+                const result = {
+                    ...inbound,
+                    doctorId: doctor.id,
+                    ai: { provider: 'gemini', skipped: false, result: geminiResult },
+                    replyTexts: finalReplyText ? [finalReplyText] : [],
+                    bookingReady: Boolean(booking),
+                    bookingPayload: booking,
+                    metaReplies: []
+                };
+
+                if (sendReplies && finalReplyText) {
+                    try {
+                        const metaReply = await sendDialogflowWhatsAppTextReply({
+                            toPhone: inbound.fromPhone,
+                            text: finalReplyText,
+                            phoneNumberId: inbound.phoneNumberId,
+                            businessAccountId: inbound.businessAccountId
+                        });
+                        const inboxCommit = await commitDialogflowOutboundReply({
+                            inbound,
+                            replyText: finalReplyText,
+                            metaReply,
+                            credentials: metaReply?._yogidesk || {},
+                            phoneNumberId: inbound.phoneNumberId,
+                            businessAccountId: inbound.businessAccountId
+                        });
+                        result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
+                    } catch (sendError) {
+                        console.error('[YogiDesk Debug] Gemini Meta reply send failed:', {
+                            messageId: inbound.messageId,
+                            fromPhone: inbound.fromPhone,
+                            error: sendError.response?.data || sendError.message || sendError
+                        });
+                        result.metaReplies.push({
+                            success: false,
+                            error: sendError.response?.data || sendError.message || 'Meta reply send failed.'
+                        });
+                    }
+                }
+
+                return result;
+            } catch (error) {
+                console.error('Gemini WhatsApp runtime failed:', {
+                    messageId: inbound.messageId,
+                    fromPhone: inbound.fromPhone,
+                    doctorId: doctor.id,
+                    error: error.message || error
+                });
+
+                return {
+                    ...inbound,
+                    doctorId: doctor.id,
+                    ai: { provider: 'gemini', success: false, error: error.message || 'Gemini runtime failed.' },
+                    replyTexts: [],
+                    bookingReady: false,
+                    bookingPayload: null,
+                    metaReplies: []
+                };
+            }
+        })();
+
+        dialogflowProcessingCache.set(dedupeKey, { startedAt: now, promise: processingPromise });
+        try {
+            const result = await processingPromise;
+            dialogflowResultCache.set(dedupeKey, { storedAt: Date.now(), result });
+            results.push(result);
+        } finally {
+            dialogflowProcessingCache.delete(dedupeKey);
+        }
+    }
+
+    return results;
 };
 
 const resolveScheduledIso = (scheduledFor, index = 0) => {
@@ -1479,5 +2167,6 @@ exports.safeInsertInboxRows = safeInsertInboxRows;
 exports.logInboxDatabaseError = logInboxDatabaseError;
 exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
 exports.runDialogflowCxForWhatsAppMessage = runDialogflowCxForWhatsAppMessage;
-exports.handleDialogflowCxWhatsAppMessage = handleDialogflowCxWhatsAppMessage;
+exports.handleGeminiWhatsAppMessage = handleGeminiWhatsAppMessage;
+exports.handleDialogflowCxWhatsAppMessage = handleGeminiWhatsAppMessage;
 exports.sendDialogflowWhatsAppTextReply = sendDialogflowWhatsAppTextReply;

@@ -9,21 +9,24 @@ const getVerifyToken = () => (
   ''
 );
 
-const getAppSecret = () => (
-  process.env.META_WEBHOOK_APP_SECRET ||
-  process.env.META_APP_SECRET ||
-  process.env.WHATSAPP_APP_SECRET ||
-  ''
-);
+const getAppSecret = () => String(process.env.WHATSAPP_APP_SECRET || '').trim();
+
+if (!getAppSecret()) {
+  console.warn('[YogiDesk Security] WHATSAPP_APP_SECRET is not configured. WhatsApp webhook POST ingestion will reject unsigned requests until the app secret is set.');
+}
 
 const verifySignature = (req) => {
   const secret = getAppSecret();
   const signature = String(req.get('x-hub-signature-256') || '').trim();
   if (!secret || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
+  const rawBody = typeof req.rawBody === 'string'
+    ? req.rawBody
+    : JSON.stringify(req.body || {});
+
   const expected = `sha256=${crypto
     .createHmac('sha256', secret)
-    .update(req.rawBody || Buffer.from(JSON.stringify(req.body || {})))
+    .update(rawBody, 'utf8')
     .digest('hex')}`;
 
   const actual = Buffer.from(signature, 'utf8');
@@ -306,18 +309,7 @@ exports.verifyWebhook = (req, res) => {
 
 exports.handleWebhook = async (req, res) => {
   if (!verifySignature(req)) {
-    const payloadShape = getWhatsAppWebhookPayloadShape(req.body);
-    if (canTemporarilyBypassSignature(req.body)) {
-      console.warn('Route WhatsApp webhook signature mismatch allowed temporarily for WhatsApp payload.', {
-        environment: process.env.NODE_ENV || 'unknown',
-        hasRawBody: Boolean(req.rawBody),
-        hasMessagesField: payloadShape.hasMessagesField,
-        hasStatuses: payloadShape.hasStatuses,
-        hasWamid: payloadShape.hasWamid
-      });
-    } else {
-      return res.status(403).send('Invalid signature');
-    }
+    return res.status(403).send(getAppSecret() ? 'Invalid signature' : 'WhatsApp app secret not configured');
   }
 
   res.sendStatus(200);

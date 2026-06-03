@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  Bot,
   Check,
   CheckCheck,
   Clock3,
@@ -16,6 +17,7 @@ import {
   ShieldAlert,
   Smile,
   User,
+  UserCog,
   UserPlus,
   Image as ImageIcon,
   Loader,
@@ -45,9 +47,10 @@ const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
   message_id: item.message_id || item.metadata?.message_id || item.metadata?.meta_message_id || '',
+  chat_id: item.chat_id || '',
   text: item.message_text || item.body || item.text || item.message_body || '',
   sender: item.sender || (item.sender_phone ? 'user' : 'user'),
-  from_me: item.from_me ?? ['agent', 'doctor'].includes(item.sender),
+  from_me: item.from_me ?? ['agent', 'doctor', 'bot'].includes(item.sender),
   type: item.type || item.message_type || (item.is_private_note ? 'private' : 'public'),
   is_private_note: Boolean(item.is_private_note),
   status: resolveDeliveryStatus(item.status, item.metadata?.delivery_status),
@@ -123,6 +126,8 @@ const InboxContent = () => {
   const [showBgMenu, setShowBgMenu] = useState(false);
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
+  const [doctorAiPaused, setDoctorAiPaused] = useState(false);
+  const [aiToggleLoading, setAiToggleLoading] = useState(false);
   const navigate = useNavigate();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
@@ -171,6 +176,17 @@ const InboxContent = () => {
     const { data } = await supabase.auth.getUser();    
     return { ...(data?.user || {}), id: storedUserId || data?.user?.id || '' };
   }, []);
+
+  const loadAiSettings = useCallback(async () => {
+    try {
+      const user = await getUser();
+      if (!user?.id) return;
+      const response = await api.get('/api/ai/settings', { params: { userId: user.id } });
+      if (response.data?.success) setDoctorAiPaused(Boolean(response.data.settings?.isAiPaused));
+    } catch (error) {
+      logInboxError(error);
+    }
+  }, [getUser]);
 
   const loadInbox = useCallback(async () => {
     const user = await getUser();
@@ -410,6 +426,10 @@ const InboxContent = () => {
   }, [loadInbox, reloadToken]);
 
   useEffect(() => {
+    loadAiSettings();
+  }, [loadAiSettings]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       setReloadToken((value) => value + 1);
     }, 30000);
@@ -470,9 +490,34 @@ const InboxContent = () => {
           schema: 'public',
           table: 'inbox_messages',
           filter: `workspace_id=eq.${user.id}`,
-        }, () => {
+        }, (payload) => {
+          const nextRow = payload.new || {};
+          const mappedMessage = mapStoredMessage(nextRow);
           setReloadToken((value) => value + 1);
-          if (selectedChat) loadMessages(selectedChat);
+
+          if (selectedChat?.id && String(nextRow.chat_id || '') === String(selectedChat.id)) {
+            setMessages((prev) => {
+              const alreadyExists = prev.some((msg) => (
+                String(msg.id) === String(mappedMessage.id) ||
+                (mappedMessage.message_id && String(msg.message_id || '') === String(mappedMessage.message_id)) ||
+                (mappedMessage.meta_message_id && String(msg.meta_message_id || '') === String(mappedMessage.meta_message_id))
+              ));
+              if (alreadyExists) {
+                return prev.map((msg) => (
+                  String(msg.id) === String(mappedMessage.id) ? { ...msg, ...mappedMessage } : msg
+                ));
+              }
+              return [...prev, mappedMessage].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
+            });
+
+            if (nextRow.sender === 'bot' || nextRow.metadata?.dialogflow_reply || nextRow.metadata?.outbound) {
+              setConversations((prev) => prev.map((chat) => (
+                chat.id === selectedChat.id
+                  ? { ...chat, lastMsg: mappedMessage.text || chat.lastMsg, deliveryStatus: mappedMessage.status || chat.deliveryStatus }
+                  : chat
+              )));
+            }
+          }
         })
         .subscribe();
     });
@@ -506,6 +551,36 @@ const InboxContent = () => {
       if (error) throw error;
     } catch (error) {
       logInboxError(error);
+    }
+  };
+
+  const handleToggleAiMode = async () => {
+    if (!selectedChat || aiToggleLoading) return;
+    const nextPaused = !(selectedChat.metadata?.ai_paused ?? doctorAiPaused);
+    const nextMetadata = { ...(selectedChat.metadata || {}), ai_paused: nextPaused };
+
+    setAiToggleLoading(true);
+    setDoctorAiPaused(nextPaused);
+    updateConversation(selectedChat.id, { metadata: nextMetadata });
+
+    try {
+      const user = await getUser();
+      const response = await api.post('/api/chat/toggle-ai', {
+        userId: user.id,
+        chatId: selectedChat.id,
+        isAiPaused: nextPaused,
+      });
+      const confirmedPaused = Boolean(response.data?.isAiPaused);
+      const confirmedMetadata = { ...(selectedChat.metadata || {}), ai_paused: confirmedPaused };
+      setDoctorAiPaused(confirmedPaused);
+      updateConversation(selectedChat.id, { metadata: confirmedMetadata });
+    } catch (error) {
+      const revertedPaused = !nextPaused;
+      setDoctorAiPaused(revertedPaused);
+      updateConversation(selectedChat.id, { metadata: { ...(selectedChat.metadata || {}), ai_paused: revertedPaused } });
+      logInboxError(error);
+    } finally {
+      setAiToggleLoading(false);
     }
   };
 
@@ -617,6 +692,8 @@ const InboxContent = () => {
     loadMessages(chat);
   };
 
+  const isAiPausedForSelectedChat = Boolean(selectedChat?.metadata?.ai_paused ?? doctorAiPaused);
+
   const chatViewportStyle = chatBg.type === 'image'
     ? { backgroundImage: `url(${chatBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : { backgroundColor: chatBg.value || '#E5DDD5' };
@@ -711,6 +788,17 @@ const InboxContent = () => {
                     {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} ({agent.role})</option>)}
                   </select>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleAiMode}
+                  disabled={aiToggleLoading}
+                  className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-black transition-all disabled:opacity-60 ${isAiPausedForSelectedChat ? 'bg-slate-800 text-white shadow-lg shadow-slate-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100'}`}
+                  title={isAiPausedForSelectedChat ? 'Resume Gemini assistant replies' : 'Pause AI for human takeover'}
+                >
+                  {isAiPausedForSelectedChat ? <UserCog size={14} /> : <Bot size={14} />}
+                  {isAiPausedForSelectedChat ? 'Human Mode (AI Paused)' : 'AI Assistant: ACTIVE'}
+                </button>
 
                 <button
                   onClick={() => setIsGhostMode(!isGhostMode)}

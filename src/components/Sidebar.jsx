@@ -13,6 +13,7 @@ import {
   Users,
   Wallet,
   ChevronDown,
+  Bot,
 } from 'lucide-react';
 import { getWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
@@ -82,6 +83,7 @@ const Sidebar = () => {
     { name: 'Inbox', path: '/dashboard/inbox', icon: MessageSquare },
     { name: 'Patients', path: '/dashboard/contacts', icon: Users },
     !isStaff && { name: 'Yogi Wallet', path: '/dashboard/wallet', icon: Wallet },
+    !isStaff && { name: 'AI Settings', path: '/dashboard/ai-settings', icon: Bot },
     { name: 'Ads CRM', path: '/dashboard/ads-crm', icon: Megaphone },
     {
       name: 'Team Setup',
