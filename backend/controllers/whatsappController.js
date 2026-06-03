@@ -22,14 +22,11 @@ try {
 
 // 3. Initialize client with the parsed memory object
 const sessionsClient = new SessionsClient({
-    credentials: {
-        client_email: googleCredsObject?.client_email,
-        private_key: googleCredsObject?.private_key
-    },
+    credentials: googleCredsObject, // Pass the complete object structure directly here
     apiEndpoint: `${process.env.DIALOGFLOW_LOCATION || 'asia-south1'}-dialogflow.googleapis.com`
 });
 
-console.log("[YogiDesk Debug] SessionsClient successfully initialized using dynamic filesystem memory injection.");
+console.log("[YogiDesk Debug] SessionsClient successfully bound via full credentials payload injection.");
 
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('../config/supabase');
