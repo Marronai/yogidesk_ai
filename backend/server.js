@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('./config/supabase');
+const { decrypt: decryptCredentialValue } = require('./utils/cryptoUtils');
 const emailConfig = require('./config/emailConfig');
 const { getUserUsage, addPatient, addPatients } = require('./controllers/patientController');
 const {
@@ -3951,9 +3952,11 @@ const handleInboxSendMessage = async (req, res) => {
         }
 
         const credentials = await getUserMetaCredentials(userId);
-        const finalToken = String(credentials.accessToken || '').trim();
+        const tokenCandidates = Array.isArray(credentials.accessTokens) && credentials.accessTokens.length
+            ? credentials.accessTokens
+            : [{ token: credentials.accessToken, source: credentials.accessTokenSource || 'primary' }];
         const finalPhoneId = String(credentials.phoneNumberId || '').trim();
-        if (!finalPhoneId || !finalToken) {
+        if (!finalPhoneId || tokenCandidates.every((candidate) => !String(candidate?.token || '').trim())) {
             return res.status(400).json({ success: false, message: 'Missing WhatsApp phone number ID or access token for this doctor.' });
         }
 
@@ -3982,28 +3985,52 @@ const handleInboxSendMessage = async (req, res) => {
         }
 
         let metaResponse;
-        try {
+        let lastMetaError = null;
+        for (const candidate of tokenCandidates) {
+            const candidateToken = String(candidate?.token || '').trim();
+            if (!candidateToken) continue;
             console.log('Meta free-form inbox send attempt:', {
                 chatId: activeChat.id,
                 to: payload.to,
                 phoneNumberId: finalPhoneId,
-                hasToken: Boolean(finalToken),
+                hasToken: Boolean(candidateToken),
+                tokenSource: candidate?.source || 'unknown',
                 type: normalizedMediaType
             });
-            metaResponse = await axios.post(`https://graph.facebook.com/v20.0/${finalPhoneId}/messages`, payload, {
-                headers: {
-                    Authorization: `Bearer ${finalToken}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 15000
-            });
-        } catch (error) {
-            const providerMessage = error.response?.data?.error?.message || error.message || 'Meta free-form send failed.';
-            console.error('Meta free-form inbox send failed:', error.response?.data || providerMessage);
-            return res.status(error.response?.status || 400).json({
+            try {
+                metaResponse = await axios.post(`https://graph.facebook.com/v20.0/${finalPhoneId}/messages`, payload, {
+                    headers: {
+                        Authorization: `Bearer ${candidateToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 15000
+                });
+                break;
+            } catch (error) {
+                lastMetaError = error;
+                const code = error.response?.data?.error?.code;
+                if (code === 190 && tokenCandidates.length > 1) {
+                    console.warn('Meta free-form token rejected, trying next credential candidate.', {
+                        tokenSource: candidate?.source || 'unknown',
+                        phoneNumberId: finalPhoneId,
+                        code
+                    });
+                    continue;
+                }
+                break;
+            }
+        }
+
+        if (!metaResponse) {
+            const providerMessage = lastMetaError?.response?.data?.error?.message || lastMetaError?.message || 'Meta free-form send failed.';
+            const providerCode = lastMetaError?.response?.data?.error?.code || null;
+            console.error('Meta free-form inbox send failed:', lastMetaError?.response?.data || providerMessage);
+            return res.status(lastMetaError?.response?.status || 400).json({
                 success: false,
-                message: providerMessage,
-                provider: error.response?.data || null
+                message: providerCode === 190
+                    ? 'Meta authentication failed. Please update the permanent WhatsApp access token in Settings or backend .env.'
+                    : providerMessage,
+                provider: lastMetaError?.response?.data || null
             });
         }
 
@@ -4451,6 +4478,40 @@ app.post('/api/payment/payu-hash', async (req, res) => {
 // ====== INTERNAL CAMPAIGN QUEUE WORKER ======
 let campaignWorkerRunning = false;
 
+const isPlaceholderMetaToken = (token) => {
+    const normalized = String(token || '').trim().toUpperCase();
+    return !normalized ||
+        normalized === 'CONFIGURED' ||
+        normalized === 'CONNECTED' ||
+        normalized === 'LOCKED' ||
+        normalized.includes('*****') ||
+        normalized.includes('REDACTED');
+};
+
+const safeDecryptMetaToken = (token) => {
+    const value = String(token || '').trim();
+    if (!value || !/^[a-f0-9]{32,}$/i.test(value) || value.length % 2 !== 0) return '';
+    try {
+        const decrypted = decryptCredentialValue(value);
+        return String(decrypted || '').trim();
+    } catch {
+        return '';
+    }
+};
+
+const addMetaTokenCandidate = (candidates, seen, token, source) => {
+    const rawToken = String(token || '').trim();
+    if (isPlaceholderMetaToken(rawToken) || seen.has(rawToken)) return;
+    candidates.push({ token: rawToken, source });
+    seen.add(rawToken);
+
+    const decryptedToken = safeDecryptMetaToken(rawToken);
+    if (!isPlaceholderMetaToken(decryptedToken) && !seen.has(decryptedToken)) {
+        candidates.push({ token: decryptedToken, source: `${source}:decrypted` });
+        seen.add(decryptedToken);
+    }
+};
+
 const getUserMetaCredentials = async (userId) => {
     if (!supabase || !userId) return {};
 
@@ -4471,16 +4532,44 @@ const getUserMetaCredentials = async (userId) => {
             }
         }
 
-        if (!data) return {};
-        const finalToken = data.system_user_token || data.whatsapp_access_token || null;
-        const finalPhoneId = data.meta_phone_number_id || data.whatsapp_phone_number_id || data.phone_number_id || null;
-        const finalBusinessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || data.business_account_id || data.waba_id || null;
-        console.log("Resolved Meta Parameters Status:", { hasToken: !!finalToken, hasPhoneId: !!finalPhoneId });
+        if (!data) {
+            const envPhoneId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_ID || '').trim();
+            const tokenCandidates = [];
+            const seenTokens = new Set();
+            addMetaTokenCandidate(tokenCandidates, seenTokens, process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN, 'env');
+            return {
+                phoneNumberId: envPhoneId,
+                businessAccountId: String(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID || '').trim(),
+                accessToken: tokenCandidates[0]?.token || null,
+                accessTokenSource: tokenCandidates[0]?.source || '',
+                accessTokens: tokenCandidates,
+            };
+        }
+        const tokenCandidates = [];
+        const seenTokens = new Set();
+        addMetaTokenCandidate(tokenCandidates, seenTokens, data.system_user_token, 'doctor.system_user_token');
+        addMetaTokenCandidate(tokenCandidates, seenTokens, data.whatsapp_access_token, 'doctor.whatsapp_access_token');
+
+        const finalPhoneId = data.meta_phone_number_id || data.whatsapp_phone_number_id || data.phone_number_id || process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_ID || null;
+        const finalBusinessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || data.business_account_id || data.waba_id || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || process.env.META_WABA_ID || null;
+        const envPhoneId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.META_PHONE_ID || '').trim();
+        if (!envPhoneId || String(envPhoneId) === String(finalPhoneId)) {
+            addMetaTokenCandidate(tokenCandidates, seenTokens, process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN, 'env');
+        }
+
+        const finalToken = tokenCandidates[0]?.token || null;
+        console.log("Resolved Meta Parameters Status:", {
+            hasToken: !!finalToken,
+            tokenSources: tokenCandidates.map((candidate) => candidate.source),
+            hasPhoneId: !!finalPhoneId
+        });
 
         return {
             phoneNumberId: finalPhoneId,
             businessAccountId: finalBusinessAccountId,
             accessToken: finalToken,
+            accessTokenSource: tokenCandidates[0]?.source || '',
+            accessTokens: tokenCandidates,
         };
     } catch (err) {
         console.error('Meta credential lookup failed:', err.message || err);
