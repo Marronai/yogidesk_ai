@@ -4,15 +4,18 @@ const rateLimit = require('express-rate-limit');
 
 let passport = null;
 let jwt = null;
+const logOptionalAuthWarning = (message) => {
+  if (process.env.AUTH_OPTIONAL_WARNINGS === 'true') console.warn(message);
+};
 try {
   passport = require('passport');
 } catch (error) {
-  console.warn('[YogiDesk Auth] Optional passport package is not installed. Google OAuth routes are disabled until passport is installed.');
+  logOptionalAuthWarning('[YogiDesk Auth] Optional passport package is not installed. Google OAuth routes are disabled until passport is installed.');
 }
 try {
   jwt = require('jsonwebtoken');
 } catch (error) {
-  console.warn('[YogiDesk Auth] jsonwebtoken package is not installed. Google OAuth callback JWT creation is disabled until jsonwebtoken is installed.');
+  logOptionalAuthWarning('[YogiDesk Auth] jsonwebtoken package is not installed. Google OAuth callback JWT creation is disabled until jsonwebtoken is installed.');
 }
 
 const { 
@@ -51,7 +54,7 @@ let protect = (req, res) => res.status(503).json({
 try {
   ({ protect } = require('../middleware/authMiddleware'));
 } catch (error) {
-  console.warn('[YogiDesk Auth] Optional auth middleware failed to load. /check-session is disabled until auth dependencies are restored.');
+  logOptionalAuthWarning('[YogiDesk Auth] Optional auth middleware failed to load. /check-session is disabled until auth dependencies are restored.');
 }
 
 // 🛠️ DEVELOPER TIP: Abhi ke liye Rate Limiters ko hata dete hain 
@@ -102,13 +105,15 @@ router.get('/google/callback',
         try {
             // ✅ JWT_SECRET agar .env mein na mile toh bypass secret use karein
             const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
+            const issuedAt = Math.floor(Date.now() / 1000) - 60;
             
             const token = jwt.sign(
                 { 
                     id: req.user._id, 
                     email: req.user.email,
                     role: req.user.role || 'doctor',
-                    name: req.user.name
+                    name: req.user.name,
+                    iat: issuedAt
                 },
                 secret,
                 { expiresIn: '30d' }

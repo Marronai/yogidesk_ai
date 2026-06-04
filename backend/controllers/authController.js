@@ -1,14 +1,17 @@
 let User = null;
 let jwt = null;
+const logOptionalAuthWarning = (message) => {
+  if (process.env.AUTH_OPTIONAL_WARNINGS === 'true') console.warn(message);
+};
 try {
   User = require('../models/User');
 } catch (error) {
-  console.warn('[YogiDesk Auth] Optional Mongo User model is missing. Mongo-backed auth routes are disabled until backend/models/User.js is restored.');
+  logOptionalAuthWarning('[YogiDesk Auth] Optional Mongo User model is missing. Mongo-backed auth routes are disabled until backend/models/User.js is restored.');
 }
 try {
   jwt = require('jsonwebtoken');
 } catch (error) {
-  console.warn('[YogiDesk Auth] jsonwebtoken package is missing. JWT issuing routes are disabled until jsonwebtoken is installed.');
+  logOptionalAuthWarning('[YogiDesk Auth] jsonwebtoken package is missing. JWT issuing routes are disabled until jsonwebtoken is installed.');
 }
 const crypto = require('crypto');
 const axios = require('axios');
@@ -17,7 +20,7 @@ let geoip = null;
 try {
   geoip = require('geoip-lite');
 } catch (error) {
-  console.warn('[YogiDesk Auth] Optional geoip-lite package is missing. Login location enrichment is disabled.');
+  logOptionalAuthWarning('[YogiDesk Auth] Optional geoip-lite package is missing. Login location enrichment is disabled.');
 }
 
 const { sendDirectBrandMail } = require('../services/mailService');
@@ -83,15 +86,18 @@ const requireMongoUserModel = (res) => {
 const generateToken = (userOrId) => {
   if (!jwt?.sign) throw new Error('JWT service unavailable. Install jsonwebtoken.');
   const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
+  const issuedAt = Math.floor(Date.now() / 1000) - 60;
   const payload = typeof userOrId === 'object'
     ? {
         id: userOrId._id,
         email: userOrId.email,
         role: userOrId.role,
-        name: userOrId.name
+        name: userOrId.name,
+        iat: issuedAt
       }
     : {
-        id: userOrId
+        id: userOrId,
+        iat: issuedAt
       };
   return jwt.sign(payload, secret, { expiresIn: '30d' });
 };
