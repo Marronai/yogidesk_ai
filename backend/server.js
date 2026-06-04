@@ -18,6 +18,13 @@ const {
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 const { getTemplateStatusAggregation, getMessageSentHistory, getDashboardMetrics } = require('./controllers/analyticsController');
+const {
+    register: registerHybridDoctor,
+    verifySignupOTP: verifyHybridSignupOtp,
+    requestEmailOTP: requestHybridEmailOtp,
+    verifyEmailOTP: verifyHybridEmailOtp,
+    verifyPhoneOTP: verifyHybridPhoneOtp
+} = require('./controllers/authController');
 const adminControlRoutes = require('./routes/adminControlRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
@@ -538,66 +545,12 @@ app.post('/api/auth/dispatch-login-alert', async (req, res) => {
     }
 });
 
-app.post('/api/auth/request-email-otp', async (req, res) => {
-    try {
-        clearExpiredEmailOtps();
-        const email = normalizeEmail(req.body?.email);
-        const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
-        const name = String(req.body?.name || 'Doctor').trim() || 'Doctor';
-
-        if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
-
-        const otp = generateEmailOtp();
-        emailOtpStore.set(buildOtpKey(email, purpose), {
-            otp,
-            expiresAt: Date.now() + 10 * 60 * 1000,
-            attempts: 0
-        });
-
-        const sent = await sendOTP(email, name, otp);
-        if (!sent) return res.status(500).json({ success: false, msg: 'Failed to send OTP. Please try again.' });
-
-        return res.status(200).json({ success: true, msg: 'OTP sent to your email.' });
-    } catch (error) {
-        console.error('Email OTP request error:', error.message);
-        return res.status(500).json({ success: false, msg: 'Unable to send OTP.' });
-    }
-});
-
-app.post('/api/auth/verify-email-otp', async (req, res) => {
-    try {
-        clearExpiredEmailOtps();
-        const email = normalizeEmail(req.body?.email);
-        const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
-        const otp = String(req.body?.otp || '').trim();
-
-        if (!email || !otp) return res.status(400).json({ success: false, msg: 'Email and OTP are required' });
-
-        const key = buildOtpKey(email, purpose);
-        const record = emailOtpStore.get(key);
-        if (!record || record.expiresAt <= Date.now()) {
-            emailOtpStore.delete(key);
-            return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
-        }
-
-        record.attempts += 1;
-        if (record.attempts > 5) {
-            emailOtpStore.delete(key);
-            return res.status(429).json({ success: false, msg: 'Too many OTP attempts. Please request a new code.' });
-        }
-
-        if (record.otp !== otp) {
-            emailOtpStore.set(key, record);
-            return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
-        }
-
-        emailOtpStore.delete(key);
-        return res.status(200).json({ success: true, msg: 'OTP verified.' });
-    } catch (error) {
-        console.error('Email OTP verification error:', error.message);
-        return res.status(500).json({ success: false, msg: 'Unable to verify OTP.' });
-    }
-});
+app.post('/api/auth/signup', registerHybridDoctor);
+app.post('/api/auth/register', registerHybridDoctor);
+app.post('/api/auth/verify-signup-otp', verifyHybridSignupOtp);
+app.post('/api/auth/request-email-otp', requestHybridEmailOtp);
+app.post('/api/auth/verify-email-otp', verifyHybridEmailOtp);
+app.post('/api/auth/verify-phone-otp', verifyHybridPhoneOtp);
 
 app.post('/api/team/dispatch-invite-email', async (req, res) => {
     try {

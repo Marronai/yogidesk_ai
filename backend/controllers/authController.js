@@ -77,8 +77,21 @@ const generateOTP = () => {
 };
 
 const emailOtpStore = new Map();
+const phoneOtpStore = new Map();
+const signupVerificationStore = new Map();
+const MONTHLY_SMS_OTP_CAP = Number(process.env.AUTH_SMS_OTP_MONTHLY_CAP || 40);
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const buildEmailOtpKey = (email, purpose = 'auth') => `${normalizeEmail(email)}:${String(purpose || 'auth').trim().toLowerCase()}`;
+const normalizePurpose = (purpose = 'auth') => String(purpose || 'auth').trim().toLowerCase();
+const normalizePhoneDigits = (phone) => String(phone || '').replace(/\D/g, '');
+const normalizePhoneE164 = (phone) => {
+  const digits = normalizePhoneDigits(phone);
+  if (!digits) return '';
+  if (String(phone || '').trim().startsWith('+')) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
+};
+const buildPhoneOtpKey = (phone, purpose = 'auth') => `${normalizePhoneE164(phone)}:${normalizePurpose(purpose)}`;
 
 const clearExpiredEmailOtps = () => {
   const now = Date.now();
@@ -87,64 +100,313 @@ const clearExpiredEmailOtps = () => {
   }
 };
 
+const isMissingColumnError = (error) => {
+  const message = String(error?.message || error?.details || '').toLowerCase();
+  return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
+};
+
+const getMissingSchemaColumn = (error) => {
+  const message = String(error?.message || error?.details || '');
+  return message.match(/'([^']+)'\s+column/i)?.[1] || message.match(/column\s+"([^"]+)"/i)?.[1] || '';
+};
+
+const updateDoctorProfileSafely = async ({ userId, payload }) => {
+  if (!supabase?.from || !userId || !payload || Object.keys(payload).length === 0) return false;
+  let nextPayload = Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+  const removedColumns = new Set();
+
+  while (Object.keys(nextPayload).length > 0) {
+    const { error } = await supabase.from('doctor_profiles').update(nextPayload).eq('id', userId);
+    if (!error) return true;
+
+    const missingColumn = getMissingSchemaColumn(error);
+    if (isMissingColumnError(error) && missingColumn && Object.prototype.hasOwnProperty.call(nextPayload, missingColumn) && !removedColumns.has(missingColumn)) {
+      removedColumns.add(missingColumn);
+      const { [missingColumn]: _removed, ...strippedPayload } = nextPayload;
+      nextPayload = strippedPayload;
+      continue;
+    }
+
+    console.error('[HybridAuth] doctor_profiles update failed:', error.message || error);
+    return false;
+  }
+
+  return false;
+};
+
+const clearExpiredPhoneOtps = () => {
+  const now = Date.now();
+  for (const [key, record] of phoneOtpStore.entries()) {
+    if (!record?.expiresAt || record.expiresAt <= now) phoneOtpStore.delete(key);
+  }
+  for (const [key, record] of signupVerificationStore.entries()) {
+    if (!record?.expiresAt || record.expiresAt <= now) signupVerificationStore.delete(key);
+  }
+};
+
+const storeEmailOtp = async ({ email, name, purpose }) => {
+  const safeEmail = normalizeEmail(email);
+  const safePurpose = normalizePurpose(purpose);
+  const otp = generateOTP();
+
+  emailOtpStore.set(buildEmailOtpKey(safeEmail, safePurpose), {
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    attempts: 0
+  });
+
+  const sent = await sendOTP(safeEmail, name || 'Doctor', otp);
+  if (!sent) throw new Error('Failed to send email OTP.');
+  return { channel: 'email', target: 'email' };
+};
+
+const verifyStoredEmailOtp = ({ email, purpose, otp }) => {
+  clearExpiredEmailOtps();
+  const safeEmail = normalizeEmail(email);
+  const key = buildEmailOtpKey(safeEmail, purpose);
+  const record = emailOtpStore.get(key);
+  if (!record || record.expiresAt <= Date.now()) {
+    emailOtpStore.delete(key);
+    return { ok: false, status: 400, message: 'Invalid or expired OTP.' };
+  }
+
+  record.attempts += 1;
+  if (record.attempts > 5) {
+    emailOtpStore.delete(key);
+    return { ok: false, status: 429, message: 'Too many OTP attempts. Please request a new code.' };
+  }
+
+  if (record.otp !== String(otp || '').trim()) {
+    emailOtpStore.set(key, record);
+    return { ok: false, status: 400, message: 'Invalid or expired OTP.' };
+  }
+
+  emailOtpStore.delete(key);
+  return { ok: true };
+};
+
+const dispatchFirebasePhoneOtp = async ({ phone, purpose, email, recaptchaToken }) => {
+  clearExpiredPhoneOtps();
+  const safePhone = normalizePhoneE164(phone);
+  const safePurpose = normalizePurpose(purpose);
+  if (!safePhone) throw new Error('Phone number is required for SMS OTP.');
+
+  console.log('[HybridAuth] Dispatching Firebase Phone OTP request.', {
+    phone: safePhone.replace(/\d(?=\d{4})/g, '*'),
+    purpose: safePurpose,
+    hasBridge: Boolean(process.env.FIREBASE_PHONE_AUTH_WEBHOOK_URL),
+    hasFirebaseApiKey: Boolean(process.env.FIREBASE_WEB_API_KEY),
+    hasRecaptchaToken: Boolean(recaptchaToken)
+  });
+
+  if (process.env.FIREBASE_PHONE_AUTH_WEBHOOK_URL) {
+    const { data } = await axios.post(process.env.FIREBASE_PHONE_AUTH_WEBHOOK_URL, {
+      phoneNumber: safePhone,
+      purpose: safePurpose,
+      email
+    }, {
+      timeout: 12000,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.FIREBASE_PHONE_AUTH_WEBHOOK_SECRET
+          ? { Authorization: `Bearer ${process.env.FIREBASE_PHONE_AUTH_WEBHOOK_SECRET}` }
+          : {})
+      }
+    });
+    return { channel: 'sms', target: 'phone', provider: 'firebase', verificationId: data?.verificationId || data?.sessionInfo || null };
+  }
+
+  if (process.env.FIREBASE_WEB_API_KEY && recaptchaToken) {
+    const { data } = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:sendVerificationCode?key=${process.env.FIREBASE_WEB_API_KEY}`,
+      { phoneNumber: safePhone, recaptchaToken },
+      { timeout: 12000 }
+    );
+    return { channel: 'sms', target: 'phone', provider: 'firebase', verificationId: data?.sessionInfo || null };
+  }
+
+  const otp = generateOTP();
+  phoneOtpStore.set(buildPhoneOtpKey(safePhone, safePurpose), {
+    otp,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    attempts: 0
+  });
+  console.warn('[HybridAuth] Firebase phone dispatch bridge is not configured. Stored local fallback phone OTP for development.', {
+    phone: safePhone.replace(/\d(?=\d{4})/g, '*'),
+    purpose: safePurpose
+  });
+  return { channel: 'sms', target: 'phone', provider: 'local_fallback', devOtp: process.env.NODE_ENV === 'production' ? undefined : otp };
+};
+
+const verifyStoredPhoneOtp = ({ phone, purpose, otp, firebaseIdToken }) => {
+  clearExpiredPhoneOtps();
+  if (firebaseIdToken) return { ok: true, provider: 'firebase_id_token' };
+
+  const safePhone = normalizePhoneE164(phone);
+  const key = buildPhoneOtpKey(safePhone, purpose);
+  const record = phoneOtpStore.get(key);
+  if (!record || record.expiresAt <= Date.now()) {
+    phoneOtpStore.delete(key);
+    return { ok: false, status: 400, message: 'Invalid or expired phone OTP.' };
+  }
+
+  record.attempts += 1;
+  if (record.attempts > 5) {
+    phoneOtpStore.delete(key);
+    return { ok: false, status: 429, message: 'Too many phone OTP attempts. Please request a new code.' };
+  }
+
+  if (record.otp !== String(otp || '').trim()) {
+    phoneOtpStore.set(key, record);
+    return { ok: false, status: 400, message: 'Invalid or expired phone OTP.' };
+  }
+
+  phoneOtpStore.delete(key);
+  return { ok: true };
+};
+
+const readDoctorProfileByIdentifier = async (identifier) => {
+  const db = supabase;
+  const raw = String(identifier || '').trim();
+  if (!db?.from || !raw) return null;
+
+  const email = normalizeEmail(raw);
+  const phoneDigits = normalizePhoneDigits(raw);
+  const phoneE164 = normalizePhoneE164(raw);
+  const filters = [];
+  if (email.includes('@')) filters.push(`email.eq.${email}`);
+  if (phoneDigits) {
+    filters.push(`phone.eq.${phoneDigits}`, `phone_number.eq.${phoneDigits}`, `phone_number.eq.${phoneE164}`, `mobile.eq.${phoneDigits}`);
+  }
+
+  if (!filters.length) return null;
+  const { data, error } = await db.from('doctor_profiles').select('*').or(filters.join(',')).limit(1).maybeSingle();
+  if (error) {
+    console.error('[HybridAuth] Supabase profile lookup failed:', error.message || error);
+    return null;
+  }
+  return data || null;
+};
+
+const incrementMonthlyOtpCount = async (profile) => {
+  if (!supabase?.from || !profile?.id) return;
+  const nextCount = Number(profile.otp_count_this_month || profile.auth_count || 0) + 1;
+  await updateDoctorProfileSafely({
+    userId: profile.id,
+    payload: {
+      otp_count_this_month: nextCount,
+      auth_count: nextCount,
+      last_otp_requested_at: new Date().toISOString()
+    }
+  });
+};
+
 exports.requestEmailOTP = async (req, res) => {
   try {
-    clearExpiredEmailOtps();
-    const email = normalizeEmail(req.body?.email);
-    const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
-    const name = String(req.body?.name || 'Doctor').trim() || 'Doctor';
-
-    if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
-
-    const otp = generateOTP();
-    emailOtpStore.set(buildEmailOtpKey(email, purpose), {
-      otp,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-      attempts: 0
+    console.log('[HybridAuth] /request-email-otp invoked.', {
+      hasIdentifier: Boolean(req.body?.identifier || req.body?.email || req.body?.phone),
+      purpose: req.body?.purpose || 'auth'
     });
+    clearExpiredEmailOtps();
+    clearExpiredPhoneOtps();
 
-    const sent = await sendOTP(email, name, otp);
-    if (!sent) return res.status(500).json({ success: false, msg: 'Failed to send OTP. Please try again.' });
+    const identifier = req.body?.identifier || req.body?.email || req.body?.phone;
+    const purpose = normalizePurpose(req.body?.purpose || 'login');
+    const profile = await readDoctorProfileByIdentifier(identifier);
 
-    return res.status(200).json({ success: true, msg: 'OTP sent to your email.' });
+    if (!profile) {
+      const email = normalizeEmail(req.body?.email || identifier);
+      if (!email) return res.status(404).json({ success: false, msg: 'Doctor profile not found.' });
+      console.warn('[HybridAuth] Profile not found; routing OTP to provided email as compatibility fallback.', { email });
+      const result = await storeEmailOtp({ email, name: req.body?.name || 'Doctor', purpose });
+      return res.status(200).json({ success: true, ...result, msg: 'OTP sent to your email.' });
+    }
+
+    const monthlyCount = Number(profile.otp_count_this_month || profile.auth_count || 0);
+    const profileEmail = normalizeEmail(profile.email || req.body?.email);
+    const profilePhone = profile.phone_number || profile.phone || profile.mobile || req.body?.phone;
+
+    if (monthlyCount < MONTHLY_SMS_OTP_CAP && profilePhone) {
+      try {
+        const result = await dispatchFirebasePhoneOtp({
+          phone: profilePhone,
+          purpose,
+          email: profileEmail,
+          recaptchaToken: req.body?.recaptchaToken
+        });
+        await incrementMonthlyOtpCount(profile);
+        return res.status(200).json({
+          success: true,
+          ...result,
+          count: monthlyCount + 1,
+          cap: MONTHLY_SMS_OTP_CAP,
+          msg: 'OTP sent to phone number.'
+        });
+      } catch (smsError) {
+        console.error('[HybridAuth] Firebase phone OTP failed; routing to email fallback.', smsError.message || smsError);
+      }
+    }
+
+    if (!profileEmail) return res.status(400).json({ success: false, msg: 'Registered email is required for OTP fallback.' });
+    const result = await storeEmailOtp({ email: profileEmail, name: profile.name || 'Doctor', purpose });
+    return res.status(200).json({
+      success: true,
+      ...result,
+      count: monthlyCount,
+      cap: MONTHLY_SMS_OTP_CAP,
+      msg: monthlyCount >= MONTHLY_SMS_OTP_CAP
+        ? 'Monthly SMS OTP cap reached. OTP sent to email.'
+        : 'OTP sent to email.'
+    });
   } catch (error) {
-    console.error('Email OTP request error:', error.message);
+    console.error('[HybridAuth] Email/SMS OTP request error:', error.message || error);
     return res.status(500).json({ success: false, msg: 'Unable to send OTP.' });
   }
 };
 
 exports.verifyEmailOTP = async (req, res) => {
   try {
-    clearExpiredEmailOtps();
-    const email = normalizeEmail(req.body?.email);
-    const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
-    const otp = String(req.body?.otp || '').trim();
+    const email = normalizeEmail(req.body?.email || req.body?.identifier);
+    const phone = normalizePhoneE164(req.body?.phone || req.body?.identifier);
+    const purpose = normalizePurpose(req.body?.purpose || 'login');
+    const otp = String(req.body?.otp || req.body?.emailOtp || req.body?.phoneOtp || '').trim();
+    const channel = String(req.body?.channel || '').trim().toLowerCase();
+    const firebaseIdToken = String(req.body?.firebaseIdToken || req.body?.firebase_id_token || '').trim();
+
+    if ((channel === 'sms' || firebaseIdToken || (phone && !email.includes('@'))) && (otp || firebaseIdToken)) {
+      const verification = verifyStoredPhoneOtp({ phone, purpose, otp, firebaseIdToken });
+      if (!verification.ok) return res.status(verification.status).json({ success: false, msg: verification.message });
+      return res.status(200).json({ success: true, channel: 'sms', msg: 'Phone OTP verified.' });
+    }
 
     if (!email || !otp) return res.status(400).json({ success: false, msg: 'Email and OTP are required' });
 
-    const key = buildEmailOtpKey(email, purpose);
-    const record = emailOtpStore.get(key);
-    if (!record || record.expiresAt <= Date.now()) {
-      emailOtpStore.delete(key);
-      return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
-    }
-
-    record.attempts += 1;
-    if (record.attempts > 5) {
-      emailOtpStore.delete(key);
-      return res.status(429).json({ success: false, msg: 'Too many OTP attempts. Please request a new code.' });
-    }
-
-    if (record.otp !== otp) {
-      emailOtpStore.set(key, record);
-      return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
-    }
-
-    emailOtpStore.delete(key);
+    const verification = verifyStoredEmailOtp({ email, purpose, otp });
+    if (!verification.ok) return res.status(verification.status).json({ success: false, msg: verification.message });
     return res.status(200).json({ success: true, msg: 'OTP verified.' });
   } catch (error) {
-    console.error('Email OTP verification error:', error.message);
+    console.error('[HybridAuth] Email OTP verification error:', error.message || error);
     return res.status(500).json({ success: false, msg: 'Unable to verify OTP.' });
+  }
+};
+
+exports.verifyPhoneOTP = async (req, res) => {
+  try {
+    const phone = normalizePhoneE164(req.body?.phone || req.body?.identifier);
+    const purpose = normalizePurpose(req.body?.purpose || 'login');
+    const otp = String(req.body?.otp || req.body?.phoneOtp || '').trim();
+    const firebaseIdToken = String(req.body?.firebaseIdToken || req.body?.firebase_id_token || '').trim();
+
+    if (!phone || (!otp && !firebaseIdToken)) {
+      return res.status(400).json({ success: false, msg: 'Phone and OTP/Firebase token are required' });
+    }
+
+    const verification = verifyStoredPhoneOtp({ phone, purpose, otp, firebaseIdToken });
+    if (!verification.ok) return res.status(verification.status).json({ success: false, msg: verification.message });
+    return res.status(200).json({ success: true, channel: 'sms', msg: 'Phone OTP verified.' });
+  } catch (error) {
+    console.error('[HybridAuth] Phone OTP verification error:', error.message || error);
+    return res.status(500).json({ success: false, msg: 'Unable to verify phone OTP.' });
   }
 };
 
@@ -169,31 +431,37 @@ const logDoctorActivity = async (userId) => {
   }
 };
 
-// 1️⃣ REGISTER: Send OTP to email, set isVerified: false
+// 1️⃣ REGISTER: Send OTP to both email and phone, keep account pending until both verify
 exports.register = async (req, res) => {
   try {
     const { name, email, password, phone, businessName, businessType, businessCategory } = req.body;
+    const safeEmail = normalizeEmail(email);
+    const safePhone = normalizePhoneE164(phone);
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ msg: "Please provide name, email, and password" });
+    console.log('[HybridAuth] Signup requested.', {
+      email: safeEmail,
+      hasPhone: Boolean(safePhone),
+      hasRecaptchaToken: Boolean(req.body?.recaptchaToken)
+    });
+
+    if (!name || !safeEmail || !password || !safePhone) {
+      return res.status(400).json({ msg: "Please provide name, email, password, and phone" });
     }
 
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ email: safeEmail });
 
     if (user) {
       return res.status(400).json({ msg: 'User already exists' });
     }
 
-    // Generate OTP
-    const otp = generateOTP();
+    const emailOtp = generateOTP();
     const otpExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Create new user
     user = await User.create({
       name,
-      email,
+      email: safeEmail,
       password,
-      phone: phone || '',
+      phone: safePhone,
       businessName: businessName || `${name}'s Clinic`,
       businessType: businessType || 'Clinic',
       businessCategory: businessCategory || 'Clinic',
@@ -202,38 +470,86 @@ exports.register = async (req, res) => {
       subscriptionStatus: 'wallet_active',
       wallet: { balance: 50, is_first_recharge: true },
       isVerified: false,
-      otp,
+      otp: emailOtp,
       otpExpires
       // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
     await ensurePremiumTrialProfile(supabase, {
       userId: String(user._id),
-      email,
+      email: safeEmail,
       name,
       businessName: businessName || `${name}'s Clinic`,
       businessCategory: businessCategory || businessType || 'Clinic',
-      phone: phone || ''
+      phone: safePhone
     }).then(({ error }) => {
       if (error) console.error('Premium trial profile seed failed:', error.message || error);
     });
 
+    await updateDoctorProfileSafely({
+      userId: String(user._id),
+      payload: {
+        account_status: 'PENDING_VERIFICATION',
+        status: 'PENDING_VERIFICATION',
+        email_otp_verified: false,
+        phone_otp_verified: false,
+        phone_number: safePhone,
+        phone: normalizePhoneDigits(safePhone),
+        updated_at: new Date().toISOString()
+      }
+    });
+
     const welcomeHTML = getWelcomeEmailHTML(name);
 
-    sendOTP(user.email, user.name, otp)
-      .catch(err => console.error("Background OTP Mailer Error Trace:", err.message));
+    const [emailResult, phoneResult] = await Promise.allSettled([
+      storeEmailOtp({ email: safeEmail, name, purpose: 'signup' }),
+      dispatchFirebasePhoneOtp({
+        phone: safePhone,
+        purpose: 'signup',
+        email: safeEmail,
+        recaptchaToken: req.body?.recaptchaToken
+      })
+    ]);
+
+    if (emailResult.status === 'rejected' || phoneResult.status === 'rejected') {
+      console.error('[HybridAuth] Signup OTP dispatch failure.', {
+        emailError: emailResult.reason?.message || null,
+        phoneError: phoneResult.reason?.message || null
+      });
+      return res.status(500).json({
+        success: false,
+        msg: 'Unable to send both signup OTPs. Please try again.'
+      });
+    }
+
+    signupVerificationStore.set(safeEmail, {
+      userId: String(user._id),
+      phone: safePhone,
+      emailVerified: false,
+      phoneVerified: false,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
 
     res.once('finish', () => {
       setImmediate(() => {
-        void sendDirectBrandMail(email, "Welcome to Yogi Desk AI - Your Premium Growth Trial is Active", welcomeHTML, 'onboarding');
+        void sendDirectBrandMail(safeEmail, "Welcome to Yogi Desk AI - Your Premium Growth Trial is Active", welcomeHTML, 'onboarding');
       });
     });
 
     res.status(200).json({
       success: true,
-      msg: 'User registered. Please check your email for OTP verification.'
+      step: "verify_both",
+      message: "OTP sent to both email and phone number",
+      msg: "OTP sent to both email and phone number",
+      email: safeEmail,
+      phone: safePhone,
+      channels: {
+        email: emailResult.value,
+        phone: phoneResult.value
+      }
     });
   } catch (error) {
+    console.error('[HybridAuth] Signup route failed:', error.message || error);
     res.status(500).json({ msg: 'Server Error', error: error.message });
   }
 };
@@ -330,10 +646,21 @@ exports.verifyOTP = async (req, res) => {
 // 3.5️⃣ VERIFY SIGNUP OTP: Verify OTP for signup and issue JWT
 exports.verifySignupOTP = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const emailOtp = String(req.body?.emailOtp || req.body?.email_otp || req.body?.otp || '').trim();
+    const phoneOtp = String(req.body?.phoneOtp || req.body?.phone_otp || req.body?.smsOtp || '').trim();
+    const firebaseIdToken = String(req.body?.firebaseIdToken || req.body?.firebase_id_token || '').trim();
+    const phone = normalizePhoneE164(req.body?.phone);
 
-    if (!email || !otp) {
-      return res.status(400).json({ msg: 'Please provide email and OTP' });
+    console.log('[HybridAuth] Signup verification requested.', {
+      email,
+      hasEmailOtp: Boolean(emailOtp),
+      hasPhoneOtp: Boolean(phoneOtp),
+      hasFirebaseIdToken: Boolean(firebaseIdToken)
+    });
+
+    if (!email || !emailOtp || (!phoneOtp && !firebaseIdToken)) {
+      return res.status(400).json({ msg: 'Please provide email OTP and phone OTP/Firebase token' });
     }
 
     const user = await User.findOne({ email }).select('+otp +otpExpires');
@@ -342,9 +669,19 @@ exports.verifySignupOTP = async (req, res) => {
       return res.status(400).json({ msg: 'User not found' });
     }
 
-    if (!user.otp || user.otp !== otp || user.otpExpires < Date.now()) {
-      return res.status(400).json({ msg: 'Invalid or expired OTP' });
-    }
+    const emailVerification = verifyStoredEmailOtp({ email, purpose: 'signup', otp: emailOtp });
+    const legacyEmailOk = user.otp && user.otp === emailOtp && user.otpExpires >= Date.now();
+    if (!emailVerification.ok && !legacyEmailOk) return res.status(emailVerification.status || 400).json({ msg: emailVerification.message || 'Invalid or expired email OTP' });
+
+    const signupState = signupVerificationStore.get(email);
+    const signupPhone = phone || signupState?.phone || user.phone;
+    const phoneVerification = verifyStoredPhoneOtp({
+      phone: signupPhone,
+      purpose: 'signup',
+      otp: phoneOtp,
+      firebaseIdToken
+    });
+    if (!phoneVerification.ok) return res.status(phoneVerification.status || 400).json({ msg: phoneVerification.message || 'Invalid or expired phone OTP' });
 
     // Clear OTP and verify user
     user.otp = undefined;
@@ -353,6 +690,20 @@ exports.verifySignupOTP = async (req, res) => {
     // user.currentSessionId = crypto.randomBytes(16).toString('hex');
     await user.save();
     logDoctorActivity(user._id);
+    signupVerificationStore.delete(email);
+
+    await updateDoctorProfileSafely({
+      userId: String(user._id),
+      payload: {
+        account_status: 'ACTIVE',
+        status: 'ACTIVE',
+        subscription_status: 'ACTIVE',
+        email_otp_verified: true,
+        phone_otp_verified: true,
+        last_verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    });
 
     const token = generateToken(user);
     const userPayload = buildUserPayload(user);

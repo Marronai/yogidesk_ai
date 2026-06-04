@@ -11,6 +11,7 @@ const {
   verifySignupOTP,
   requestEmailOTP,
   verifyEmailOTP,
+  verifyPhoneOTP,
   googleLogin,
   sendWhatsAppOTP,
   verifyWhatsAppOTP
@@ -47,6 +48,7 @@ router.post('/verify-login', loginLimiter, verifyOTP);
 router.post('/verify-signup-otp', loginLimiter, verifySignupOTP);
 router.post('/request-email-otp', loginLimiter, requestEmailOTP);
 router.post('/verify-email-otp', loginLimiter, verifyEmailOTP);
+router.post('/verify-phone-otp', loginLimiter, verifyPhoneOTP);
 
 // --- WHATSAPP OTP AUTH ROUTES ---
 router.post('/send-whatsapp-otp', loginLimiter, sendWhatsAppOTP);
