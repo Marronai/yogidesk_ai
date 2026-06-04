@@ -26,6 +26,7 @@ const {
     verifyPhoneOTP: verifyHybridPhoneOtp
 } = require('./controllers/authController');
 const adminControlRoutes = require('./routes/adminControlRoutes');
+const authRoutes = require('./routes/authRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
@@ -92,6 +93,16 @@ app.use(express.json({
     }
 }));
 app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+    if (req.url.includes('request-email-otp')) {
+        console.log("[YogiDesk Critical Debug] Caught target route! Method:", req.method, "URL:", req.url);
+    }
+    next();
+});
+
+app.use('/api/auth', authRoutes);
+
 app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });

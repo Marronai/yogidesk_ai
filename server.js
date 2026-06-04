@@ -5,6 +5,7 @@ const app = express();
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, 'backend', '.env') });
 const paymentRoutes = require('./backend/routes/paymentRoutes');
+const authRoutes = require('./backend/routes/authRoutes');
 
 // Port automatic Hostinger decide karega, local par 5000
 const PORT = process.env.PORT || 5000;
@@ -21,6 +22,16 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+    if (req.url.includes('request-email-otp')) {
+        console.log("[YogiDesk Critical Debug] Caught target route! Method:", req.method, "URL:", req.url);
+    }
+    next();
+});
+
+app.use('/api/auth', authRoutes);
+
 app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });
