@@ -3434,7 +3434,7 @@ app.delete('/api/templates/:id', async (req, res) => {
  * REFACTORED: Dedicated route for Meta Connection Configuration.
  * Now strictly uses session-level profile updates via the controller.
  */
-app.get('/api/settings/meta-connection', async (req, res) => {
+const handleMetaConnectionFetch = async (req, res) => {
     try {
         const sessionUser = await getSupabaseSessionUser(req);
         if (!sessionUser?.id) {
@@ -3459,14 +3459,20 @@ app.get('/api/settings/meta-connection', async (req, res) => {
         console.error('Meta settings fetch failure:', error.message || error);
         return res.status(500).json({ success: false, message: "Unable to fetch Meta configuration." });
     }
-});
+};
 
-app.post('/api/settings/meta-connection', async (req, res, next) => {
+const attachSessionUserForMetaConnection = async (req, res, next) => {
     const sessionUser = await getSupabaseSessionUser(req);
     if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized" });
     req.user = sessionUser;
     next();
-}, saveMetaConnection);
+};
+
+app.get('/api/settings/meta-connection', handleMetaConnectionFetch);
+app.get('/settings/meta-connection', handleMetaConnectionFetch);
+
+app.post('/api/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
+app.post('/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
 
 app.post('/api/payments/meta-connection', async (req, res, next) => {
     const sessionUser = await getSupabaseSessionUser(req);
