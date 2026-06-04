@@ -1,8 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const passport = require('passport');
-const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+
+let passport = null;
+let jwt = null;
+try {
+  passport = require('passport');
+} catch (error) {
+  console.warn('[YogiDesk Auth] Optional passport package is not installed. Google OAuth routes are disabled until passport is installed.');
+}
+try {
+  jwt = require('jsonwebtoken');
+} catch (error) {
+  console.warn('[YogiDesk Auth] jsonwebtoken package is not installed. Google OAuth callback JWT creation is disabled until jsonwebtoken is installed.');
+}
 
 const { 
   register, 
@@ -33,7 +44,15 @@ const signupLimiter = rateLimit({
   message: { msg: 'Too many signup attempts. Please try again after 15 minutes.' }
 });
 
-const { protect } = require('../middleware/authMiddleware');
+let protect = (req, res) => res.status(503).json({
+  success: false,
+  msg: 'Session middleware is unavailable because auth dependencies are missing.'
+});
+try {
+  ({ protect } = require('../middleware/authMiddleware'));
+} catch (error) {
+  console.warn('[YogiDesk Auth] Optional auth middleware failed to load. /check-session is disabled until auth dependencies are restored.');
+}
 
 // 🛠️ DEVELOPER TIP: Abhi ke liye Rate Limiters ko hata dete hain 
 // kyunki testing mein ye bar-bar block kar dete hain (405/429 error)
@@ -57,12 +76,25 @@ router.post('/verify-whatsapp-otp', loginLimiter, verifyWhatsAppOTP);
 // --- GOOGLE AUTH ROUTES ---
 router.post('/google', googleLogin);
 
+const requirePassport = (req, res, next) => {
+  if (!passport?.authenticate || !jwt?.sign) {
+    return res.status(503).json({
+      success: false,
+      msg: 'Google OAuth is unavailable because passport/jsonwebtoken packages are not installed on this server.'
+    });
+  }
+  return next();
+};
+
+const runGooglePassport = (options) => (req, res, next) => passport.authenticate('google', options)(req, res, next);
+
 // 1. Google par redirect
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get('/google', requirePassport, runGooglePassport({ scope: ['profile', 'email'] }));
 
 // 2. Google callback with JWT Token ✅
 router.get('/google/callback', 
-    passport.authenticate('google', { 
+    requirePassport,
+    runGooglePassport({ 
         failureRedirect: 'https://yogidesk-ai.com/login?error=google_auth_failed',
         session: false 
     }),

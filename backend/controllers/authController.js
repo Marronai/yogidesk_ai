@@ -1,9 +1,24 @@
-const User = require('../models/User');
-const jwt = require('jsonwebtoken');
+let User = null;
+let jwt = null;
+try {
+  User = require('../models/User');
+} catch (error) {
+  console.warn('[YogiDesk Auth] Optional Mongo User model is missing. Mongo-backed auth routes are disabled until backend/models/User.js is restored.');
+}
+try {
+  jwt = require('jsonwebtoken');
+} catch (error) {
+  console.warn('[YogiDesk Auth] jsonwebtoken package is missing. JWT issuing routes are disabled until jsonwebtoken is installed.');
+}
 const crypto = require('crypto');
 const axios = require('axios');
-const geoip = require('geoip-lite');
 const { supabase } = require('../config/supabase');
+let geoip = null;
+try {
+  geoip = require('geoip-lite');
+} catch (error) {
+  console.warn('[YogiDesk Auth] Optional geoip-lite package is missing. Login location enrichment is disabled.');
+}
 
 const { sendDirectBrandMail } = require('../services/mailService');
 const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
@@ -55,8 +70,18 @@ const buildUserPayload = (user) => ({
   wallet: user.wallet || { balance: 50, is_first_recharge: true }
 });
 
+const requireMongoUserModel = (res) => {
+  if (User) return true;
+  res.status(503).json({
+    success: false,
+    msg: 'Mongo-backed auth is unavailable because backend/models/User.js is missing.'
+  });
+  return false;
+};
+
 // 🛠️ HELPER: Token Generator (Fallback safe)
 const generateToken = (userOrId) => {
+  if (!jwt?.sign) throw new Error('JWT service unavailable. Install jsonwebtoken.');
   const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
   const payload = typeof userOrId === 'object'
     ? {
@@ -434,6 +459,7 @@ const logDoctorActivity = async (userId) => {
 // 1️⃣ REGISTER: Send OTP to both email and phone, keep account pending until both verify
 exports.register = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const { name, email, password, phone, businessName, businessType, businessCategory } = req.body;
     const safeEmail = normalizeEmail(email);
     const safePhone = normalizePhoneE164(phone);
@@ -557,6 +583,7 @@ exports.register = async (req, res) => {
 // 2️⃣ LOGIN STEP 1: Verify email/password, send OTP
 exports.loginStep1 = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -600,6 +627,7 @@ exports.loginStep1 = async (req, res) => {
 // 3️⃣ VERIFY OTP: Verify OTP and issue JWT
 exports.verifyOTP = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const { email, otp } = req.body;
 
     if (!email || !otp) {
@@ -646,6 +674,7 @@ exports.verifyOTP = async (req, res) => {
 // 3.5️⃣ VERIFY SIGNUP OTP: Verify OTP for signup and issue JWT
 exports.verifySignupOTP = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const email = normalizeEmail(req.body?.email);
     const emailOtp = String(req.body?.emailOtp || req.body?.email_otp || req.body?.otp || '').trim();
     const phoneOtp = String(req.body?.phoneOtp || req.body?.phone_otp || req.body?.smsOtp || '').trim();
@@ -729,6 +758,7 @@ exports.verifySignupOTP = async (req, res) => {
 // 4️⃣ GOOGLE LOGIN: Direct token-based fallback
 exports.googleLogin = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const { access_token, tokenId } = req.body;
     const googleToken = access_token || tokenId;
 
@@ -909,6 +939,7 @@ exports.verifyWhatsAppOTP = async (req, res) => {
 // 9️⃣ INITIALIZE SUPER ADMIN: Hardlocked capacity (Max 2)
 exports.initializeSuperAdmin = async (req, res) => {
   try {
+    if (!requireMongoUserModel(res)) return;
     const { name, email, password, secretKey } = req.body;
 
     // Security secondary check
