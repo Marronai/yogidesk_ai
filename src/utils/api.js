@@ -3,10 +3,32 @@ import { supabase } from '../config/supabaseClient';
 
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
+const PRODUCTION_FRONTEND_HOST = 'yogidesk-ai.com';
+const PRODUCTION_API_URL = 'https://api.yogidesk-ai.com';
 
-const API_URL = stripApiSuffix(
-  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://api.yogidesk-ai.com'
-);
+const resolveApiUrl = () => {
+  const configuredUrl = stripApiSuffix(
+    import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || PRODUCTION_API_URL
+  );
+
+  if (typeof window === 'undefined') return configuredUrl;
+
+  const frontendHost = window.location.hostname.replace(/^www\./i, '');
+  let configuredHost = '';
+  try {
+    configuredHost = new URL(configuredUrl).hostname.replace(/^www\./i, '');
+  } catch {
+    return PRODUCTION_API_URL;
+  }
+
+  if (frontendHost === PRODUCTION_FRONTEND_HOST && configuredHost === PRODUCTION_FRONTEND_HOST) {
+    return PRODUCTION_API_URL;
+  }
+
+  return configuredUrl;
+};
+
+const API_URL = resolveApiUrl();
 const API_BASE_URL = `${API_URL}/api`;
 
 // Create axios instance with default config

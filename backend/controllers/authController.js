@@ -76,6 +76,78 @@ const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+const emailOtpStore = new Map();
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const buildEmailOtpKey = (email, purpose = 'auth') => `${normalizeEmail(email)}:${String(purpose || 'auth').trim().toLowerCase()}`;
+
+const clearExpiredEmailOtps = () => {
+  const now = Date.now();
+  for (const [key, record] of emailOtpStore.entries()) {
+    if (!record?.expiresAt || record.expiresAt <= now) emailOtpStore.delete(key);
+  }
+};
+
+exports.requestEmailOTP = async (req, res) => {
+  try {
+    clearExpiredEmailOtps();
+    const email = normalizeEmail(req.body?.email);
+    const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
+    const name = String(req.body?.name || 'Doctor').trim() || 'Doctor';
+
+    if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
+
+    const otp = generateOTP();
+    emailOtpStore.set(buildEmailOtpKey(email, purpose), {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      attempts: 0
+    });
+
+    const sent = await sendOTP(email, name, otp);
+    if (!sent) return res.status(500).json({ success: false, msg: 'Failed to send OTP. Please try again.' });
+
+    return res.status(200).json({ success: true, msg: 'OTP sent to your email.' });
+  } catch (error) {
+    console.error('Email OTP request error:', error.message);
+    return res.status(500).json({ success: false, msg: 'Unable to send OTP.' });
+  }
+};
+
+exports.verifyEmailOTP = async (req, res) => {
+  try {
+    clearExpiredEmailOtps();
+    const email = normalizeEmail(req.body?.email);
+    const purpose = String(req.body?.purpose || 'auth').trim().toLowerCase();
+    const otp = String(req.body?.otp || '').trim();
+
+    if (!email || !otp) return res.status(400).json({ success: false, msg: 'Email and OTP are required' });
+
+    const key = buildEmailOtpKey(email, purpose);
+    const record = emailOtpStore.get(key);
+    if (!record || record.expiresAt <= Date.now()) {
+      emailOtpStore.delete(key);
+      return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
+    }
+
+    record.attempts += 1;
+    if (record.attempts > 5) {
+      emailOtpStore.delete(key);
+      return res.status(429).json({ success: false, msg: 'Too many OTP attempts. Please request a new code.' });
+    }
+
+    if (record.otp !== otp) {
+      emailOtpStore.set(key, record);
+      return res.status(400).json({ success: false, msg: 'Invalid or expired OTP.' });
+    }
+
+    emailOtpStore.delete(key);
+    return res.status(200).json({ success: true, msg: 'OTP verified.' });
+  } catch (error) {
+    console.error('Email OTP verification error:', error.message);
+    return res.status(500).json({ success: false, msg: 'Unable to verify OTP.' });
+  }
+};
+
 // 🛠️ HELPER: Silent activity logging
 const logDoctorActivity = async (userId) => {
   if (!userId) return;
