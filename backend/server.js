@@ -2275,6 +2275,8 @@ const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, 
         : [];
 };
 
+const PROFILE_OWNER_COLUMNS = ['id', 'user_id', 'doctor_id', 'auth_user_id'];
+
 const readSingleRowSafely = async ({ table, select, column = 'id', value }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !table || !select || !value) return { data: null, error: null };
@@ -2297,6 +2299,16 @@ const readSingleRowSafely = async ({ table, select, column = 'id', value }) => {
     }
 };
 
+const readProfileOwnerRowSafely = async ({ table, select, value }) => {
+    for (const column of PROFILE_OWNER_COLUMNS) {
+        const result = await readSingleRowSafely({ table, select, column, value });
+        if (result.data) return result;
+        if (result.error && !isMissingColumnError(result.error) && result.error.code !== 'PGRST205') return result;
+    }
+
+    return { data: null, error: null };
+};
+
 const getDoctorTemplateProfile = async (userId) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from || !userId) return {};
@@ -2309,7 +2321,7 @@ const getDoctorTemplateProfile = async (userId) => {
     ];
 
     for (const lookup of profileLookups) {
-        const { data, error } = await readSingleRowSafely({
+        const { data, error } = await readProfileOwnerRowSafely({
             table: lookup.table,
             select: lookup.select,
             value: userId
@@ -2342,6 +2354,7 @@ const getMetaConfigForUser = async (userId) => {
     if (!db?.from || !userId) {
         return {
             meta_configured: false,
+            meta_locked: false,
             whatsapp_phone_number_id: '',
             whatsapp_business_account_id: '',
             meta_business_manager_id: '',
@@ -2365,7 +2378,7 @@ const getMetaConfigForUser = async (userId) => {
     ];
 
     for (const lookup of lookups) {
-        const { data, error } = await readSingleRowSafely({
+        const { data, error } = await readProfileOwnerRowSafely({
             table: lookup.table,
             select: lookup.select,
             value: userId
@@ -2381,9 +2394,13 @@ const getMetaConfigForUser = async (userId) => {
         const businessAccountId = data.meta_waba_id || data.whatsapp_business_account_id || '';
         const accessToken = data.system_user_token || data.whatsapp_access_token || '';
         const businessManagerId = data.meta_business_manager_id || data.meta_business_id || data.business_id || '';
+        const hasAnyMetaCredential = Boolean(phoneNumberId || businessAccountId || accessToken || businessManagerId);
+
+        if (!hasAnyMetaCredential) continue;
 
         return {
             meta_configured: Boolean(phoneNumberId && businessAccountId && accessToken),
+            meta_locked: hasAnyMetaCredential,
             whatsapp_phone_number_id: phoneNumberId,
             whatsapp_business_account_id: businessAccountId,
             whatsapp_business_id: businessManagerId,
@@ -2394,6 +2411,7 @@ const getMetaConfigForUser = async (userId) => {
 
     return {
         meta_configured: false,
+        meta_locked: false,
         whatsapp_phone_number_id: '',
         whatsapp_business_account_id: '',
         whatsapp_business_id: '',
@@ -2415,7 +2433,7 @@ const getRawMetaCredentialsForUser = async (userId) => {
     ];
 
     for (const lookup of tokenLookups) {
-        const { data } = await readSingleRowSafely({
+        const { data } = await readProfileOwnerRowSafely({
             table: lookup.table,
             select: lookup.select,
             value: userId
@@ -3452,7 +3470,7 @@ const handleMetaConnectionFetch = async (req, res) => {
                 meta_business_manager_id: metaConfig.meta_business_manager_id || '',
                 system_user_token: metaConfig.system_user_token || '',
                 meta_configured: metaConfig.meta_configured,
-                is_locked: metaConfig.meta_configured
+                is_locked: Boolean(metaConfig.meta_locked || metaConfig.meta_configured)
             }
         });
     } catch (error) {

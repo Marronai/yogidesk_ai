@@ -45,6 +45,56 @@ const isFreshMetaCache = (cache = {}) => {
   return Boolean(savedAt && Date.now() - savedAt < META_CACHE_TTL_MS);
 };
 
+const readMetaFields = (row = {}) => ({
+  meta_phone_number_id: row.meta_phone_number_id || row.whatsapp_phone_number_id || row.phone_number_id || '',
+  meta_waba_id: row.meta_waba_id || row.whatsapp_business_account_id || row.business_account_id || row.waba_id || '',
+  system_user_token: row.system_user_token || row.whatsapp_access_token || '',
+  meta_business_manager_id: row.meta_business_manager_id || row.meta_business_id || row.business_id || '',
+});
+
+const hasStoredMetaFields = (row = {}) => Boolean(
+  readMetaFields(row).meta_phone_number_id ||
+  readMetaFields(row).meta_waba_id ||
+  readMetaFields(row).system_user_token
+);
+
+const fetchMetaConnectionFromSupabase = async (userId) => {
+  if (!userId) return null;
+  const tables = ['doctor_profiles', 'users', 'clinics'];
+  const ownerColumns = ['id', 'user_id', 'doctor_id', 'auth_user_id'];
+
+  for (const table of tables) {
+    for (const column of ownerColumns) {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .eq(column, userId)
+          .limit(1)
+          .maybeSingle();
+
+        if (error) continue;
+        if (data && hasStoredMetaFields(data)) {
+          const metaFields = readMetaFields(data);
+          return {
+            ...data,
+            ...metaFields,
+            whatsapp_phone_number_id: metaFields.meta_phone_number_id,
+            whatsapp_business_account_id: metaFields.meta_waba_id,
+            system_user_token: metaFields.system_user_token ? 'CONFIGURED' : '',
+            meta_configured: true,
+            is_locked: true,
+          };
+        }
+      } catch {
+        // Try the next table/owner column pair.
+      }
+    }
+  }
+
+  return null;
+};
+
 const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -110,9 +160,7 @@ const Settings = () => {
       if (!force && lastHydratedMetaRef.current === activeUserId) {
         return;
       }
-      const profile = userProfile?.id
-        ? userProfile
-        : await loadUserProfile(activeUserId, { force: false });
+      const profile = await loadUserProfile(activeUserId, { force: true });
       let fetchedData = profile || {};
       const cachedMeta = readCachedMetaConnection(activeUserId);
       const lastSavedMeta = lastSavedMetaRef.current || {};
@@ -132,6 +180,16 @@ const Settings = () => {
           };
         } catch (metaFetchError) {
           console.warn('Meta settings prefill fetch skipped:', metaFetchError?.message || metaFetchError);
+        }
+      }
+
+      if (!hasStoredMetaFields(fetchedData) && !fetchedData.meta_configured && !fetchedData.is_locked) {
+        const directMetaData = await fetchMetaConnectionFromSupabase(activeUserId);
+        if (directMetaData) {
+          fetchedData = {
+            ...fetchedData,
+            ...directMetaData,
+          };
         }
       }
 
