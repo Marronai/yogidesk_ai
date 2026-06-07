@@ -6,9 +6,14 @@ import {
   Bot,
   Zap,
   MessageSquare,
+  ShieldCheck,
+  Radio,
+  ToggleRight,
+  Wrench,
 } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import PublicNavbar from '../components/PublicNavbar';
+import api from '../utils/api';
 
 const DURATIONS = [
   { id: '3m', label: '3 Months', saving: 'Starter cycle', months: 3 },
@@ -44,9 +49,39 @@ const PLANS = [
   },
 ];
 
+const TRUST_DETAILS = [
+  { icon: ShieldCheck, text: 'Enterprise-Grade Client Protocol Isolation (100% Secure)' },
+  { icon: Radio, text: 'Omnichannel 24/7 Smart Desk Automated Response Execution' },
+  { icon: ToggleRight, text: 'Human-Takeover Toggle Switch Overrides Enabled Instantly' },
+  { icon: Wrench, text: 'Zero Network Maintenance Overheads' },
+];
+
+const loadRazorpayCheckout = () => new Promise((resolve, reject) => {
+  if (window.Razorpay) {
+    resolve(true);
+    return;
+  }
+
+  const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+  if (existingScript) {
+    existingScript.addEventListener('load', () => resolve(true), { once: true });
+    existingScript.addEventListener('error', reject, { once: true });
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.async = true;
+  script.onload = () => resolve(true);
+  script.onerror = () => reject(new Error('Unable to load secure checkout.'));
+  document.body.appendChild(script);
+});
+
 export default function Pricing() {
   const [durationId, setDurationId] = useState('12m');
   const [showLeadPopup, setShowLeadPopup] = useState(false);
+  const [checkoutStatus, setCheckoutStatus] = useState(null);
+  const [loadingPlanId, setLoadingPlanId] = useState('');
 
   // 5-Minute Behavioral Timeout Popup Trigger
   useEffect(() => {
@@ -56,10 +91,9 @@ export default function Pricing() {
     return () => clearTimeout(timer);
   }, []);
 
-  const duration = useMemo(() => DURATIONS.find((d) => d.id === durationId) || DURATIONS[2], [durationId]);
   const prices = useMemo(() => BASE_PRICES[durationId] || BASE_PRICES['12m'], [durationId]);
 
-  const handleCheckoutClick = async (planId) => {
+  const handleCheckout = async (planId, price) => {
     try {
       const { data } = await supabase.auth.getUser();
       const user = data?.user;
@@ -68,11 +102,59 @@ export default function Pricing() {
         window.location.href = '/signup';
         return;
       }
-      // Redirect to checkout with plan parameter
-      window.location.href = `/dashboard?plan=${planId}&duration=${durationId}`;
+
+      const securePlanId = `${planId}_${durationId}`;
+      setLoadingPlanId(securePlanId);
+      setCheckoutStatus(null);
+
+      await loadRazorpayCheckout();
+      const response = await api.post('/api/payments/create-order', { planId: securePlanId });
+      const order = response.data || {};
+      if (!order.success || !order.order_id || !order.key_id) {
+        throw new Error(order.message || 'Secure checkout could not be initialized.');
+      }
+
+      const checkout = new window.Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency || 'INR',
+        name: 'YogiDesk AI',
+        description: order.planName || `Workspace plan at Rs. ${price}/month`,
+        order_id: order.order_id,
+        prefill: {
+          name: user?.user_metadata?.full_name || localStorage.getItem('user_name') || 'Doctor',
+          email: user?.email || localStorage.getItem('user_email') || '',
+        },
+        notes: {
+          plan_id: securePlanId,
+        },
+        theme: {
+          color: '#13233f',
+        },
+        handler: () => {
+          setCheckoutStatus({
+            type: 'success',
+            text: 'Subscription initiated successfully! Redirecting to your updated secure workspace panel...',
+          });
+          window.setTimeout(() => {
+            window.location.href = `/dashboard?subscription=initiated&plan=${encodeURIComponent(planId)}`;
+          }, 1600);
+        },
+        modal: {
+          ondismiss: () => setLoadingPlanId(''),
+        },
+      });
+
+      checkout.open();
     } catch (error) {
-      console.error('Checkout error:', error);
-      window.location.href = '/signup';
+      console.error('Checkout error:', error?.response?.data || error.message || error);
+      setLoadingPlanId('');
+      setCheckoutStatus({
+        type: 'error',
+        text: error?.response?.data?.message || 'Unable to initialize secure checkout. Please try again.',
+      });
+    } finally {
+      if (!window.Razorpay) setLoadingPlanId('');
     }
   };
 
@@ -81,14 +163,40 @@ export default function Pricing() {
       <PublicNavbar />
       
       {/* HEADER */}
-      <div className="text-center mb-16 pt-20">
-        <h2 className="text-3xl font-extrabold text-slate-900 sm:text-4xl lg:text-5xl">
-          Simple, Transparent Pricing for Smart Clinics
-        </h2>
-        <p className="mt-6 text-xl text-slate-600 max-w-3xl mx-auto">
-          Unlock automated patient communication and scale your digital presence.
-        </p>
+      <div className="mx-auto mb-12 max-w-7xl pt-20">
+        <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+          <div className="grid gap-0 lg:grid-cols-[1.25fr_0.75fr]">
+            <div className="p-8 sm:p-10 lg:p-12">
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-orange-600">Workspace Pricing</p>
+              <h1 className="mt-4 max-w-3xl text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">
+                Simple, Transparent Workspace Plans
+              </h1>
+              <p className="mt-5 max-w-2xl text-lg font-semibold leading-8 text-slate-600">
+                Choose the perfect automation scale for your clinic. No hidden engine setup fees.
+              </p>
+            </div>
+            <div className="bg-[#071020] p-8 text-white sm:p-10 lg:p-12">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-orange-300">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+              <h2 className="mt-8 text-2xl font-black leading-tight">Medical workspace billing with secure plan activation</h2>
+              <p className="mt-4 text-sm font-semibold leading-6 text-slate-300">
+                Plans are validated server-side before checkout, keeping subscription activation clean and tamper-resistant.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {checkoutStatus && (
+        <div className={`mx-auto mb-8 max-w-7xl rounded-2xl border px-5 py-4 text-sm font-bold shadow-sm ${
+          checkoutStatus.type === 'success'
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            : 'border-red-200 bg-red-50 text-red-800'
+        }`}>
+          {checkoutStatus.text}
+        </div>
+      )}
 
       {/* DURATION SELECTOR */}
       <div className="max-w-7xl mx-auto mb-12 flex justify-center">
@@ -163,8 +271,8 @@ export default function Pricing() {
             </div>
           </div>
           <div className="p-6 bg-slate-50 border-t border-slate-100 mt-auto">
-            <button onClick={() => handleCheckoutClick('starter')} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition duration-200">
-              Get Started
+            <button onClick={() => handleCheckout('starter', prices.starter)} disabled={loadingPlanId === `starter_${durationId}`} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition duration-200 disabled:cursor-not-allowed disabled:opacity-70">
+              {loadingPlanId === `starter_${durationId}` ? 'Opening Checkout...' : 'Choose Plan'}
             </button>
           </div>
         </div>
@@ -234,8 +342,8 @@ export default function Pricing() {
             </div>
           </div>
           <div className="p-6 bg-orange-50 border-t border-orange-100 mt-auto">
-            <button onClick={() => handleCheckoutClick('growth')} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 px-4 rounded-xl shadow-sm transition duration-200">
-              Upgrade to Growth
+            <button onClick={() => handleCheckout('growth', prices.growth)} disabled={loadingPlanId === `growth_${durationId}`} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-semibold py-3 px-4 rounded-xl shadow-sm transition duration-200 disabled:cursor-not-allowed disabled:opacity-70">
+              {loadingPlanId === `growth_${durationId}` ? 'Opening Checkout...' : 'Select Plan'}
             </button>
           </div>
         </div>
@@ -293,13 +401,28 @@ export default function Pricing() {
             </div>
           </div>
           <div className="p-6 bg-slate-50 border-t border-slate-100 mt-auto">
-            <button onClick={() => handleCheckoutClick('multi')} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition duration-200">
-              Go Enterprise
+            <button onClick={() => handleCheckout('multi', prices.multi)} disabled={loadingPlanId === `multi_${durationId}`} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 px-4 rounded-xl transition duration-200 disabled:cursor-not-allowed disabled:opacity-70">
+              {loadingPlanId === `multi_${durationId}` ? 'Opening Checkout...' : 'Choose Plan'}
             </button>
           </div>
         </div>
 
       </div>
+
+      <section className="mx-auto mt-10 max-w-7xl">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {TRUST_DETAILS.map(({ icon: Icon, text }) => (
+              <div key={text} className="rounded-2xl border border-slate-100 bg-slate-50 p-5">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <p className="mt-4 text-sm font-black leading-6 text-[#13233f]">{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* ================= 5-MINUTE DWELL OVERLAY POPUP ================= */}
       {showLeadPopup && (
