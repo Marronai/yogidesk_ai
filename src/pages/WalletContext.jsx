@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 import { saveWallet } from '../utils/wallet'; // Assuming saveWallet is still needed for localStorage fallback
 
 // Helper functions (moved from YogiWallet.jsx)
@@ -16,7 +17,25 @@ const normalizeWallet = (walletData = {}) => ({
   welcome_gift_active: walletData.welcome_gift_active ?? false,
   current_plan: walletData.current_plan || 'starter',
   plan_tier: walletData.plan_tier || 'starter',
+  runtime_plan: walletData.runtime_plan || walletData.current_plan || walletData.plan_tier || 'starter',
+  has_trial_expired: Boolean(walletData.has_trial_expired),
+  plan_limits: walletData.plan_limits || null,
 });
+
+const applyRuntimePlan = (walletData = {}, profile = {}) => {
+  const hasTrialExpired = Boolean(profile.has_trial_expired);
+  const runtimePlan = String(profile.runtime_plan || profile.current_plan || profile.plan_tier || walletData.runtime_plan || '').trim();
+  const effectivePlan = hasTrialExpired ? 'basic' : (runtimePlan || walletData.current_plan || walletData.plan_tier || 'starter');
+
+  return normalizeWallet({
+    ...walletData,
+    current_plan: effectivePlan,
+    plan_tier: effectivePlan,
+    runtime_plan: effectivePlan,
+    has_trial_expired: hasTrialExpired,
+    plan_limits: profile.plan_limits || walletData.plan_limits || null,
+  });
+};
 
 const WalletContext = createContext(null);
 
@@ -29,7 +48,7 @@ export const useWallet = () => {
 };
 
 export const WalletProvider = ({ children }) => {
-  const [wallet, setWallet] = useState({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' });
+  const [wallet, setWallet] = useState(normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' }));
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState(null);
@@ -46,6 +65,11 @@ export const WalletProvider = ({ children }) => {
     if (!isCleanFilterValue(currentUserId)) return { balance: 0 };
 
     try {
+      const profileResult = await api
+        .get('/profile/context', { params: { userId: currentUserId } })
+        .catch(() => ({ data: null }));
+      const runtimeProfile = profileResult.data?.profile || {};
+
       const { data, error } = await supabase
         .from('wallets')
         .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier')
@@ -53,7 +77,7 @@ export const WalletProvider = ({ children }) => {
         .maybeSingle();
 
       if (!error && data) {
-        const safeWallet = normalizeWallet(data);
+        const safeWallet = applyRuntimePlan(data, runtimeProfile);
         saveWallet(safeWallet); // Update localStorage for initial hydration/fallback
         return safeWallet;
       }
@@ -76,7 +100,7 @@ export const WalletProvider = ({ children }) => {
           .single();
 
         if (!createError && createdWallet) {
-          const safeWallet = normalizeWallet(createdWallet);
+          const safeWallet = applyRuntimePlan(createdWallet, runtimeProfile);
           saveWallet(safeWallet);
           return safeWallet;
         }
@@ -84,7 +108,7 @@ export const WalletProvider = ({ children }) => {
     } catch (error) {
       console.warn('Wallet table unavailable; continuing with local fallback.', error?.message || error);
     }
-    return { balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' };
+    return normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' });
   }, []);
 
   const fetchTransactions = useCallback(async (currentUserId) => {
@@ -169,7 +193,14 @@ export const WalletProvider = ({ children }) => {
           table: 'wallets',
           filter: `user_id=eq.${userId}`
         }, (payload) => {
-          if (payload.new && isMounted) setWallet(normalizeWallet(payload.new));
+          if (payload.new && isMounted) {
+            setWallet((current) => normalizeWallet({
+              ...payload.new,
+              runtime_plan: current.runtime_plan,
+              has_trial_expired: current.has_trial_expired,
+              plan_limits: current.plan_limits,
+            }));
+          }
         })
         .on('postgres_changes', {
           event: 'INSERT',

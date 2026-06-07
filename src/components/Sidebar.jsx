@@ -14,6 +14,8 @@ import {
   Wallet,
   ChevronDown,
   Bot,
+  Lock,
+  X,
 } from 'lucide-react';
 import { getWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
@@ -22,16 +24,18 @@ import { useAuth } from '../context/AuthContext';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
+const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
 
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, userProfile } = useAuth();
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
   const [lifetimeCount, setLifetimeCount] = useState(0);
   const [quickRechargeOpen, setQuickRechargeOpen] = useState(false);
   const [quickRechargeLoading, setQuickRechargeLoading] = useState(false);
+  const [lockNotice, setLockNotice] = useState('');
   const [profile, setProfile] = useState({
     role: normalizeRole(),
     name: localStorage.getItem('user_name') || 'Team Member',
@@ -63,6 +67,17 @@ const Sidebar = () => {
   }, []);
 
   const isStaff = profile.role === 'STAFF';
+  const runtimePlan = String(
+    userProfile?.runtime_plan
+    || userProfile?.current_plan
+    || userProfile?.plan_tier
+    || wallet.runtime_plan
+    || wallet.current_plan
+    || wallet.plan_tier
+    || ''
+  ).toLowerCase();
+  const hasTrialExpired = Boolean(userProfile?.has_trial_expired || wallet.has_trial_expired);
+  const isBasicPlan = hasTrialExpired || runtimePlan === 'basic';
   const isWalletLow = Number(wallet.balance || 0) < 20;
   const isActive = (path) => {
     if (path === '/templates') return location.pathname === '/templates' || location.pathname === '/templates/create';
@@ -83,12 +98,13 @@ const Sidebar = () => {
     { name: 'Inbox', path: '/dashboard/inbox', icon: MessageSquare },
     { name: 'Patients', path: '/dashboard/contacts', icon: Users },
     !isStaff && { name: 'Yogi Wallet', path: '/dashboard/wallet', icon: Wallet },
-    !isStaff && { name: 'AI Settings', path: '/dashboard/ai-settings', icon: Bot },
-    { name: 'Ads CRM', path: '/dashboard/ads-crm', icon: Megaphone },
+    !isStaff && { name: 'AI Assistant Slots', path: '/dashboard/ai-settings', icon: Bot, premiumLocked: true },
+    { name: 'Ads CRM Manager', path: '/dashboard/ads-crm', icon: Megaphone, premiumLocked: true },
     {
-      name: 'Team Setup',
+      name: 'Team Setup Layouts',
       path: '/team',
-      icon: Users
+      icon: Users,
+      premiumLocked: true
     },
   ].filter(Boolean);
 
@@ -139,6 +155,24 @@ const Sidebar = () => {
 
   return (
     <div className="w-64 bg-white border-r border-gray-200 flex flex-col h-screen sticky top-0 z-40 flex-shrink-0 font-sans">
+      {lockNotice && (
+        <div className="fixed left-72 top-5 z-50 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-orange-200 bg-white p-4 text-sm font-bold leading-6 text-slate-700 shadow-2xl shadow-slate-200">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-xl bg-orange-50 p-2 text-orange-600">
+              <Lock size={18} />
+            </div>
+            <p className="flex-1">{lockNotice}</p>
+            <button
+              type="button"
+              onClick={() => setLockNotice('')}
+              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              aria-label="Close feature lock notice"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="p-6 flex items-center gap-3 flex-shrink-0 border-b border-gray-50">
         <Link to={isStaff ? '/staff/dashboard' : '/dashboard'} className="flex h-14 md:h-16 lg:h-20 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
           <img
@@ -206,9 +240,31 @@ const Sidebar = () => {
 
       <nav className="flex-1 px-4 py-2 overflow-y-auto custom-scrollbar">
         <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 px-2">Main Menu</p>
-        {mainLinks.map(({ name, path, icon }) => (
-          <Link key={path} to={path} className={menuClass(path)}>{React.createElement(icon, { size: 20 })}<span>{name}</span></Link>
-        ))}
+        {mainLinks.map(({ name, path, icon, premiumLocked }) => {
+          const locked = Boolean(premiumLocked && isBasicPlan);
+          if (locked) {
+            return (
+              <button
+                key={path}
+                type="button"
+                onClick={() => setLockNotice(TRIAL_EXPIRED_MESSAGE)}
+                title={TRIAL_EXPIRED_MESSAGE}
+                className={`${menuClass(path)} w-full cursor-not-allowed opacity-75`}
+              >
+                {React.createElement(icon, { size: 20 })}
+                <span className="flex-1 text-left">{name}</span>
+                <Lock size={15} />
+              </button>
+            );
+          }
+
+          return (
+            <Link key={path} to={path} className={menuClass(path)}>
+              {React.createElement(icon, { size: 20 })}
+              <span>{name}</span>
+            </Link>
+          );
+        })}
 
         {userIndustry === 'hospital' && (
           <>

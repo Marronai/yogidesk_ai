@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Clock, KeyRound, Mail, RefreshCw, Trash2, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, Clock, KeyRound, Lock, Mail, RefreshCw, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
 
-const seatCaps = { starter: 1, growth: 2, hospital: 5 };
+const seatCaps = { basic: 0, starter: 1, growth: 2, hospital: 5, multi_specialty: 5, multi: 5 };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const INVITE_EXPIRY_DAYS = 3;
 const TEAM_CHANGE_COOLDOWN_DAYS = 30;
+const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
 
 const addDays = (date, days) => new Date(date.getTime() + days * DAY_MS);
 const isPendingExpired = (member) => (
@@ -30,8 +31,9 @@ const Team = () => {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   
-  const plan = (wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase();
-  const maxSeats = seatCaps[plan] || seatCaps.starter;
+  const plan = String(wallet.runtime_plan || wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase().replace(/[\s-]+/g, '_');
+  const isTrialExpired = Boolean(wallet.has_trial_expired) || plan === 'basic';
+  const maxSeats = isTrialExpired ? 0 : (seatCaps[plan] ?? seatCaps.starter);
   const visibleMembers = useMemo(() => (
     members.filter((member) => !['DELETED', 'EXPIRED'].includes(String(member.status || '').toUpperCase()) && !isPendingExpired(member))
   ), [members]);
@@ -49,7 +51,7 @@ const Team = () => {
   const nextInviteAllowedAt = latestTeamChangeAt ? addDays(latestTeamChangeAt, TEAM_CHANGE_COOLDOWN_DAYS) : null;
   const isInviteCoolingDown = Boolean(nextInviteAllowedAt && nextInviteAllowedAt.getTime() > Date.now());
   const isFull = visibleMembers.length >= maxSeats;
-  const inviteDisabled = isFull || isInviteCoolingDown;
+  const inviteDisabled = isTrialExpired || isFull || isInviteCoolingDown || maxSeats <= 0;
 
   const seatLabel = useMemo(() => `${visibleMembers.length} / ${maxSeats} staff seats used`, [visibleMembers.length, maxSeats]);
   const cooldownLabel = nextInviteAllowedAt
@@ -144,6 +146,10 @@ const Team = () => {
     event.preventDefault();
     setAlert('');
 
+    if (isTrialExpired || maxSeats <= 0) {
+      setAlert(TRIAL_EXPIRED_MESSAGE);
+      return;
+    }
     if (isFull) {
       setAlert(`Your ${plan} plan allows ${maxSeats} team seat${maxSeats > 1 ? 's' : ''}. Upgrade to add more staff.`);
       return;
@@ -256,7 +262,7 @@ const Team = () => {
           <h1 className="text-3xl font-black text-slate-900 mt-2">Team Setup</h1>
           <p className="text-slate-500 mt-1">Invite staff members and control shared inbox ownership.</p>
         </div>
-        <div className={`rounded-2xl border px-5 py-4 ${isFull ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+        <div className={`rounded-2xl border px-5 py-4 ${isTrialExpired || isFull ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
           <div className="flex items-center gap-2 text-sm font-black">
             <Users size={18} />
             {seatLabel}
@@ -375,42 +381,52 @@ const Team = () => {
       )}
 
       <div className="grid lg:grid-cols-[380px_1fr] gap-6">
-        <form onSubmit={handleInvite} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
-          <div>
-            <h2 className="text-lg font-black text-slate-900">Invite Member</h2>
-            <p className="text-sm text-slate-500 mt-1">Add staff access by name and email.</p>
-          </div>
-
-          <input
-            value={form.name}
-            onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-            placeholder="Staff name"
-            disabled={inviteDisabled}
-            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400 disabled:bg-slate-50 disabled:text-slate-400"
-          />
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-            placeholder="staff@email.com"
-            disabled={inviteDisabled}
-            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400 disabled:bg-slate-50 disabled:text-slate-400"
-          />
-          <button
-            type="submit"
-            disabled={inviteDisabled}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
-          >
-            <UserPlus size={18} />
-            Send Invite
-          </button>
-          {isInviteCoolingDown && (
-            <div className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
-              <Clock className="mt-0.5 shrink-0" size={15} />
-              One new staff user can be added every 30 days. Next invite available after {cooldownLabel}.
+        {isTrialExpired ? (
+          <div className="bg-white rounded-3xl border border-red-100 shadow-sm p-6">
+            <div className="inline-flex rounded-2xl bg-red-50 p-3 text-red-600">
+              <Lock size={22} />
             </div>
-          )}
-        </form>
+            <h2 className="mt-4 text-lg font-black text-slate-900">Team Setup Locked</h2>
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{TRIAL_EXPIRED_MESSAGE}</p>
+          </div>
+        ) : (
+          <form onSubmit={handleInvite} className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">Invite Member</h2>
+              <p className="text-sm text-slate-500 mt-1">Add staff access by name and email.</p>
+            </div>
+
+            <input
+              value={form.name}
+              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Staff name"
+              disabled={inviteDisabled}
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400 disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              placeholder="staff@email.com"
+              disabled={inviteDisabled}
+              className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none focus:border-orange-400 disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            <button
+              type="submit"
+              disabled={inviteDisabled}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+            >
+              <UserPlus size={18} />
+              Send Invite
+            </button>
+            {isInviteCoolingDown && (
+              <div className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+                <Clock className="mt-0.5 shrink-0" size={15} />
+                One new staff user can be added every 30 days. Next invite available after {cooldownLabel}.
+              </div>
+            )}
+          </form>
+        )}
 
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">

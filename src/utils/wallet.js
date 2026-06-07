@@ -13,6 +13,11 @@ export const getWallet = () => {
       is_first_recharge: stored.is_first_recharge ?? true,
       welcome_gift_active: stored.welcome_gift_active ?? false,
       last_cashback: Number(stored.last_cashback ?? 0),
+      current_plan: stored.current_plan || 'starter',
+      plan_tier: stored.plan_tier || stored.current_plan || 'starter',
+      runtime_plan: stored.runtime_plan || stored.current_plan || stored.plan_tier || 'starter',
+      has_trial_expired: Boolean(stored.has_trial_expired),
+      plan_limits: stored.plan_limits || null,
     };
   } catch {
     return {
@@ -20,6 +25,11 @@ export const getWallet = () => {
       is_first_recharge: true,
       welcome_gift_active: false,
       last_cashback: 0,
+      current_plan: 'starter',
+      plan_tier: 'starter',
+      runtime_plan: 'starter',
+      has_trial_expired: false,
+      plan_limits: null,
     };
   }
 };
@@ -30,6 +40,11 @@ export const saveWallet = (wallet) => {
     is_first_recharge: wallet.is_first_recharge ?? true,
     welcome_gift_active: wallet.welcome_gift_active ?? false,
     last_cashback: Number(wallet.last_cashback ?? 0),
+    current_plan: wallet.current_plan || wallet.runtime_plan || wallet.plan_tier || 'starter',
+    plan_tier: wallet.plan_tier || wallet.runtime_plan || wallet.current_plan || 'starter',
+    runtime_plan: wallet.runtime_plan || wallet.current_plan || wallet.plan_tier || 'starter',
+    has_trial_expired: Boolean(wallet.has_trial_expired),
+    plan_limits: wallet.plan_limits || null,
   };
 
   localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify(safeWallet));

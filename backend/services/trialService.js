@@ -1,19 +1,45 @@
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 const PLAN_LIMITS = {
+  BASIC: { patient_limit: 500, staff_limit: 0, template_limit: 10 },
   STARTER: { patient_limit: 500, staff_limit: 1, template_limit: 20 },
-  GROWTH: { patient_limit: 2000, staff_limit: 3, template_limit: 50 },
+  GROWTH: { patient_limit: 2000, staff_limit: 2, template_limit: 50 },
   MULTI_SPECIALTY: { patient_limit: 10000, staff_limit: 10, template_limit: 100 },
 };
 
 const normalizeTier = (tier = 'GROWTH') => {
   const value = String(tier || 'GROWTH').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (value.includes('BASIC')) return 'BASIC';
   if (value.includes('MULTI')) return 'MULTI_SPECIALTY';
   if (value.includes('STARTER')) return 'STARTER';
   return 'GROWTH';
 };
 
 const getPlanLimits = (tier) => PLAN_LIMITS[normalizeTier(tier)] || PLAN_LIMITS.GROWTH;
+
+const isPaidSubscriptionStatus = (status) => ['active', 'paid', 'subscription_active'].includes(String(status || '').trim().toLowerCase());
+
+const evaluateRuntimePlan = (profile = {}, now = new Date()) => {
+  const subscriptionStatus = profile.subscription_status || profile.subscriptionStatus || '';
+  const paid = Boolean(profile.payment_confirmed || profile.subscription_paid || profile.is_paid || isPaidSubscriptionStatus(subscriptionStatus));
+  const startSource = profile.trial_start_at || profile.trial_started_at || profile.created_at || profile.createdAt || null;
+  const startedAt = startSource ? new Date(startSource) : null;
+  const elapsedMs = startedAt && Number.isFinite(startedAt.getTime()) ? now.getTime() - startedAt.getTime() : 0;
+  const hasTrialExpired = Boolean(!paid && elapsedMs > 7 * 24 * MS_PER_HOUR);
+  const sourceTier = profile.subscription_tier || profile.current_plan || profile.plan_tier || profile.plan || 'GROWTH';
+  const runtimeTier = hasTrialExpired ? 'BASIC' : normalizeTier(sourceTier);
+
+  return {
+    runtime_plan: runtimeTier.toLowerCase(),
+    runtime_tier: runtimeTier,
+    source_tier: normalizeTier(sourceTier),
+    has_trial_expired: hasTrialExpired,
+    is_paid: paid,
+    trial_started_at: startedAt && Number.isFinite(startedAt.getTime()) ? startedAt.toISOString() : null,
+    trial_elapsed_days: startedAt && Number.isFinite(startedAt.getTime()) ? Math.max(0, Math.floor(elapsedMs / (24 * MS_PER_HOUR))) : 0,
+    plan_limits: getPlanLimits(runtimeTier),
+  };
+};
 
 const buildTrialProfilePayload = ({
   userId,
@@ -188,6 +214,7 @@ const activateSubscriptionTier = async ({ db, userId, tier, paymentReference }) 
 
 module.exports = {
   activateSubscriptionTier,
+  evaluateRuntimePlan,
   ensurePremiumTrialProfile,
   getPlanLimits,
   normalizeTier,

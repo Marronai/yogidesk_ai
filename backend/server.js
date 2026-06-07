@@ -32,6 +32,7 @@ const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSync
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 const {
     activateSubscriptionTier,
+    evaluateRuntimePlan,
     ensurePremiumTrialProfile,
     startTrialReminderJob
 } = require('./services/trialService');
@@ -463,11 +464,12 @@ app.get('/api/profile/trial', attachDoctorSession, async (req, res) => {
 
         const trialEnd = data?.trial_end_at ? new Date(data.trial_end_at) : null;
         const remainingMs = trialEnd ? trialEnd.getTime() - Date.now() : null;
+        const runtimePlan = evaluateRuntimePlan(data || {});
         return res.status(200).json({
             success: true,
-            profile: data || null,
+            profile: data ? { ...data, ...runtimePlan } : null,
             remainingHours: remainingMs === null ? null : Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))),
-            shouldShowRetentionModal: Boolean(data && ['trialing', 'trial'].includes(String(data.subscription_status || '').toLowerCase()) && remainingMs !== null && remainingMs <= 48 * 60 * 60 * 1000 && remainingMs > 0)
+            shouldShowRetentionModal: Boolean(data && !runtimePlan.has_trial_expired && ['trialing', 'trial'].includes(String(data.subscription_status || '').toLowerCase()) && remainingMs !== null && remainingMs <= 48 * 60 * 60 * 1000 && remainingMs > 0)
         });
     } catch (error) {
         console.error('Trial profile fetch failed:', error.message || error);
@@ -2913,6 +2915,28 @@ app.get('/api/profile/context', async (req, res) => {
         const profile = await getDoctorTemplateProfile(userId);
         const metaConfig = await getMetaConfigForUser(userId);
         const specialization = normalizeSpecialization(profile.specialization);
+        const db = supabaseAdmin || supabase;
+        let billingProfile = {};
+
+        try {
+            if (db?.from) {
+                const { data: planRow, error: planError } = await db
+                    .from('doctor_profiles')
+                    .select('id,created_at,trial_start_at,trial_started_at,subscription_tier,subscription_status,current_plan,plan_tier,plan,payment_confirmed,subscription_paid,is_paid')
+                    .eq('id', userId)
+                    .maybeSingle();
+
+                if (!planError && planRow) {
+                    billingProfile = planRow;
+                } else if (planError && !isMissingColumnError(planError)) {
+                    console.warn('[YogiDesk Secure Trial] Runtime plan lookup skipped.');
+                }
+            }
+        } catch {
+            console.warn('[YogiDesk Secure Trial] Runtime plan lookup skipped.');
+        }
+
+        const runtimePlan = evaluateRuntimePlan(billingProfile);
 
         return res.status(200).json({
             success: true,
@@ -2924,6 +2948,16 @@ app.get('/api/profile/context', async (req, res) => {
                 specialization,
                 clinic_category: specialization,
                 booking_link: profile.bookingLink || `https://yogidesk-ai.com/book/${userId}`,
+                current_plan: runtimePlan.runtime_plan,
+                plan_tier: runtimePlan.runtime_plan,
+                runtime_plan: runtimePlan.runtime_plan,
+                runtime_tier: runtimePlan.runtime_tier,
+                source_tier: runtimePlan.source_tier,
+                has_trial_expired: runtimePlan.has_trial_expired,
+                is_paid: runtimePlan.is_paid,
+                trial_started_at: runtimePlan.trial_started_at,
+                trial_elapsed_days: runtimePlan.trial_elapsed_days,
+                plan_limits: runtimePlan.plan_limits,
                 ...metaConfig
             }
         });

@@ -123,6 +123,11 @@ const normalizePhoneE164 = (phone) => {
   return `+${digits}`;
 };
 const buildPhoneOtpKey = (phone, purpose = 'auth') => `${normalizePhoneE164(phone)}:${normalizePurpose(purpose)}`;
+const sanitizeProfileChoice = (value, fallback = '') => String(value || fallback || '')
+  .replace(/[\u0000-\u001F\u007F<>`$]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 80);
 
 const clearExpiredEmailOtps = () => {
   const now = Date.now();
@@ -466,9 +471,11 @@ const logDoctorActivity = async (userId) => {
 exports.register = async (req, res) => {
   try {
     if (!requireMongoUserModel(res)) return;
-    const { name, email, password, phone, businessName, businessType, businessCategory } = req.body;
+    const { name, email, password, phone, businessName, businessType, businessCategory, specialization } = req.body;
     const safeEmail = normalizeEmail(email);
     const safePhone = normalizePhoneE164(phone);
+    const selectedSpecialization = sanitizeProfileChoice(specialization || businessCategory || businessType);
+    const selectedBusinessType = sanitizeProfileChoice(businessType, 'Clinic') || 'Clinic';
 
     console.log('[HybridAuth] Signup requested.', {
       email: safeEmail,
@@ -495,8 +502,8 @@ exports.register = async (req, res) => {
       password,
       phone: safePhone,
       businessName: businessName || `${name}'s Clinic`,
-      businessType: businessType || 'Clinic',
-      businessCategory: businessCategory || 'Clinic',
+      businessType: selectedBusinessType,
+      businessCategory: selectedSpecialization,
       role: 'user',
       planType: 'starter_clinic',
       subscriptionStatus: 'wallet_active',
@@ -512,7 +519,7 @@ exports.register = async (req, res) => {
       email: safeEmail,
       name,
       businessName: businessName || `${name}'s Clinic`,
-      businessCategory: businessCategory || businessType || 'Clinic',
+      businessCategory: selectedSpecialization,
       phone: safePhone
     }).then(({ error }) => {
       if (error) console.error('Premium trial profile seed failed:', error.message || error);
@@ -527,6 +534,9 @@ exports.register = async (req, res) => {
         phone_otp_verified: false,
         phone_number: safePhone,
         phone: normalizePhoneDigits(safePhone),
+        specialization: selectedSpecialization,
+        business_category: selectedSpecialization,
+        clinic_category: selectedSpecialization,
         updated_at: new Date().toISOString()
       }
     });
