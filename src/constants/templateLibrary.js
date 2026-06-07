@@ -140,11 +140,26 @@ export const GENERAL_PHYSICIAN_PREMADE_TEMPLATES = [
   },
 ];
 
-export const getBaselineTemplatesForSpecialty = (specialty) => (
-  String(specialty || '').toLowerCase().includes('dent')
-    ? DENTAL_PREMADE_TEMPLATES
-    : GENERAL_PHYSICIAN_PREMADE_TEMPLATES
+const mapTemplateDataToPremade = (specialty) => (
+  (TEMPLATE_DATA[specialty] || []).map((template) => ({
+    id: template.id,
+    specialization: specialty,
+    template_name: template.title,
+    category: template.category,
+    language: 'English',
+    body_text: template.english,
+  }))
 );
+
+export const getBaselineTemplatesForSpecialty = (specialty) => {
+  const normalized = String(specialty || '').trim();
+  const lower = normalized.toLowerCase();
+  if (!normalized) return [];
+  if (lower.includes('dent')) return DENTAL_PREMADE_TEMPLATES;
+  if (lower.includes('general') || lower.includes('physician')) return GENERAL_PHYSICIAN_PREMADE_TEMPLATES;
+  if (TEMPLATE_DATA[normalized]) return mapTemplateDataToPremade(normalized);
+  return [];
+};
 
 export const TEMPLATE_DATA = {
   Dentist: [

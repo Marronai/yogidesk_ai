@@ -34,6 +34,7 @@ const {
     activateSubscriptionTier,
     evaluateRuntimePlan,
     ensurePremiumTrialProfile,
+    getPlanLimits,
     startTrialReminderJob
 } = require('./services/trialService');
 
@@ -418,16 +419,20 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
         if (!email) return res.status(400).json({ success: false, msg: 'Email is required' });
 
         if (supabaseAdmin && userId) {
-            await ensurePremiumTrialProfile(supabaseAdmin, {
-                userId,
-                email,
-                name: name || 'Doctor',
-                businessName,
-                businessCategory,
-                phone
-            }).then(({ error }) => {
-                if (error) console.error('Premium trial profile seed failed:', error.message || error);
-            });
+            try {
+                await ensurePremiumTrialProfile(supabaseAdmin, {
+                    userId,
+                    email,
+                    name: name || 'Doctor',
+                    businessName,
+                    businessCategory,
+                    phone
+                }).then(({ error }) => {
+                    if (error) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
+                });
+            } catch {
+                console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
+            }
 
             await supabaseAdmin.from('wallets').upsert({
                 user_id: userId,
@@ -435,9 +440,11 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
                 is_first_recharge: true,
                 welcome_gift_active: true,
                 current_plan: 'growth',
-                plan_tier: 'Growth Clinic',
+                plan_tier: 'growth',
                 lifetime_contacts_count: 0
-            }, { onConflict: 'user_id', ignoreDuplicates: true });
+            }, { onConflict: 'user_id' }).catch(() => {
+                console.error('[YogiDesk Secure Trial] Wallet seed deferred.');
+            });
         }
 
         const sent = await sendWelcomeEmail(email, name || 'Doctor', businessName || 'Yogi Desk Clinic');
@@ -2151,11 +2158,12 @@ const normalizeSpecialization = (value) => {
 
 const normalizeSpecializationSlug = (value) => {
     const normalized = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (!normalized) return '';
     if (normalized.includes('dent')) return 'dentist';
     if (normalized.includes('gyn') || normalized.includes('obst')) return 'gynecologist';
     if (normalized.includes('ortho') || normalized.includes('bone') || normalized.includes('joint')) return 'orthopedic';
     if (normalized.includes('general') || normalized.includes('physician') || normalized.includes('clinic')) return 'general_physician';
-    return 'general_physician';
+    return normalized.replace(/[^a-z0-9_]/g, '').slice(0, 80);
 };
 
 const specializationSlugToSearchValue = (slug) => ({
@@ -2163,7 +2171,7 @@ const specializationSlugToSearchValue = (slug) => ({
     gynecologist: 'gynecologist',
     orthopedic: 'orthopedic',
     general_physician: 'general physician'
-}[slug] || 'general physician');
+}[slug] || String(slug || '').replace(/_/g, ' '));
 
 const STATIC_PREMADE_TEMPLATES = {
     dentist: [
@@ -2183,7 +2191,7 @@ const STATIC_PREMADE_TEMPLATES = {
 };
 
 const getStaticPremadeTemplates = (specializationQuery, language) => {
-    const templates = STATIC_PREMADE_TEMPLATES[specializationQuery] || STATIC_PREMADE_TEMPLATES.general_physician;
+    const templates = STATIC_PREMADE_TEMPLATES[specializationQuery] || [];
     const normalizedLanguage = String(language || '').trim().toLowerCase();
     if (!normalizedLanguage || normalizedLanguage === 'all') return templates;
     const filtered = templates.filter((template) => String(template.language || '').toLowerCase().includes(normalizedLanguage));
@@ -2209,6 +2217,7 @@ const fetchPremadeTemplatesBySpecialization = async ({ db, specializationQuery, 
     };
 
     const humanPattern = specializationSlugToSearchValue(specializationQuery);
+    if (!humanPattern) return [];
     let { data, error } = await runQuery(humanPattern);
     if (error) {
         console.warn('Pre-made template lookup failed:', error.message || error);
@@ -2280,8 +2289,8 @@ const getDoctorTemplateProfile = async (userId) => {
     if (!db?.from || !userId) return {};
 
     const profileLookups = [
-        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_category,business_category,clinic_booking_link,booking_link,website' },
-        { table: 'doctor_profiles', select: 'id,name,clinic_name,business_name,specialization,clinic_category,business_category,industry,booking_link' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,specialization,clinic_category,business_category,clinic_booking_link,booking_link,website' },
+        { table: 'doctor_profiles', select: 'id,name,clinic_name,specialization,clinic_category,business_category,industry,booking_link' },
         { table: 'users', select: 'id,name,specialization,clinic_booking_link,booking_link,website' },
         { table: 'clinics', select: 'id,name,specialization,clinic_booking_link,booking_link,website' }
     ];
@@ -2299,7 +2308,7 @@ const getDoctorTemplateProfile = async (userId) => {
             return {
                 ...data,
                 specialization,
-                clinicName: data.clinic_name || data.business_name || data.name || '',
+                clinicName: data.clinic_name || data.name || '',
                 bookingLink: data.clinic_booking_link || data.booking_link || data.website || `https://yogidesk-ai.com/book/${userId}`
             };
         }
@@ -2944,7 +2953,7 @@ app.get('/api/profile/context', async (req, res) => {
                 id: userId,
                 name: profile.name || sessionUser.user_metadata?.full_name || sessionUser.email || 'Doctor',
                 email: sessionUser.email || '',
-                clinic_name: profile.clinicName || profile.clinic_name || profile.business_name || '',
+                clinic_name: profile.clinicName || profile.clinic_name || '',
                 specialization,
                 clinic_category: specialization,
                 booking_link: profile.bookingLink || `https://yogidesk-ai.com/book/${userId}`,
@@ -2999,9 +3008,15 @@ app.post('/api/profile/onboarding', async (req, res) => {
             email: sessionUser.email || null,
             name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || clinicName,
             clinic_name: clinicName,
-            business_name: clinicName,
             specialization,
             business_category: specialization,
+            clinic_category: specialization,
+            subscription_tier: 'growth',
+            current_plan: 'growth',
+            plan_tier: 'growth',
+            lifetime_patients_limit: 2000,
+            ai_token_balance: 1000,
+            plan_limits: getPlanLimits('GROWTH'),
             whatsapp_phone_number_id: phoneNumberId,
             meta_phone_number_id: phoneNumberId,
             updated_at: new Date().toISOString()
@@ -3946,29 +3961,39 @@ app.get('/api/ai/settings', async (req, res) => {
         const userId = await resolveInboxRequestUserId(req);
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
 
-        const { data, error } = await db
-            .from('doctor_profiles')
-            .select('id, plan, current_plan, plan_tier, subscription_tier, ai_enabled, token_limit, token_used, is_ai_paused')
-            .eq('id', userId)
-            .maybeSingle();
+        let data = null;
+        let error = null;
+        const profileResult = await readSingleRowSafely({
+            table: 'doctor_profiles',
+            select: 'id,created_at,trial_start_at,trial_started_at,plan,current_plan,plan_tier,subscription_tier,subscription_status,payment_confirmed,subscription_paid,is_paid,ai_enabled,token_limit,token_used,ai_token_balance,is_ai_paused',
+            column: 'id',
+            value: userId
+        });
+        data = profileResult.data;
+        error = profileResult.error;
 
         if (error) throw error;
-        const plan = data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'Basic';
+        const runtimePlan = evaluateRuntimePlan(data || {});
+        const plan = runtimePlan.runtime_plan || data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'growth';
+        const tokenLimit = Number(data?.token_limit ?? data?.ai_token_balance ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
 
         return res.status(200).json({
             success: true,
             settings: {
                 plan,
-                aiEnabled: Boolean(data?.ai_enabled),
-                tokenLimit: Number(data?.token_limit || 0),
+                plan_tier: plan,
+                runtime_plan: runtimePlan.runtime_plan,
+                has_trial_expired: runtimePlan.has_trial_expired,
+                aiEnabled: runtimePlan.runtime_tier !== 'BASIC' && data?.ai_enabled !== false,
+                tokenLimit,
                 tokenUsed: Number(data?.token_used || 0),
                 isAiPaused: Boolean(data?.is_ai_paused)
             }
         });
     } catch (error) {
         const statusCode = error.statusCode || 500;
-        console.error('AI settings fetch failed:', error.message || error);
-        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load AI settings.' });
+        console.error('[YogiDesk Secure AI] Settings lookup failed.');
+        return res.status(statusCode).json({ success: false, message: 'Unable to load AI settings.' });
     }
 });
 

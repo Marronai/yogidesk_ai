@@ -15,9 +15,9 @@ const normalizeWallet = (walletData = {}) => ({
   balance: Number(walletData.balance ?? 0),
   is_first_recharge: walletData.is_first_recharge ?? true,
   welcome_gift_active: walletData.welcome_gift_active ?? false,
-  current_plan: walletData.current_plan || 'starter',
-  plan_tier: walletData.plan_tier || 'starter',
-  runtime_plan: walletData.runtime_plan || walletData.current_plan || walletData.plan_tier || 'starter',
+  current_plan: walletData.current_plan || 'growth',
+  plan_tier: walletData.plan_tier || 'growth',
+  runtime_plan: walletData.runtime_plan || walletData.current_plan || walletData.plan_tier || 'growth',
   has_trial_expired: Boolean(walletData.has_trial_expired),
   plan_limits: walletData.plan_limits || null,
 });
@@ -25,7 +25,7 @@ const normalizeWallet = (walletData = {}) => ({
 const applyRuntimePlan = (walletData = {}, profile = {}) => {
   const hasTrialExpired = Boolean(profile.has_trial_expired);
   const runtimePlan = String(profile.runtime_plan || profile.current_plan || profile.plan_tier || walletData.runtime_plan || '').trim();
-  const effectivePlan = hasTrialExpired ? 'basic' : (runtimePlan || walletData.current_plan || walletData.plan_tier || 'starter');
+  const effectivePlan = hasTrialExpired ? 'basic' : (runtimePlan || walletData.current_plan || walletData.plan_tier || 'growth');
 
   return normalizeWallet({
     ...walletData,
@@ -48,7 +48,7 @@ export const useWallet = () => {
 };
 
 export const WalletProvider = ({ children }) => {
-  const [wallet, setWallet] = useState(normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' }));
+  const [wallet, setWallet] = useState(normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'growth', plan_tier: 'growth' }));
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState(null);
@@ -88,8 +88,8 @@ export const WalletProvider = ({ children }) => {
           balance: 50.00, // The sign-up bonus
           is_first_recharge: true,
           welcome_gift_active: true,
-          current_plan: 'starter',
-          plan_tier: 'starter',
+          current_plan: 'growth',
+          plan_tier: 'growth',
           lifetime_contacts_count: 0,
         };
 
@@ -108,7 +108,7 @@ export const WalletProvider = ({ children }) => {
     } catch (error) {
       console.warn('Wallet table unavailable; continuing with local fallback.', error?.message || error);
     }
-    return normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'starter', plan_tier: 'starter' });
+    return normalizeWallet({ balance: 0, is_first_recharge: true, welcome_gift_active: false, current_plan: 'growth', plan_tier: 'growth' });
   }, []);
 
   const fetchTransactions = useCallback(async (currentUserId) => {

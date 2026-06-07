@@ -11,6 +11,29 @@ import { getOAuthRedirectUrl, handleGoogleSignIn, supabase } from '../config/sup
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
 
+const getMissingColumnName = (error) => {
+  const message = String(error?.message || error?.details || '');
+  const match = message.match(/'([^']+)' column/i) || message.match(/column "?([a-zA-Z0-9_]+)"?/i);
+  return match?.[1] || '';
+};
+
+const upsertProfileSafely = async (payload) => {
+  let safePayload = { ...payload };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { error } = await supabase
+      .from('doctor_profiles')
+      .upsert(safePayload, { onConflict: 'id' });
+
+    if (!error) return { error: null };
+    const missingColumn = getMissingColumnName(error);
+    if (!missingColumn || !Object.prototype.hasOwnProperty.call(safePayload, missingColumn)) return { error };
+    const { [missingColumn]: _removed, ...nextPayload } = safePayload;
+    safePayload = nextPayload;
+  }
+
+  return { error: new Error('Profile seed retry limit reached.') };
+};
+
 const SignUp = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -80,13 +103,14 @@ const SignUp = () => {
       is_first_recharge: true,
       welcome_gift_active: true,
       current_plan: 'growth',
-      plan_tier: 'Growth Clinic',
+      plan_tier: 'growth',
+      lifetime_contacts_count: 0,
     };
     const walletConflictTarget = 'user_id';
 
     const { error } = await supabase
       .from('wallets')
-      .upsert(walletPayload, { onConflict: walletConflictTarget, ignoreDuplicates: true });
+      .upsert(walletPayload, { onConflict: walletConflictTarget });
 
     if (error) console.warn('Wallet database seed deferred:', error.message);
 
@@ -102,26 +126,27 @@ const SignUp = () => {
       email: email.trim().toLowerCase(),
       name: formData.name.trim() || 'Doctor',
       clinic_name: formData.businessName.trim(),
-      business_name: formData.businessName.trim(),
       business_category: formData.businessCategory,
       clinic_category: formData.businessCategory,
       specialization: formData.businessCategory,
       phone_number: formData.phone.replace(/\D/g, '').slice(-10),
-      subscription_tier: 'GROWTH',
+      subscription_tier: 'growth',
+      current_plan: 'growth',
+      plan_tier: 'growth',
       subscription_status: 'trialing',
       trial_start_at: now.toISOString(),
       trial_end_at: trialEndAt.toISOString(),
       wallet_balance: 50.00,
+      lifetime_patients_limit: 2000,
+      ai_token_balance: 1000,
       onboarding_tour_completed: false,
-      plan_limits: { patient_limit: 2000, staff_limit: 3, template_limit: 50 },
+      plan_limits: { patient_limit: 2000, staff_limit: 2, template_limit: 50 },
       updated_at: now.toISOString(),
     };
 
-    const { error } = await supabase
-      .from('doctor_profiles')
-      .upsert(profilePayload, { onConflict: 'id' });
+    const { error } = await upsertProfileSafely(profilePayload);
 
-    if (error) console.warn('Premium trial profile seed deferred to backend:', error.message);
+    if (error) console.warn('Premium trial profile seed deferred to backend.');
   };
 
   const triggerWelcomeEmail = (email = formData.email, userId = pendingUser?.id) => {
@@ -186,6 +211,9 @@ const SignUp = () => {
           clinicName: formData.businessName,
           businessCategory: formData.businessCategory,
           phone: formData.phone,
+          plan: 'growth',
+          plan_tier: 'growth',
+          specialization: formData.businessCategory,
           welcomeGift: true,
         });
         
@@ -242,6 +270,8 @@ const SignUp = () => {
             full_name: formData.name.trim() || googleUser.user_metadata?.full_name || 'Doctor',
             business_name: formData.businessName.trim(),
             business_category: formData.businessCategory,
+            specialization: formData.businessCategory,
+            plan_tier: 'growth',
             phone: cleanPhone
           }
         });
@@ -252,6 +282,8 @@ const SignUp = () => {
             full_name: formData.name.trim() || googleUser.user_metadata?.full_name,
             business_name: formData.businessName.trim(),
             business_category: formData.businessCategory,
+            specialization: formData.businessCategory,
+            plan_tier: 'growth',
             phone: cleanPhone
           }
         }, googleUser.email || cleanEmail);
@@ -281,6 +313,8 @@ const SignUp = () => {
               full_name: formData.name.trim(),
               business_name: formData.businessName.trim(),
               business_category: formData.businessCategory,
+              specialization: formData.businessCategory,
+              plan_tier: 'growth',
               phone: cleanPhone,
               email_otp_verified: true
             }

@@ -163,7 +163,7 @@ const updateDoctorProfileSafely = async ({ userId, payload }) => {
       continue;
     }
 
-    console.error('[HybridAuth] doctor_profiles update failed:', error.message || error);
+    console.error('[HybridAuth] doctor_profiles update deferred.');
     return false;
   }
 
@@ -505,7 +505,7 @@ exports.register = async (req, res) => {
       businessType: selectedBusinessType,
       businessCategory: selectedSpecialization,
       role: 'user',
-      planType: 'starter_clinic',
+      planType: 'growth',
       subscriptionStatus: 'wallet_active',
       wallet: { balance: 50, is_first_recharge: true },
       isVerified: false,
@@ -522,7 +522,9 @@ exports.register = async (req, res) => {
       businessCategory: selectedSpecialization,
       phone: safePhone
     }).then(({ error }) => {
-      if (error) console.error('Premium trial profile seed failed:', error.message || error);
+      if (error) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
+    }).catch(() => {
+      console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
     });
 
     await updateDoctorProfileSafely({
@@ -537,6 +539,12 @@ exports.register = async (req, res) => {
         specialization: selectedSpecialization,
         business_category: selectedSpecialization,
         clinic_category: selectedSpecialization,
+        subscription_tier: 'growth',
+        current_plan: 'growth',
+        plan_tier: 'growth',
+        lifetime_patients_limit: 2000,
+        ai_token_balance: 1000,
+        plan_limits: { patient_limit: 2000, staff_limit: 2, template_limit: 50 },
         updated_at: new Date().toISOString()
       }
     });

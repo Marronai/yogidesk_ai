@@ -27,7 +27,7 @@ const AuthSuccess = () => {
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({
     clinic_name: '',
-    specialization: 'General Physician',
+    specialization: '',
     whatsapp_phone_number_id: '',
   });
 
@@ -56,8 +56,8 @@ const AuthSuccess = () => {
         if (missingProfile) {
           setForm((current) => ({
             ...current,
-            clinic_name: profile.clinic_name || profile.business_name || sessionUser.user_metadata?.business_name || '',
-            specialization: profile.specialization || 'General Physician',
+            clinic_name: profile.clinic_name || sessionUser.user_metadata?.business_name || '',
+            specialization: profile.specialization || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
             whatsapp_phone_number_id: profile.whatsapp_phone_number_id || '',
           }));
           setNeedsOnboarding(true);

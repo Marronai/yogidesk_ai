@@ -38,7 +38,7 @@ const TemplateManager = () => {
   const templateApiPath = String(api.defaults?.baseURL || '').replace(/\/+$/, '').endsWith('/api') ? '/templates' : '/api/templates';
   const { wallet } = useWallet(); // Consume wallet from global context
   const { userProfile } = useAuth();
-  const [selectedSpecialty, setSelectedSpecialty] = useState('General Physician');
+  const [selectedSpecialty, setSelectedSpecialty] = useState('');
 
   const fetchTemplates = useCallback(async ({ silent = false } = {}) => {
     try {
@@ -89,7 +89,7 @@ const TemplateManager = () => {
         ...(activeLang.toLowerCase() !== 'all' && { language: activeLang })
       };
       const response = await api.get('/templates/dashboard', { params });
-      const specialization = response.data?.sourceSpecialization || response.data?.metadata?.sourceSpecialization || response.data?.specialization || userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || 'General Physician';
+      const specialization = response.data?.sourceSpecialization || response.data?.metadata?.sourceSpecialization || response.data?.specialization || userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || '';
       const templates = Array.isArray(response.data?.templates) ? response.data.templates : [];
       setDashboardTemplates(templates.length ? templates : getBaselineTemplatesForSpecialty(specialization));
       setDashboardSpecialization(specialization);
@@ -98,7 +98,7 @@ const TemplateManager = () => {
     } catch (err) {
       console.error('Dashboard template library failed:', err);
       setError(err?.response?.data?.message || 'Unable to load specialization templates.');
-      const specialization = userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || 'General Physician';
+      const specialization = userProfile?.clinic_category || userProfile?.specialization || localStorage.getItem('user_business_category') || '';
       setDashboardTemplates(getBaselineTemplatesForSpecialty(specialization));
       setDashboardSpecialization(specialization);
     } finally {
@@ -518,7 +518,7 @@ const TemplateManager = () => {
             <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
               <Globe size={16} /> Ready-Made Library
             </h3>
-            <p className="mt-2 text-xl font-black text-slate-900">{dashboardSpecialization || 'General Physician'} Templates</p>
+            <p className="mt-2 text-xl font-black text-slate-900">{dashboardSpecialization || 'Medical'} Templates</p>
             <p className="mt-1 text-xs font-semibold text-slate-500">50 Meta-ready templates mapped from your clinic profile.</p>
           </div>
 

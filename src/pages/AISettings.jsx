@@ -3,9 +3,13 @@ import { Bot, CreditCard, Gauge, PauseCircle, RefreshCw, Settings2, ShieldCheck 
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
+import { useAuth } from '../context/AuthContext';
 
 const defaultSettings = {
-  plan: 'Basic',
+  plan: '',
+  plan_tier: '',
+  runtime_plan: '',
+  has_trial_expired: false,
   aiEnabled: false,
   tokenLimit: 0,
   tokenUsed: 0,
@@ -14,6 +18,7 @@ const defaultSettings = {
 
 const AISettings = () => {
   const navigate = useNavigate();
+  const { userProfile } = useAuth();
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -30,10 +35,22 @@ const AISettings = () => {
       setError('');
       const { data: userResult } = await supabase.auth.getUser();
       const userId = userResult?.user?.id || localStorage.getItem('user_id');
-      const response = await api.get('/api/ai/settings', { params: { userId } });
-      if (response.data?.success) setSettings({ ...defaultSettings, ...(response.data.settings || {}) });
+      const [settingsResult, profileResult] = await Promise.all([
+        api.get('/api/ai/settings', { params: { userId } }),
+        api.get('/profile/context', { params: { userId } }).catch(() => ({ data: null })),
+      ]);
+      if (settingsResult.data?.success) {
+        const liveProfile = profileResult.data?.profile || userProfile || {};
+        const livePlan = liveProfile.runtime_plan || liveProfile.current_plan || liveProfile.plan_tier;
+        setSettings({
+          ...defaultSettings,
+          ...(settingsResult.data.settings || {}),
+          ...(livePlan && { plan: livePlan, plan_tier: livePlan, runtime_plan: livePlan }),
+          has_trial_expired: Boolean(liveProfile.has_trial_expired || settingsResult.data.settings?.has_trial_expired),
+        });
+      }
     } catch (err) {
-      setError(err?.response?.data?.message || err.message || 'Unable to load AI settings.');
+      setError(err?.response?.data?.message || 'Unable to load AI settings.');
     } finally {
       setLoading(false);
     }
@@ -43,8 +60,13 @@ const AISettings = () => {
     loadSettings();
   }, []);
 
-  const planLabel = String(settings.plan || 'Basic').replace(/_/g, ' ');
+  const planLabel = String(settings.runtime_plan || settings.plan_tier || settings.plan || 'growth').replace(/_/g, ' ');
   const assistantEnabled = settings.aiEnabled && !settings.isAiPaused;
+  const displayPlanLabel = planLabel
+    .split(' ')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 
   return (
     <div className="space-y-6">
@@ -55,7 +77,7 @@ const AISettings = () => {
           </div>
           <div>
             <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Appointments</p>
-            <h1 className="text-2xl font-black tracking-tight text-slate-900">Gemini Assistant Settings</h1>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">Assistant Settings</h1>
           </div>
         </div>
         <button
@@ -85,9 +107,9 @@ const AISettings = () => {
             </span>
           </div>
           <p className="text-xs font-black uppercase tracking-widest text-slate-400">Current Plan</p>
-          <p className="mt-2 text-3xl font-black text-slate-950">{planLabel}</p>
+          <p className="mt-2 text-3xl font-black text-slate-950">{displayPlanLabel}</p>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
-            {settings.aiEnabled ? 'AI appointment automation is enabled for this workspace.' : 'AI automation is not enabled on this plan.'}
+            {settings.has_trial_expired ? 'Your complementary access has expired. Upgrade to restore assistant automation.' : settings.aiEnabled ? 'Assistant automation is enabled for this workspace.' : 'Assistant automation is not enabled on this plan.'}
           </p>
         </div>
 
@@ -125,7 +147,7 @@ const AISettings = () => {
             <h2 className="text-sm font-black uppercase tracking-widest text-slate-600">Assistant Gate</h2>
           </div>
           <p className="text-sm font-semibold leading-6 text-slate-500">
-            Basic plans, disabled AI, exhausted usage, and human takeover all bypass Gemini so patients remain in the inbox for manual reply.
+            Plan limits, disabled automation, exhausted usage, and human takeover all route patients to the inbox for manual reply.
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

@@ -18,6 +18,11 @@ const normalizeTier = (tier = 'GROWTH') => {
 const getPlanLimits = (tier) => PLAN_LIMITS[normalizeTier(tier)] || PLAN_LIMITS.GROWTH;
 
 const isPaidSubscriptionStatus = (status) => ['active', 'paid', 'subscription_active'].includes(String(status || '').trim().toLowerCase());
+const getMissingColumnName = (error) => {
+  const message = String(error?.message || error?.details || '');
+  const match = message.match(/'([^']+)' column/i) || message.match(/column "?([a-zA-Z0-9_]+)"?/i);
+  return match?.[1] || '';
+};
 
 const evaluateRuntimePlan = (profile = {}, now = new Date()) => {
   const subscriptionStatus = profile.subscription_status || profile.subscriptionStatus || '';
@@ -56,16 +61,17 @@ const buildTrialProfilePayload = ({
     email: email || null,
     name: name || 'Doctor',
     clinic_name: businessName || null,
-    business_name: businessName || null,
     business_category: businessCategory || null,
     clinic_category: businessCategory || null,
     specialization: businessCategory || null,
     phone_number: phone || null,
-    subscription_tier: 'GROWTH',
+    subscription_tier: 'growth',
     subscription_status: 'trialing',
     trial_start_at: now.toISOString(),
     trial_end_at: trialEnd.toISOString(),
     wallet_balance: 50.00,
+    lifetime_patients_limit: 2000,
+    ai_token_balance: 1000,
     onboarding_tour_completed: false,
     trial_last_reminder_at: null,
     plan_limits: getPlanLimits('GROWTH'),
@@ -77,11 +83,25 @@ const ensurePremiumTrialProfile = async (db, payload) => {
   if (!db?.from || !payload?.userId) return { data: null, error: null };
 
   const row = buildTrialProfilePayload(payload);
-  const result = await db
-    .from('doctor_profiles')
-    .upsert(row, { onConflict: 'id' })
-    .select('*')
-    .maybeSingle();
+  let safeRow = { ...row };
+  let result = { data: null, error: null };
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      result = await db
+        .from('doctor_profiles')
+        .upsert(safeRow, { onConflict: 'id' })
+        .select('*')
+        .maybeSingle();
+    } catch (error) {
+      result = { data: null, error };
+    }
+
+    const missingColumn = getMissingColumnName(result.error);
+    if (!missingColumn || !Object.prototype.hasOwnProperty.call(safeRow, missingColumn)) break;
+    delete safeRow[missingColumn];
+    result = { data: null, error: null };
+  }
 
   if (result.error) return result;
 
@@ -91,9 +111,11 @@ const ensurePremiumTrialProfile = async (db, payload) => {
     is_first_recharge: true,
     welcome_gift_active: true,
     current_plan: 'growth',
-    plan_tier: 'Growth Clinic',
+    plan_tier: 'growth',
     lifetime_contacts_count: 0,
-  }, { onConflict: 'user_id', ignoreDuplicates: true });
+  }, { onConflict: 'user_id' }).catch(() => {
+    console.error('[YogiDesk Secure Trial] Wallet seed deferred.');
+  });
 
   return result;
 };
