@@ -3450,11 +3450,31 @@ const attachSessionUserForMetaConnection = async (req, res, next) => {
     next();
 };
 
-const sanitizeKnowledgeBaseText = (value, maxLength = 1200) => String(value || '')
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
+const escapeKnowledgeBaseTemplateText = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;')
+    .replace(/\$\{/g, '&#36;{');
+
+const sanitizeKnowledgeBaseText = (value, maxLength = 1200) => escapeKnowledgeBaseTemplateText(
+    String(value || '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength)
+);
+
+const logKnowledgeBasePersistenceError = (error) => {
+    console.error('[YogiDesk Secure Settings] Knowledge base save failed', {
+        code: error?.code || null,
+        message: error?.message || 'Unknown persistence error',
+        details: error?.details || null,
+        hint: error?.hint || null
+    });
+};
 
 const normalizeKnowledgeBasePayload = (body = {}) => ({
     clinic_timing: sanitizeKnowledgeBaseText(body.clinic_timing ?? body.clinicTiming, 500),
@@ -3505,11 +3525,9 @@ const handleKnowledgeBaseSave = async (req, res) => {
         const db = supabaseAdmin || supabase;
         if (!db?.from) return res.status(500).json({ success: false, message: "Settings service unavailable." });
 
-        const nowIso = new Date().toISOString();
         const payload = {
             doctor_id: sessionUser.id,
-            ...normalizeKnowledgeBasePayload(req.body || {}),
-            updated_at: nowIso
+            ...normalizeKnowledgeBasePayload(req.body || {})
         };
 
         const { data, error } = await db
@@ -3519,14 +3537,14 @@ const handleKnowledgeBaseSave = async (req, res) => {
             .maybeSingle();
 
         if (error) {
-            console.error('[YogiDesk Secure Settings] Knowledge base save failed');
-            return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base." });
+            logKnowledgeBasePersistenceError(error);
+            return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base due to verification mismatch." });
         }
 
         return res.status(200).json({ success: true, data });
-    } catch {
-        console.error('[YogiDesk Secure Settings] Knowledge base save failed');
-        return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base." });
+    } catch (error) {
+        logKnowledgeBasePersistenceError(error);
+        return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base due to verification mismatch." });
     }
 };
 
