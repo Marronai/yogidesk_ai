@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Bot, CheckCircle2, Clock, IndianRupee, Loader2, Lock, Mail, MapPin, Phone, Save, ShieldCheck, Smartphone, Stethoscope, User } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Clock, Edit3, IndianRupee, Loader2, Lock, Mail, MapPin, Phone, Save, ShieldCheck, Smartphone, Stethoscope, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
@@ -21,9 +21,14 @@ const emptyKnowledgeBaseForm = {
 
 const sanitizeKnowledgeBaseValue = (value, maxLength = 1200) => String(value || '')
   .replace(/[\u0000-\u001F\u007F]/g, ' ')
+  .replace(/[<>`]/g, '')
+  .replace(/\$\{/g, '{')
   .replace(/\s+/g, ' ')
   .trim()
   .slice(0, maxLength);
+
+const isKnowledgeBaseEmpty = (data = {}) => Object.keys(emptyKnowledgeBaseForm)
+  .every((key) => !String(data[key] || '').trim());
 
 const getStoredAccount = () => {
   const userId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id') || '';
@@ -115,6 +120,7 @@ const Settings = () => {
   const [loadingKnowledgeBase, setLoadingKnowledgeBase] = useState(true);
   const [savingKnowledgeBase, setSavingKnowledgeBase] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState('account');
+  const [isEditing, setIsEditing] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
   const [metaValidationError, setMetaValidationError] = useState('');
@@ -289,6 +295,7 @@ const Settings = () => {
         clinic_location: data.clinic_location || '',
         services_offered: data.services_offered || '',
       });
+      setIsEditing(isKnowledgeBaseEmpty(data));
     } catch {
       showToast('error', 'Unable to load AI Knowledge Base.');
     } finally {
@@ -355,7 +362,8 @@ const Settings = () => {
       if (!res.data?.success) throw new Error('Knowledge base save was not confirmed.');
 
       setKnowledgeBaseForm(payload);
-      showToast('success', 'AI Knowledge Base updated successfully! Gemini is now trained on your new settings.');
+      setIsEditing(false);
+      showToast('success', 'AI Knowledge Base updated successfully! Your custom Yogidesk ai Assistant is now synchronised and live.');
     } catch (error) {
       showToast('error', error?.response?.data?.message || 'Unable to save AI Knowledge Base.');
     } finally {
@@ -497,7 +505,7 @@ const Settings = () => {
             </h3>
             <p className="mt-2 text-sm font-bold text-slate-500">
               {connectionAnimation === 'success'
-                ? 'Your WhatsApp Cloud credentials are saved and locked.'
+                ? 'Your business messaging credentials are saved and locked.'
                 : 'Please check the credentials and try again.'}
             </p>
           </div>
@@ -511,7 +519,7 @@ const Settings = () => {
               <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-600">Yogi Desk</p>
               <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Settings</h1>
               <p className="mt-2 text-sm font-medium text-slate-500">
-                Manage your profile and WhatsApp Cloud API configuration.
+                Configure your workspace profile and smart automated assistant protocols.
               </p>
             </div>
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-lg shadow-orange-200">
@@ -599,9 +607,9 @@ const Settings = () => {
                   <Smartphone size={22} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-950">Official Meta API Connection</h2>
+                  <h2 className="text-xl font-black text-slate-950">Official Business Messaging Connection</h2>
                   <p className="mt-1 text-sm font-medium text-slate-500">
-                    Add your clinic's Meta WhatsApp Cloud credentials here.
+                    Add your clinic's verified WhatsApp connection credentials here.
                   </p>
                 </div>
               </div>
@@ -613,7 +621,7 @@ const Settings = () => {
                     : 'border-slate-200 bg-slate-100 text-slate-600'
                 }`}
               >
-                {isConnected ? 'Connected to Meta Cloud' : 'Not connected yet'}
+                {isConnected ? 'Connected' : 'Not connected yet'}
               </span>
             </div>
 
@@ -708,7 +716,7 @@ const Settings = () => {
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="w-full rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800 sm:flex-1">
-                Your WhatsApp credentials are used for authenticated Meta Cloud dispatch across campaigns and templates.
+                Your WhatsApp credentials are used for authenticated business messaging across campaigns and templates.
               </div>
 
               {!metaInputsLocked && (
@@ -763,7 +771,7 @@ const Settings = () => {
                 <div>
                   <h2 className="text-xl font-black text-slate-950">AI Knowledge Base</h2>
                   <p className="mt-1 text-sm font-medium text-slate-500">
-                    Gemini uses this clinic-specific information only for your WhatsApp assistant.
+                    Your smart assistant uses this clinic-specific information only for your workspace.
                   </p>
                 </div>
               </div>
@@ -785,7 +793,10 @@ const Settings = () => {
                     onChange={(event) => updateKnowledgeBaseField('clinic_timing', event.target.value)}
                     placeholder="Mon-Sat: 10 AM - 2 PM"
                     rows={4}
-                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                    readOnly={!isEditing}
+                    className={`w-full resize-none rounded-2xl border py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50 ${
+                      isEditing ? 'border-slate-200 bg-slate-50' : 'border-emerald-100 bg-emerald-50/50 text-slate-700'
+                    }`}
                   />
                 </div>
               </div>
@@ -799,7 +810,10 @@ const Settings = () => {
                     value={knowledgeBaseForm.consultation_fees}
                     onChange={(event) => updateKnowledgeBaseField('consultation_fees', event.target.value)}
                     placeholder="Rs. 500"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                    readOnly={!isEditing}
+                    className={`w-full rounded-2xl border py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50 ${
+                      isEditing ? 'border-slate-200 bg-slate-50' : 'border-emerald-100 bg-emerald-50/50 text-slate-700'
+                    }`}
                   />
                 </div>
               </div>
@@ -813,7 +827,10 @@ const Settings = () => {
                     onChange={(event) => updateKnowledgeBaseField('clinic_location', event.target.value)}
                     placeholder="1st Floor, Jha Complex..."
                     rows={5}
-                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                    readOnly={!isEditing}
+                    className={`w-full resize-none rounded-2xl border py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50 ${
+                      isEditing ? 'border-slate-200 bg-slate-50' : 'border-emerald-100 bg-emerald-50/50 text-slate-700'
+                    }`}
                   />
                 </div>
               </div>
@@ -827,21 +844,36 @@ const Settings = () => {
                     onChange={(event) => updateKnowledgeBaseField('services_offered', event.target.value)}
                     placeholder="Root Canal, Teeth Whitening, Braces..."
                     rows={5}
-                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                    readOnly={!isEditing}
+                    className={`w-full resize-none rounded-2xl border py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50 ${
+                      isEditing ? 'border-slate-200 bg-slate-50' : 'border-emerald-100 bg-emerald-50/50 text-slate-700'
+                    }`}
                   />
                 </div>
               </div>
             </div>
 
             <div className="mt-6 flex justify-end">
-              <button
-                type="submit"
-                disabled={savingKnowledgeBase || loadingKnowledgeBase}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-              >
-                {savingKnowledgeBase ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                {savingKnowledgeBase ? 'Saving...' : 'Save Changes'}
-              </button>
+              {isEditing ? (
+                <button
+                  type="submit"
+                  disabled={savingKnowledgeBase || loadingKnowledgeBase}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                >
+                  {savingKnowledgeBase ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                  {savingKnowledgeBase ? 'Saving...' : 'Save Changes'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsEditing(true)}
+                  disabled={loadingKnowledgeBase}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                >
+                  <Edit3 size={18} />
+                  Edit Settings
+                </button>
+              )}
             </div>
           </section>
         </form>
