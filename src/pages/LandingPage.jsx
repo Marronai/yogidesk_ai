@@ -8,7 +8,6 @@ import {
   Star, ShieldCheck, Heart, Search, Sparkles, Filter, Copy, Layers, Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import Footer from '../components/Footer';
 import PublicNavbar from '../components/PublicNavbar';
 
 // 🔒 STATIC HEALTHCARE RESOURCE LEDGER
@@ -464,9 +463,6 @@ const LandingPage = () => {
             </Link>
          </div>
       </section>
-
-      {/* FOOTER CONTAINER */}
-      <Footer />
     </div>
   );
 };
