@@ -91,7 +91,7 @@ const GEMINI_BOUNCE_WINDOW_MS = 2000;
 const GEMINI_RESULT_CACHE_MS = 30000;
 const geminiProcessingCache = new Map();
 const geminiResultCache = new Map();
-const GEMINI_MODEL_NAME = 'gemini-1.5-flash';
+const GEMINI_MODEL_NAME = 'gemini-2.5-flash';
 const GEMINI_SYSTEM_INSTRUCTION = 'You are an empathetic medical assistant for Yogi Desk. Collect Patient Name, Appointment Date, and Time naturally in Hinglish. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.';
 let geminiModel = null;
 
@@ -480,7 +480,22 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
         `Preferred language: ${languageCode}.`
     ].join('\n');
 
-    const response = await getGeminiModel().generateContent(prompt);
+    let response;
+    try {
+        response = await getGeminiModel().generateContent(prompt);
+    } catch (error) {
+        console.error('[YogiDesk Secure AI] Execution bypassed due to model interface code');
+        return {
+            success: false,
+            model: GEMINI_MODEL_NAME,
+            skipped: true,
+            reason: 'model_interface_code',
+            replyText: '',
+            usageMetadata: {},
+            tokenIncrement: 0
+        };
+    }
+
     const replyText = String(response?.response?.text?.() || '').trim();
     const usageMetadata = response?.response?.usageMetadata || {};
     return {
@@ -863,6 +878,18 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                     languageCode
                 });
 
+                if (geminiResult?.skipped) {
+                    return {
+                        ...inbound,
+                        doctorId: doctor.id,
+                        ai: { provider: 'gemini', skipped: true, reason: geminiResult.reason || 'model_interface_code' },
+                        replyTexts: [],
+                        bookingReady: false,
+                        bookingPayload: null,
+                        metaReplies: []
+                    };
+                }
+
                 const { cleanText, booking } = parseGeminiBookingConfirmation(geminiResult.replyText);
                 if (booking) saveGeminiAppointmentAsync({ doctor, inbound, booking });
 
@@ -916,17 +943,12 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
 
                 return result;
             } catch (error) {
-                console.error('Gemini WhatsApp runtime failed:', {
-                    messageId: inbound.messageId,
-                    fromPhone: inbound.fromPhone,
-                    doctorId: doctor.id,
-                    error: error.message || error
-                });
+                console.error('[YogiDesk Secure AI] Execution bypassed due to model interface code');
 
                 return {
                     ...inbound,
                     doctorId: doctor.id,
-                    ai: { provider: 'gemini', success: false, error: error.message || 'Gemini runtime failed.' },
+                    ai: { provider: 'gemini', success: false, error: 'model_interface_code' },
                     replyTexts: [],
                     bookingReady: false,
                     bookingPayload: null,
@@ -934,14 +956,10 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                 };
             }
         })().catch((error) => {
-            console.error('[YogiDesk AI] WhatsApp processing failed:', {
-                messageId: inbound.messageId,
-                fromPhone: inbound.fromPhone,
-                error: error.message || error
-            });
+            console.error('[YogiDesk Secure AI] Execution bypassed due to model interface code');
             return {
                 ...inbound,
-                ai: { provider: 'gemini', success: false, error: error.message || 'Gemini processing failed.' },
+                ai: { provider: 'gemini', success: false, error: 'model_interface_code' },
                 replyTexts: [],
                 bookingReady: false,
                 bookingPayload: null,
