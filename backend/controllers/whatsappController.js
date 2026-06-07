@@ -92,7 +92,7 @@ const GEMINI_RESULT_CACHE_MS = 30000;
 const geminiProcessingCache = new Map();
 const geminiResultCache = new Map();
 const GEMINI_MODEL_NAME = 'gemini-2.5-flash';
-const GEMINI_SYSTEM_INSTRUCTION = 'You are an empathetic medical assistant for Yogi Desk. Collect Patient Name, Appointment Date, and Time naturally in Hinglish. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.';
+const GEMINI_REPORT_ESCALATION_REPLY = 'Main aapka appointment Dr. Sahab ke sath book kar deti hoon, wo live aapki reports check karke aapko sahi aur sateek salah denge. Kya main aapka slot confirm karoon?';
 let geminiModel = null;
 
 const getGeminiModel = () => {
@@ -105,6 +105,54 @@ const getGeminiModel = () => {
     });
     return geminiModel;
 };
+
+const sanitizeGeminiContextValue = (value, fallback, maxLength = 1200) => {
+    const cleaned = String(value || '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLength);
+    return cleaned || fallback;
+};
+
+const fetchClinicKnowledgeBaseForDoctor = async (doctorId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !doctorId) return null;
+
+    try {
+        const { data, error } = await db
+            .from('clinic_knowledge_base')
+            .select('clinic_timing, services_offered, clinic_location, consultation_fees')
+            .eq('doctor_id', doctorId)
+            .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+            console.error('[YogiDesk Secure AI] Knowledge base lookup bypassed');
+            return null;
+        }
+
+        return data || null;
+    } catch {
+        console.error('[YogiDesk Secure AI] Knowledge base lookup bypassed');
+        return null;
+    }
+};
+
+const buildGeminiSystemInstruction = (dbData = {}) => [
+    'You are the official empathetic, professional AI medical receptionist for this clinic.',
+    'Here is the strict, verified ground-truth data for this specific doctor only. Do NOT invent, hallucinate, or use any outside knowledge:',
+    `- Clinic Timings: ${sanitizeGeminiContextValue(dbData.clinic_timing, 'Contact clinic directly', 500)}`,
+    `- Services Offered: ${sanitizeGeminiContextValue(dbData.services_offered, 'General Consultation', 1200)}`,
+    `- Location/Address: ${sanitizeGeminiContextValue(dbData.clinic_location, 'Contact clinic directly', 1000)}`,
+    `- Consultation Fees: ${sanitizeGeminiContextValue(dbData.consultation_fees, 'Contact clinic directly', 250)}`,
+    '',
+    'Rules:',
+    '1. Answer the patient query politely and conversationally in their preferred language: Hindi, English, or conversational Hinglish.',
+    '2. Keep the tone warm, comforting, and highly precise.',
+    `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
+    '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
+    '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.'
+].join('\n');
 
 const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
     const normalizedPayload = JSON.stringify({
@@ -470,8 +518,10 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
         ownerId: doctor?.id,
         patientPhone: inbound.fromPhone
     });
+    const clinicKnowledgeBase = await fetchClinicKnowledgeBaseForDoctor(doctor?.id);
+    const systemInstruction = buildGeminiSystemInstruction(clinicKnowledgeBase || {});
     const prompt = [
-        GEMINI_SYSTEM_INSTRUCTION,
+        systemInstruction,
         '',
         'Conversation so far:',
         history.length ? history.join('\n') : 'No earlier messages.',

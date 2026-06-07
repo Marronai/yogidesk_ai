@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, Lock, Mail, Phone, Save, ShieldCheck, Smartphone, User } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Clock, IndianRupee, Loader2, Lock, Mail, MapPin, Phone, Save, ShieldCheck, Smartphone, Stethoscope, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
@@ -11,6 +11,19 @@ const emptyForm = {
   whatsappBusinessAccountId: '',
   whatsappAccessToken: '',
 };
+
+const emptyKnowledgeBaseForm = {
+  clinic_timing: '',
+  consultation_fees: '',
+  clinic_location: '',
+  services_offered: '',
+};
+
+const sanitizeKnowledgeBaseValue = (value, maxLength = 1200) => String(value || '')
+  .replace(/[\u0000-\u001F\u007F]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, maxLength);
 
 const getStoredAccount = () => {
   const userId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id') || '';
@@ -99,12 +112,16 @@ const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
+  const [loadingKnowledgeBase, setLoadingKnowledgeBase] = useState(true);
+  const [savingKnowledgeBase, setSavingKnowledgeBase] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState('account');
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [hasExistingConnection, setHasExistingConnection] = useState(false);
   const [metaValidationError, setMetaValidationError] = useState('');
   const [connectionAnimation, setConnectionAnimation] = useState(null);
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [knowledgeBaseForm, setKnowledgeBaseForm] = useState(emptyKnowledgeBaseForm);
   const { userProfile, loadUserProfile } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const lastHydratedMetaRef = useRef('');
@@ -261,6 +278,29 @@ const Settings = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userProfile]);
 
+  const loadKnowledgeBase = async () => {
+    setLoadingKnowledgeBase(true);
+    try {
+      const res = await api.get('/api/settings/knowledge-base');
+      const data = res.data?.data || {};
+      setKnowledgeBaseForm({
+        clinic_timing: data.clinic_timing || '',
+        consultation_fees: data.consultation_fees || '',
+        clinic_location: data.clinic_location || '',
+        services_offered: data.services_offered || '',
+      });
+    } catch {
+      showToast('error', 'Unable to load AI Knowledge Base.');
+    } finally {
+      setLoadingKnowledgeBase(false);
+    }
+  };
+
+  useEffect(() => {
+    loadKnowledgeBase();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const refreshMetaConnection = async () => {
     try {
       const { userId } = await getActiveAccount();
@@ -290,6 +330,37 @@ const Settings = () => {
       ...current,
       [field]: value,
     }));
+  };
+
+  const updateKnowledgeBaseField = (field, value) => {
+    setKnowledgeBaseForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleSaveKnowledgeBase = async (event) => {
+    event.preventDefault();
+    setSavingKnowledgeBase(true);
+
+    try {
+      const payload = {
+        clinic_timing: sanitizeKnowledgeBaseValue(knowledgeBaseForm.clinic_timing, 500),
+        consultation_fees: sanitizeKnowledgeBaseValue(knowledgeBaseForm.consultation_fees, 250),
+        clinic_location: sanitizeKnowledgeBaseValue(knowledgeBaseForm.clinic_location, 1000),
+        services_offered: sanitizeKnowledgeBaseValue(knowledgeBaseForm.services_offered, 1200),
+      };
+
+      const res = await api.put('/api/settings/knowledge-base', payload);
+      if (!res.data?.success) throw new Error('Knowledge base save was not confirmed.');
+
+      setKnowledgeBaseForm(payload);
+      showToast('success', 'AI Knowledge Base updated successfully! Gemini is now trained on your new settings.');
+    } catch (error) {
+      showToast('error', error?.response?.data?.message || 'Unable to save AI Knowledge Base.');
+    } finally {
+      setSavingKnowledgeBase(false);
+    }
   };
 
   const handleUpdate = async (event) => {
@@ -449,6 +520,34 @@ const Settings = () => {
           </div>
         </div>
 
+        <div className="mb-6 flex flex-col gap-2 rounded-2xl border border-slate-100 bg-white p-2 shadow-sm sm:flex-row">
+          <button
+            type="button"
+            onClick={() => setActiveSettingsTab('account')}
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
+              activeSettingsTab === 'account'
+                ? 'bg-orange-600 text-white shadow-md shadow-orange-100'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <ShieldCheck size={18} />
+            Account & Meta
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSettingsTab('knowledge-base')}
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-black transition ${
+              activeSettingsTab === 'knowledge-base'
+                ? 'bg-orange-600 text-white shadow-md shadow-orange-100'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Bot size={18} />
+            AI Knowledge Base
+          </button>
+        </div>
+
+        {activeSettingsTab === 'account' ? (
         <form onSubmit={handleUpdate} className="space-y-6">
           <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex items-start gap-4">
@@ -653,6 +752,100 @@ const Settings = () => {
             </div>
           </div>
         </form>
+        ) : (
+        <form onSubmit={handleSaveKnowledgeBase} className="space-y-6">
+          <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+            <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+                  <Bot size={22} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-950">AI Knowledge Base</h2>
+                  <p className="mt-1 text-sm font-medium text-slate-500">
+                    Gemini uses this clinic-specific information only for your WhatsApp assistant.
+                  </p>
+                </div>
+              </div>
+              {loadingKnowledgeBase && (
+                <span className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                  <Loader2 className="animate-spin" size={14} />
+                  Loading
+                </span>
+              )}
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Clinic Timings</label>
+                <div className="relative">
+                  <Clock className="absolute left-4 top-4 text-slate-400" size={18} />
+                  <textarea
+                    value={knowledgeBaseForm.clinic_timing}
+                    onChange={(event) => updateKnowledgeBaseField('clinic_timing', event.target.value)}
+                    placeholder="Mon-Sat: 10 AM - 2 PM"
+                    rows={4}
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Consultation Fees</label>
+                <div className="relative">
+                  <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input
+                    type="text"
+                    value={knowledgeBaseForm.consultation_fees}
+                    onChange={(event) => updateKnowledgeBaseField('consultation_fees', event.target.value)}
+                    placeholder="Rs. 500"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Clinic Location / Address</label>
+                <div className="relative">
+                  <MapPin className="absolute left-4 top-4 text-slate-400" size={18} />
+                  <textarea
+                    value={knowledgeBaseForm.clinic_location}
+                    onChange={(event) => updateKnowledgeBaseField('clinic_location', event.target.value)}
+                    placeholder="1st Floor, Jha Complex..."
+                    rows={5}
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Services Offered</label>
+                <div className="relative">
+                  <Stethoscope className="absolute left-4 top-4 text-slate-400" size={18} />
+                  <textarea
+                    value={knowledgeBaseForm.services_offered}
+                    onChange={(event) => updateKnowledgeBaseField('services_offered', event.target.value)}
+                    placeholder="Root Canal, Teeth Whitening, Braces..."
+                    rows={5}
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-12 pr-4 text-sm font-semibold outline-none transition focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-50"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="submit"
+                disabled={savingKnowledgeBase || loadingKnowledgeBase}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+              >
+                {savingKnowledgeBase ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+                {savingKnowledgeBase ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </section>
+        </form>
+        )}
       </div>
     </div>
   );

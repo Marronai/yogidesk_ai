@@ -3450,11 +3450,98 @@ const attachSessionUserForMetaConnection = async (req, res, next) => {
     next();
 };
 
+const sanitizeKnowledgeBaseText = (value, maxLength = 1200) => String(value || '')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+
+const normalizeKnowledgeBasePayload = (body = {}) => ({
+    clinic_timing: sanitizeKnowledgeBaseText(body.clinic_timing ?? body.clinicTiming, 500),
+    consultation_fees: sanitizeKnowledgeBaseText(body.consultation_fees ?? body.consultationFees, 250),
+    clinic_location: sanitizeKnowledgeBaseText(body.clinic_location ?? body.clinicLocation, 1000),
+    services_offered: sanitizeKnowledgeBaseText(body.services_offered ?? body.servicesOffered, 1200)
+});
+
+const handleKnowledgeBaseFetch = async (req, res) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: "Settings service unavailable." });
+
+        const { data, error } = await db
+            .from('clinic_knowledge_base')
+            .select('clinic_timing, consultation_fees, clinic_location, services_offered')
+            .eq('doctor_id', sessionUser.id)
+            .maybeSingle();
+
+        if (error && error.code !== 'PGRST116') {
+            console.error('[YogiDesk Secure Settings] Knowledge base fetch failed');
+            return res.status(500).json({ success: false, message: "Unable to fetch AI Knowledge Base." });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: data || {
+                clinic_timing: '',
+                consultation_fees: '',
+                clinic_location: '',
+                services_offered: ''
+            }
+        });
+    } catch {
+        console.error('[YogiDesk Secure Settings] Knowledge base fetch failed');
+        return res.status(500).json({ success: false, message: "Unable to fetch AI Knowledge Base." });
+    }
+};
+
+const handleKnowledgeBaseSave = async (req, res) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: "Settings service unavailable." });
+
+        const nowIso = new Date().toISOString();
+        const payload = {
+            doctor_id: sessionUser.id,
+            ...normalizeKnowledgeBasePayload(req.body || {}),
+            updated_at: nowIso
+        };
+
+        const { data, error } = await db
+            .from('clinic_knowledge_base')
+            .upsert(payload, { onConflict: 'doctor_id' })
+            .select('clinic_timing, consultation_fees, clinic_location, services_offered')
+            .maybeSingle();
+
+        if (error) {
+            console.error('[YogiDesk Secure Settings] Knowledge base save failed');
+            return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base." });
+        }
+
+        return res.status(200).json({ success: true, data });
+    } catch {
+        console.error('[YogiDesk Secure Settings] Knowledge base save failed');
+        return res.status(500).json({ success: false, message: "Unable to save AI Knowledge Base." });
+    }
+};
+
 app.get('/api/settings/meta-connection', handleMetaConnectionFetch);
 app.get('/settings/meta-connection', handleMetaConnectionFetch);
 
 app.post('/api/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
 app.post('/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
+
+app.get('/api/settings/knowledge-base', handleKnowledgeBaseFetch);
+app.get('/settings/knowledge-base', handleKnowledgeBaseFetch);
+app.post('/api/settings/knowledge-base', handleKnowledgeBaseSave);
+app.post('/settings/knowledge-base', handleKnowledgeBaseSave);
+app.put('/api/settings/knowledge-base', handleKnowledgeBaseSave);
+app.put('/settings/knowledge-base', handleKnowledgeBaseSave);
 
 app.post('/api/payments/meta-connection', async (req, res, next) => {
     const sessionUser = await getSupabaseSessionUser(req);
