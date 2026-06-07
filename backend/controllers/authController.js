@@ -514,18 +514,19 @@ exports.register = async (req, res) => {
       // currentSessionId: crypto.randomBytes(16).toString('hex')
     });
 
-    await ensurePremiumTrialProfile(supabase, {
-      userId: String(user._id),
-      email: safeEmail,
-      name,
-      businessName: businessName || `${name}'s Clinic`,
-      businessCategory: selectedSpecialization,
-      phone: safePhone
-    }).then(({ error }) => {
-      if (error) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
-    }).catch(() => {
+    try {
+      const { error: trialSeedError } = await ensurePremiumTrialProfile(supabase, {
+        userId: String(user._id),
+        email: safeEmail,
+        name,
+        businessName: businessName || `${name}'s Clinic`,
+        businessCategory: selectedSpecialization,
+        phone: safePhone
+      });
+      if (trialSeedError) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
+    } catch {
       console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
-    });
+    }
 
     await updateDoctorProfileSafely({
       userId: String(user._id),

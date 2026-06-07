@@ -28,6 +28,7 @@ import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
+const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.';
 
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
@@ -170,6 +171,8 @@ const InboxContent = () => {
   const [showDetailsPanel, setShowDetailsPanel] = useState(false);
   const [chatBg, setChatBg] = useState({ type: 'color', value: '#E5DDD5' });
   const [doctorAiPaused, setDoctorAiPaused] = useState(false);
+  const [aiAccessLocked, setAiAccessLocked] = useState(false);
+  const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
   const [aiToggleLoading, setAiToggleLoading] = useState(false);
   const bottomRef = useRef(null);
   const messagesViewportRef = useRef(null);
@@ -227,7 +230,13 @@ const InboxContent = () => {
       const user = await getUser();
       if (!user?.id) return;
       const response = await api.get('/api/ai/settings', { params: { userId: user.id } });
-      if (response.data?.success) setDoctorAiPaused(Boolean(response.data.settings?.isAiPaused));
+      if (response.data?.success) {
+        const settings = response.data.settings || {};
+        const locked = Boolean(settings.has_trial_expired || settings.is_trial_expired || String(settings.runtime_plan || settings.plan_tier || settings.plan || '').toLowerCase() === 'basic');
+        setDoctorAiPaused(Boolean(settings.isAiPaused));
+        setAiAccessLocked(locked);
+        if (locked) setShowTrialExpiredModal(true);
+      }
     } catch (error) {
       logInboxError(error);
     }
@@ -604,6 +613,10 @@ const InboxContent = () => {
 
   const handleToggleAiMode = async () => {
     if (!selectedChat || aiToggleLoading) return;
+    if (aiAccessLocked) {
+      setShowTrialExpiredModal(true);
+      return;
+    }
     const nextPaused = !(selectedChat.metadata?.ai_paused ?? doctorAiPaused);
     const nextMetadata = { ...(selectedChat.metadata || {}), ai_paused: nextPaused };
 
@@ -635,6 +648,10 @@ const InboxContent = () => {
   const handleSendMessage = async () => {
     const text = message.trim();
     if (!text || !selectedChat) return;
+    if (aiAccessLocked) {
+      setShowTrialExpiredModal(true);
+      return;
+    }
     if (!canUseComposer) {
       navigate('/campaigns');
       return;
@@ -776,7 +793,7 @@ const InboxContent = () => {
     loadMessages(chat);
   };
 
-  const isAiPausedForSelectedChat = Boolean(selectedChat?.metadata?.ai_paused ?? doctorAiPaused);
+  const isAiPausedForSelectedChat = aiAccessLocked || Boolean(selectedChat?.metadata?.ai_paused ?? doctorAiPaused);
 
   const chatViewportStyle = chatBg.type === 'image'
     ? { backgroundImage: `url(${chatBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
@@ -784,6 +801,35 @@ const InboxContent = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F0F2F5] font-sans">
+      {showTrialExpiredModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-orange-600">Trial Expired</p>
+                <h2 className="mt-2 text-xl font-black text-slate-950">AI features are locked</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTrialExpiredModal(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+                aria-label="Close trial expired notice"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">{TRIAL_EXPIRED_NOTICE}</p>
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/wallet')}
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-orange-700"
+            >
+              Open Billing
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex w-80 flex-col border-r border-slate-200 bg-white lg:w-96">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-4">
           <div className="mb-4 flex items-center justify-between">
@@ -876,12 +922,12 @@ const InboxContent = () => {
                 <button
                   type="button"
                   onClick={handleToggleAiMode}
-                  disabled={aiToggleLoading}
+                  disabled={aiToggleLoading || aiAccessLocked}
                   className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-black transition-all disabled:opacity-60 ${isAiPausedForSelectedChat ? 'bg-slate-800 text-white shadow-lg shadow-slate-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100'}`}
-                  title={isAiPausedForSelectedChat ? 'Resume Gemini assistant replies' : 'Pause AI for human takeover'}
+                  title={aiAccessLocked ? 'Recharge wallet balance to reactivate YogiDesk AI' : isAiPausedForSelectedChat ? 'Resume Gemini assistant replies' : 'Pause AI for human takeover'}
                 >
                   {isAiPausedForSelectedChat ? <UserCog size={14} /> : <Bot size={14} />}
-                  {isAiPausedForSelectedChat ? 'Human Mode (AI Paused)' : 'AI Assistant: ACTIVE'}
+                  {aiAccessLocked ? 'AI Locked' : isAiPausedForSelectedChat ? 'Human Mode (AI Paused)' : 'AI Assistant: ACTIVE'}
                 </button>
 
                 <button
@@ -942,16 +988,33 @@ const InboxContent = () => {
               <div className="mx-auto max-w-[900px] space-y-3">
                 {!isGhostMode && (
                   <div className="mb-2 flex gap-2">
-                    <button onClick={() => setIsPrivateNote(false)} className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase transition-all ${!isPrivateNote ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>
+                    <button disabled={aiAccessLocked} onClick={() => setIsPrivateNote(false)} className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase transition-all disabled:cursor-not-allowed disabled:opacity-50 ${!isPrivateNote ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>
                       <MessageSquare size={12} className="mr-1.5 inline" /> Customer Reply
                     </button>
-                    <button onClick={() => setIsPrivateNote(true)} className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase transition-all ${isPrivateNote ? 'bg-yellow-400 text-yellow-900 shadow-md' : 'bg-slate-50 text-slate-400'}`}>
+                    <button disabled={aiAccessLocked} onClick={() => setIsPrivateNote(true)} className={`rounded-lg px-4 py-1.5 text-[10px] font-black uppercase transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isPrivateNote ? 'bg-yellow-400 text-yellow-900 shadow-md' : 'bg-slate-50 text-slate-400'}`}>
                       <Lock size={12} className="mr-1.5 inline" /> Private Note
                     </button>
                   </div>
                 )}
 
-                {!canUseComposer && !isGhostMode ? (
+                {aiAccessLocked ? (
+                  <div className="flex flex-col gap-3 rounded-2xl border border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex gap-3">
+                      <AlertCircle size={20} className="mt-0.5 shrink-0 text-orange-600" />
+                      <div>
+                        <p className="text-sm font-black text-slate-800">YogiDesk AI features are locked</p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">{TRIAL_EXPIRED_NOTICE}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/dashboard/wallet')}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-xs font-black uppercase tracking-wide text-white shadow-sm hover:bg-orange-700"
+                    >
+                      Open Billing
+                    </button>
+                  </div>
+                ) : !canUseComposer && !isGhostMode ? (
                   <div className="flex flex-col gap-3 rounded-2xl border border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <p className="text-sm font-black text-slate-800">Customer reply window is closed</p>
@@ -973,7 +1036,7 @@ const InboxContent = () => {
                     <input
                       type="text"
                       placeholder={isGhostMode ? 'Ghost mode active: typing disabled' : (isPrivateNote ? 'Type a private team note...' : 'Reply to customer...')}
-                      disabled={isGhostMode}
+                      disabled={isGhostMode || aiAccessLocked}
                       className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
                       value={message}
                       onChange={(event) => setMessage(event.target.value)}

@@ -88,11 +88,13 @@ const ensurePremiumTrialProfile = async (db, payload) => {
 
   for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      result = await db
+      const { data: seedData, error: seedError } = await db
         .from('doctor_profiles')
-        .upsert(safeRow, { onConflict: 'id' })
+        .upsert({ id: payload.userId, ...safeRow }, { onConflict: 'id' })
         .select('*')
         .maybeSingle();
+      if (seedError) throw new Error(seedError.message);
+      result = { data: seedData, error: null };
     } catch (error) {
       result = { data: null, error };
     }
@@ -105,7 +107,7 @@ const ensurePremiumTrialProfile = async (db, payload) => {
 
   if (result.error) return result;
 
-  await db.from('wallets').upsert({
+  const { error: walletSeedError } = await db.from('wallets').upsert({
     user_id: payload.userId,
     balance: 50.00,
     is_first_recharge: true,
@@ -113,9 +115,10 @@ const ensurePremiumTrialProfile = async (db, payload) => {
     current_plan: 'growth',
     plan_tier: 'growth',
     lifetime_contacts_count: 0,
-  }, { onConflict: 'user_id' }).catch(() => {
+  }, { onConflict: 'user_id' });
+  if (walletSeedError) {
     console.error('[YogiDesk Secure Trial] Wallet seed deferred.');
-  });
+  }
 
   return result;
 };

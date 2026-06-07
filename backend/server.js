@@ -420,21 +420,20 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
 
         if (supabaseAdmin && userId) {
             try {
-                await ensurePremiumTrialProfile(supabaseAdmin, {
+                const trialResult = await ensurePremiumTrialProfile(supabaseAdmin, {
                     userId,
                     email,
                     name: name || 'Doctor',
                     businessName,
                     businessCategory,
                     phone
-                }).then(({ error }) => {
-                    if (error) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
                 });
+                if (trialResult.error) console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
             } catch {
                 console.error('[YogiDesk Secure Trial] Premium trial profile seed deferred.');
             }
 
-            await supabaseAdmin.from('wallets').upsert({
+            const { error: walletSeedError } = await supabaseAdmin.from('wallets').upsert({
                 user_id: userId,
                 balance: 50.00,
                 is_first_recharge: true,
@@ -442,9 +441,10 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
                 current_plan: 'growth',
                 plan_tier: 'growth',
                 lifetime_contacts_count: 0
-            }, { onConflict: 'user_id' }).catch(() => {
+            }, { onConflict: 'user_id' });
+            if (walletSeedError) {
                 console.error('[YogiDesk Secure Trial] Wallet seed deferred.');
-            });
+            }
         }
 
         const sent = await sendWelcomeEmail(email, name || 'Doctor', businessName || 'Yogi Desk Clinic');
@@ -475,6 +475,7 @@ app.get('/api/profile/trial', attachDoctorSession, async (req, res) => {
         return res.status(200).json({
             success: true,
             profile: data ? { ...data, ...runtimePlan } : null,
+            is_trial_expired: runtimePlan.has_trial_expired,
             remainingHours: remainingMs === null ? null : Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000))),
             shouldShowRetentionModal: Boolean(data && !runtimePlan.has_trial_expired && ['trialing', 'trial'].includes(String(data.subscription_status || '').toLowerCase()) && remainingMs !== null && remainingMs <= 48 * 60 * 60 * 1000 && remainingMs > 0)
         });
@@ -2963,6 +2964,7 @@ app.get('/api/profile/context', async (req, res) => {
                 runtime_tier: runtimePlan.runtime_tier,
                 source_tier: runtimePlan.source_tier,
                 has_trial_expired: runtimePlan.has_trial_expired,
+                is_trial_expired: runtimePlan.has_trial_expired,
                 is_paid: runtimePlan.is_paid,
                 trial_started_at: runtimePlan.trial_started_at,
                 trial_elapsed_days: runtimePlan.trial_elapsed_days,
@@ -3022,15 +3024,16 @@ app.post('/api/profile/onboarding', async (req, res) => {
             updated_at: new Date().toISOString()
         };
 
-        const savedProfile = await upsertSingleRowSafely({
-            db,
-            table: 'doctor_profiles',
-            row: payload
-        });
+        const { data: seedData, error: seedError } = await db
+            .from('doctor_profiles')
+            .upsert({ id: userId, ...payload }, { onConflict: 'id' })
+            .select('*')
+            .maybeSingle();
+        if (seedError) throw new Error(seedError.message);
 
         return res.status(200).json({
             success: true,
-            profile: savedProfile || payload
+            profile: seedData || payload
         });
     } catch (error) {
         console.error('Profile onboarding save error:', error.message || error);
@@ -3975,7 +3978,10 @@ app.get('/api/ai/settings', async (req, res) => {
         if (error) throw error;
         const runtimePlan = evaluateRuntimePlan(data || {});
         const plan = runtimePlan.runtime_plan || data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'growth';
-        const tokenLimit = Number(data?.token_limit ?? data?.ai_token_balance ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
+        const isTrialExpired = runtimePlan.has_trial_expired;
+        const tokenLimit = runtimePlan.runtime_tier === 'BASIC'
+            ? 0
+            : Number(data?.token_limit ?? data?.ai_token_balance ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
 
         return res.status(200).json({
             success: true,
@@ -3984,6 +3990,7 @@ app.get('/api/ai/settings', async (req, res) => {
                 plan_tier: plan,
                 runtime_plan: runtimePlan.runtime_plan,
                 has_trial_expired: runtimePlan.has_trial_expired,
+                is_trial_expired: isTrialExpired,
                 aiEnabled: runtimePlan.runtime_tier !== 'BASIC' && data?.ai_enabled !== false,
                 tokenLimit,
                 tokenUsed: Number(data?.token_used || 0),

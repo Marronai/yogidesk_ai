@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bot, CreditCard, Gauge, PauseCircle, RefreshCw, Settings2, ShieldCheck } from 'lucide-react';
+import { Bot, CreditCard, Gauge, PauseCircle, RefreshCw, Settings2, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
@@ -10,6 +10,7 @@ const defaultSettings = {
   plan_tier: '',
   runtime_plan: '',
   has_trial_expired: false,
+  is_trial_expired: false,
   aiEnabled: false,
   tokenLimit: 0,
   tokenUsed: 0,
@@ -22,8 +23,11 @@ const AISettings = () => {
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
 
   const usagePercent = useMemo(() => {
+    const locked = settings.has_trial_expired || settings.is_trial_expired || String(settings.runtime_plan || settings.plan_tier || settings.plan || '').toLowerCase() === 'basic';
+    if (locked) return 0;
     const limit = Number(settings.tokenLimit || 0);
     if (!limit) return 0;
     return Math.min(100, Math.round((Number(settings.tokenUsed || 0) / limit) * 100));
@@ -42,11 +46,13 @@ const AISettings = () => {
       if (settingsResult.data?.success) {
         const liveProfile = profileResult.data?.profile || userProfile || {};
         const livePlan = liveProfile.runtime_plan || liveProfile.current_plan || liveProfile.plan_tier;
+        const expired = Boolean(liveProfile.has_trial_expired || liveProfile.is_trial_expired || settingsResult.data.settings?.has_trial_expired || settingsResult.data.settings?.is_trial_expired);
         setSettings({
           ...defaultSettings,
           ...(settingsResult.data.settings || {}),
           ...(livePlan && { plan: livePlan, plan_tier: livePlan, runtime_plan: livePlan }),
-          has_trial_expired: Boolean(liveProfile.has_trial_expired || settingsResult.data.settings?.has_trial_expired),
+          has_trial_expired: expired,
+          is_trial_expired: expired,
         });
       }
     } catch (err) {
@@ -61,15 +67,54 @@ const AISettings = () => {
   }, []);
 
   const planLabel = String(settings.runtime_plan || settings.plan_tier || settings.plan || 'growth').replace(/_/g, ' ');
-  const assistantEnabled = settings.aiEnabled && !settings.isAiPaused;
+  const isLocked = settings.has_trial_expired || settings.is_trial_expired || planLabel.toLowerCase() === 'basic';
+  const assistantEnabled = settings.aiEnabled && !settings.isAiPaused && !isLocked;
+  const displayTokenLimit = isLocked ? 0 : Number(settings.tokenLimit || 0);
+  const displayTokenUsed = isLocked ? 0 : Number(settings.tokenUsed || 0);
   const displayPlanLabel = planLabel
     .split(' ')
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ');
 
+  useEffect(() => {
+    if (isLocked) setShowTrialExpiredModal(true);
+  }, [isLocked]);
+
   return (
     <div className="space-y-6">
+      {showTrialExpiredModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-orange-600">Trial Expired</p>
+                <h2 className="mt-2 text-xl font-black text-slate-950">YogiDesk AI is paused</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTrialExpiredModal(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200"
+                aria-label="Close trial expired notice"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">
+              Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/wallet')}
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-orange-700"
+            >
+              <CreditCard size={18} />
+              Open Billing
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm md:flex-row md:items-center">
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
@@ -109,7 +154,7 @@ const AISettings = () => {
           <p className="text-xs font-black uppercase tracking-widest text-slate-400">Current Plan</p>
           <p className="mt-2 text-3xl font-black text-slate-950">{displayPlanLabel}</p>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
-            {settings.has_trial_expired ? 'Your complementary access has expired. Upgrade to restore assistant automation.' : settings.aiEnabled ? 'Assistant automation is enabled for this workspace.' : 'Assistant automation is not enabled on this plan.'}
+            {isLocked ? 'Your complementary access has expired. Recharge wallet balance to restore assistant automation.' : settings.aiEnabled ? 'Assistant automation is enabled for this workspace.' : 'Assistant automation is not enabled on this plan.'}
           </p>
         </div>
 
@@ -121,7 +166,7 @@ const AISettings = () => {
               </div>
               <div>
                 <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Usage</p>
-                <p className="text-sm font-bold text-slate-700">Tokens/Messages Used: {Number(settings.tokenUsed || 0)} / {Number(settings.tokenLimit || 0)}</p>
+                <p className="text-sm font-bold text-slate-700">Tokens/Messages Used: {displayTokenUsed} / {displayTokenLimit}</p>
               </div>
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{usagePercent}%</span>
