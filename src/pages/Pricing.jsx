@@ -12,6 +12,7 @@ import {
   Sparkles,
   Stethoscope,
   ToggleRight,
+  UserCheck,
   X,
   Zap,
 } from 'lucide-react';
@@ -101,6 +102,17 @@ const SECURITY_ITEMS = [
   { icon: ShieldCheck, label: 'End-to-End Encryption' },
 ];
 
+const PLAN_BREAKDOWN_ROWS = [
+  ['Patient database', '500 patients', '2,000 patients', '10,000 patients'],
+  ['Staff / receptionist seats', 'Not included', 'Admin + 2 staff seats', 'Admin + 5 staff seats'],
+  ['Shared team inbox', 'Not included', 'Included', 'Included'],
+  ['Patient smart assistant', 'Not included', 'Included', 'Advanced routing'],
+  ['Human-takeover toggle', 'Not included', 'Included', 'Included'],
+  ['PDF / lab report delivery', 'Not included', 'Included', 'Included'],
+  ['Review collection workflow', 'Not included', 'Included', 'Included'],
+  ['Dedicated onboarding manager', 'Not included', 'Priority support', 'Dedicated manager'],
+];
+
 const SETUP_STEPS = [
   ['1', 'Choose Your Duration Plan', 'Select the plan and tenure that fits your clinic workflow.'],
   ['2', 'Connect Your Verified WhatsApp Number', 'Link verified messaging credentials with guided support.'],
@@ -123,6 +135,8 @@ const FAQS = [
 ];
 
 const formatCurrency = (value) => `Rs. ${Math.round(value).toLocaleString('en-IN')}`;
+
+const getSliderProgress = (value) => ((value - 500) / (20000 - 500)) * 100;
 
 const loadRazorpayCheckout = () => new Promise((resolve, reject) => {
   if (window.Razorpay) {
@@ -176,7 +190,13 @@ export default function Pricing() {
       const user = data?.user;
       const userId = user?.id || localStorage.getItem('user_id');
       if (!userId) {
-        window.location.href = '/signup';
+        setCheckoutStatus({
+          type: 'error',
+          text: 'Please login first. Redirecting you to secure signup...',
+        });
+        window.setTimeout(() => {
+          window.location.href = '/signup';
+        }, 900);
         return;
       }
 
@@ -230,10 +250,10 @@ export default function Pricing() {
   };
 
   return (
-    <div className="relative bg-slate-50 px-4 py-16 font-sans sm:px-6 lg:px-8">
+    <div className="relative bg-slate-50 px-4 pb-16 pt-0 font-sans sm:px-6 lg:px-8">
       <PublicNavbar />
 
-      <header className="mx-auto max-w-7xl pt-20">
+      <header className="mx-auto max-w-7xl pt-32">
         <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-12 text-center shadow-sm sm:px-10 lg:px-16">
           <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-orange-100 bg-orange-50 px-4 py-2 text-xs font-black uppercase tracking-[0.22em] text-orange-600">
             <Sparkles className="h-4 w-4" />
@@ -353,6 +373,51 @@ export default function Pricing() {
         </div>
       </section>
 
+      <section className="mx-auto mt-10 max-w-7xl">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-orange-600">Plan Breakdown</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-[#071020]">What each clinic plan includes</h2>
+            </div>
+            <p className="max-w-xl text-sm font-semibold leading-6 text-slate-500">
+              Aap quickly compare kar sakte hain ki Starter me kya missing hai, Growth me kya unlock hota hai, aur Multi-Specialty kis clinic ke liye best hai.
+            </p>
+          </div>
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="min-w-[900px] w-full border-collapse text-left">
+              <thead>
+                <tr className="bg-slate-100 text-xs font-black uppercase tracking-widest text-[#13233f]">
+                  <th className="px-5 py-4">Feature</th>
+                  <th className="px-5 py-4">Starter Clinic</th>
+                  <th className="border-x border-orange-200 bg-orange-50 px-5 py-4 text-orange-700">Growth Clinic</th>
+                  <th className="px-5 py-4">Multi-Specialty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {PLAN_BREAKDOWN_ROWS.map(([feature, starter, growth, multi]) => (
+                  <tr key={feature} className="border-t border-slate-100">
+                    <td className="px-5 py-4 text-sm font-black text-[#071020]">{feature}</td>
+                    <td className={`px-5 py-4 text-sm font-bold ${String(starter).includes('Not included') ? 'text-rose-500' : 'text-slate-600'}`}>
+                      {String(starter).includes('Not included') ? <X className="mr-2 inline h-4 w-4" /> : <Check className="mr-2 inline h-4 w-4 text-emerald-500" />}
+                      {starter}
+                    </td>
+                    <td className="border-x border-orange-100 bg-orange-50/50 px-5 py-4 text-sm font-black text-[#071020]">
+                      <Check className="mr-2 inline h-4 w-4 text-orange-500" />
+                      {growth}
+                    </td>
+                    <td className="px-5 py-4 text-sm font-bold text-slate-600">
+                      <Check className="mr-2 inline h-4 w-4 text-emerald-500" />
+                      {multi}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section className="mx-auto mt-16 max-w-7xl">
         <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -409,7 +474,10 @@ export default function Pricing() {
               step="100"
               value={messageVolume}
               onChange={(event) => setMessageVolume(Number(event.target.value))}
-              className="h-2 w-full cursor-pointer accent-orange-500"
+              style={{
+                background: `linear-gradient(to right, #ff6b00 0%, #ff6b00 ${getSliderProgress(messageVolume)}%, #334155 ${getSliderProgress(messageVolume)}%, #334155 100%)`,
+              }}
+              className="h-2 w-full cursor-pointer appearance-none rounded-full accent-orange-500"
             />
             <div className="mt-3 flex justify-between text-xs font-black text-slate-400">
               <span>500</span>
@@ -419,7 +487,7 @@ export default function Pricing() {
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             <div className="rounded-2xl border border-rose-100 bg-rose-50 p-5">
-              <p className="text-xs font-black uppercase tracking-widest text-rose-500">Competitor Cost</p>
+              <p className="text-xs font-black uppercase tracking-widest text-rose-500">WATI / Interakt Cost</p>
               <p className="mt-3 text-3xl font-black text-rose-600">{formatCurrency(roi.competitorCost)}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-100 p-5">
@@ -433,7 +501,7 @@ export default function Pricing() {
           </div>
 
           <div className="mt-6 rounded-[22px] bg-[#13233f] p-6 text-white">
-            <p className="text-2xl font-black leading-snug">Dr. Doctor, you save {formatCurrency(roi.savings)} every month using YogiDesk AI</p>
+            <p className="text-2xl font-black leading-snug">Your clinic can save {formatCurrency(roi.savings)} every month using YogiDesk AI</p>
             <p className="mt-3 text-sm font-semibold leading-6 text-slate-300">Based on {messageVolume.toLocaleString('en-IN')} messages per month and the selected workspace pricing model.</p>
           </div>
         </div>
@@ -454,16 +522,17 @@ export default function Pricing() {
                 key={plan.id}
                 type="button"
                 onClick={() => handleCheckout(plan.id)}
+                disabled={loadingPlanId === `${plan.id}_${durationId}`}
                 className={`flex w-full items-center justify-between rounded-2xl border p-4 text-left transition ${
                   plan.id === 'growth' ? 'border-orange-400 bg-orange-50' : 'border-slate-200 bg-white hover:border-orange-200'
-                }`}
+                } disabled:cursor-not-allowed disabled:opacity-70`}
               >
                 <span>
                   <span className="block text-sm font-black text-[#071020]">{plan.title}</span>
                   <span className="mt-1 block text-sm font-bold text-slate-500">Rs. {prices[plan.id]}/month</span>
                 </span>
                 <span className={`rounded-full px-3 py-1 text-xs font-black ${plan.id === 'growth' ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
-                  {plan.id === 'growth' ? 'Active' : 'Select'}
+                  {loadingPlanId === `${plan.id}_${durationId}` ? 'Opening' : 'Checkout'}
                 </span>
               </button>
             ))}
@@ -472,15 +541,15 @@ export default function Pricing() {
       </section>
 
       <section className="mx-auto mt-16 grid max-w-7xl gap-6 lg:grid-cols-[0.8fr_1.6fr]">
-        <div className="rounded-[28px] bg-[#071020] p-7 text-white shadow-sm sm:p-8">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-orange-300">
+        <div className="rounded-[28px] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-slate-100 p-7 text-[#071020] shadow-sm sm:p-8">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-100 text-orange-600">
             <ShieldCheck className="h-6 w-6" />
           </div>
           <h2 className="mt-6 text-3xl font-black leading-tight">Medical Security & Compliance</h2>
           <div className="mt-6 space-y-3">
             {SECURITY_ITEMS.map(({ icon: Icon, label }) => (
-              <div key={label} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                <Icon className="h-5 w-5 text-orange-300" />
+              <div key={label} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <Icon className="h-5 w-5 text-orange-500" />
                 <span className="text-sm font-black">{label}</span>
               </div>
             ))}
@@ -506,6 +575,33 @@ export default function Pricing() {
                 <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{body}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto mt-16 max-w-7xl">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+          <div className="grid gap-6 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.22em] text-orange-600">Decision Helper</p>
+              <h2 className="mt-3 text-3xl font-black tracking-tight text-[#071020]">Kaunsa plan choose karein?</h2>
+              <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
+                Agar clinic me daily patient follow-up, staff coordination, ya automated replies ki need hai, Growth plan best starting point hai. Starter sirf reminders ke liye, aur Multi-Specialty high-volume multi-doctor teams ke liye hai.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                ['Starter', 'Basic reminders aur templates chahiye. AI assistant nahi chahiye.'],
+                ['Growth', 'Staff inbox, AI assistant, reports, reviews aur takeover controls chahiye.'],
+                ['Multi-Specialty', 'Multiple doctors, locations aur advanced patient routing chahiye.'],
+              ].map(([title, text]) => (
+                <div key={title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <UserCheck className="h-5 w-5 text-orange-500" />
+                  <h3 className="mt-4 text-base font-black text-[#071020]">{title}</h3>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{text}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
