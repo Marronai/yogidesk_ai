@@ -48,6 +48,7 @@ import { WalletProvider } from './context/WalletContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
  // Agar navbar bhi global hai
 
+const ROOT_ROUTE_FALLBACK = '/';
 
 const AppContent = () => {
   const location = useLocation();
@@ -142,7 +143,7 @@ const AppContent = () => {
           {/* ============================== */}
           
           {/* Agar kuch galat type kare toh wapas Landing Page par bhej do */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to={ROOT_ROUTE_FALLBACK} replace />} />
         </Routes>
         {/* Render footer ONLY on public marketing pages */}
         {!isInternalRoute && <Footer />}
@@ -152,7 +153,7 @@ const AppContent = () => {
 
 const App = () => {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/">
       <AuthProvider>
         <WalletProvider>
           <AppContent />
