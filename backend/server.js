@@ -71,10 +71,12 @@ const isMetaWebhookRequest = (req = {}) => ([
 ].some(isMetaWebhookRequestPath));
 
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
-const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-Hub-Signature-256';
+const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-YogiDesk-User-Email, X-Hub-Signature-256, X-Requested-With';
 const CORS_ALLOWED_ORIGINS = new Set([
     'https://yogidesk-ai.com',
+    'https://www.yogidesk-ai.com',
     'http://yogidesk-ai.com',
+    'http://www.yogidesk-ai.com',
     'http://localhost:5173'
 ]);
 const resolveCorsOrigin = (origin) => (

@@ -40,7 +40,7 @@ const normalizeAmount = (value) => {
 };
 
 const getRazorpayCredentials = () => ({
-  keyId: String(process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID || '').trim(),
+  keyId: String(process.env.RAZORPAY_KEY_ID || '').trim(),
   keySecret: String(process.env.RAZORPAY_KEY_SECRET || '').trim(),
 });
 

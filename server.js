@@ -11,9 +11,9 @@ const authRoutes = require('./backend/routes/authRoutes');
 const PORT = process.env.PORT || 5000;
 
 const corsOptions = {
-    origin: ['https://yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://localhost:5173'],
+    origin: ['https://yogidesk-ai.com', 'https://www.yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://www.yogidesk-ai.com', 'http://localhost:5173'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-YogiDesk-User-Email', 'X-Hub-Signature-256', 'X-Requested-With'],
     credentials: true
 };
 
