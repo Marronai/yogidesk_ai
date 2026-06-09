@@ -638,6 +638,24 @@ exports.loginStep1 = async (req, res) => {
       return res.status(400).json({ msg: 'Invalid Credentials' });
     }
 
+    if (isMetaReviewerEmail(safeEmail)) {
+      user.otp = undefined;
+      user.otpExpires = undefined;
+      user.isVerified = true;
+      await user.save();
+      logDoctorActivity(user._id);
+
+      const token = generateToken(user);
+      const userPayload = buildUserPayload(user);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Authentication verified cleanly via Staging Evaluation Loop.',
+        token,
+        user: userPayload
+      });
+    }
+
     // Generate OTP
     const otp = generateOTP();
     user.otp = otp;
