@@ -39,6 +39,8 @@ const normalizeAmount = (value) => {
   return Number.isFinite(amount) ? amount.toFixed(2) : null;
 };
 
+const createShortReceipt = () => `rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`.slice(0, 39);
+
 const getRazorpayCredentials = () => ({
   keyId: String(process.env.RAZORPAY_KEY_ID || '').trim(),
   keySecret: String(process.env.RAZORPAY_KEY_SECRET || '').trim(),
@@ -94,6 +96,15 @@ const logRazorpayOrderError = (error, context = {}) => {
   });
 };
 
+const getRazorpayErrorMessage = (error) => (
+  error?.error?.description ||
+  error?.description ||
+  error?.response?.data?.error?.description ||
+  error?.response?.data?.description ||
+  error?.message ||
+  'Razorpay initialization failed'
+);
+
 router.post('/create-order', async (req, res) => {
   try {
     const doctor = await resolveAuthenticatedDoctor(req);
@@ -109,11 +120,10 @@ router.post('/create-order', async (req, res) => {
     }
 
     const { keyId, client } = getRazorpayClient();
-    const receiptDoctorId = String(doctor.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
     const order = await client.orders.create({
       amount: verifiedPlan.amountPaise,
       currency: 'INR',
-      receipt: `receipt_doc_${receiptDoctorId}_${Date.now()}`,
+      receipt: createShortReceipt(),
       notes: {
         doctor_id: doctor.id,
         plan_id: verifiedPlan.planId,
@@ -133,7 +143,7 @@ router.post('/create-order', async (req, res) => {
     });
   } catch (error) {
     logRazorpayOrderError(error, { planId: req.body?.planId || null });
-    return res.status(500).json({ success: false, message: 'Unable to initialize secure checkout right now.' });
+    return res.status(400).json({ success: false, message: getRazorpayErrorMessage(error) });
   }
 });
 
@@ -150,11 +160,10 @@ router.post('/razorpay-subscription-session', async (req, res) => {
     }
 
     const { keyId, client } = getRazorpayClient();
-    const receiptDoctorId = String(doctor.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
     const order = await client.orders.create({
       amount: verifiedPlan.amountPaise,
       currency: 'INR',
-      receipt: `receipt_doc_${receiptDoctorId}_${Date.now()}`,
+      receipt: createShortReceipt(),
       notes: {
         userId: doctor.id,
         plan_id: verifiedPlan.planId,
@@ -168,7 +177,7 @@ router.post('/razorpay-subscription-session', async (req, res) => {
     return res.status(200).json({ success: true, key: keyId, order });
   } catch (error) {
     logRazorpayOrderError(error, { legacy: true, planId: req.body?.planId || null });
-    return res.status(500).json({ success: false, msg: 'Unable to initialize secure checkout right now.' });
+    return res.status(400).json({ success: false, msg: getRazorpayErrorMessage(error) });
   }
 });
 
