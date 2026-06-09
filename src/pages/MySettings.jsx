@@ -1,8 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Bot, CheckCircle2, Clock, Edit3, IndianRupee, Loader2, Lock, Mail, MapPin, Phone, Save, ShieldCheck, Smartphone, Stethoscope, User } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Clock, Edit3, IndianRupee, Loader2, Lock, Mail, MapPin, MessageSquare, Phone, Plus, Save, ShieldCheck, Smartphone, Sparkles, Stethoscope, Trash2, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
+import {
+  QUICK_REPLY_VARIABLES,
+  readQuickReplies,
+  sanitizeQuickReplyBody,
+  sanitizeQuickReplyRecord,
+  sanitizeQuickReplyText,
+  validateQuickReplyRecord,
+  writeQuickReplies,
+} from '../utils/quickReplies';
 
 const emptyForm = {
   name: '',
@@ -17,6 +26,12 @@ const emptyKnowledgeBaseForm = {
   consultation_fees: '',
   clinic_location: '',
   services_offered: '',
+};
+
+const emptyQuickReplyForm = {
+  title: '',
+  keywords: '',
+  body: '',
 };
 
 const sanitizeKnowledgeBaseValue = (value, maxLength = 1200) => String(value || '')
@@ -128,10 +143,16 @@ const Settings = () => {
   const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const [knowledgeBaseForm, setKnowledgeBaseForm] = useState(emptyKnowledgeBaseForm);
+  const [quickReplyManagerOpen, setQuickReplyManagerOpen] = useState(false);
+  const [quickReplyWorkspaceId, setQuickReplyWorkspaceId] = useState('');
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [quickReplyForm, setQuickReplyForm] = useState(emptyQuickReplyForm);
+  const [quickReplyError, setQuickReplyError] = useState('');
   const { userProfile, loadUserProfile } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const lastHydratedMetaRef = useRef('');
   const hydratingMetaRef = useRef(false);
+  const quickReplyBodyRef = useRef(null);
   const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
   const isConfigured = isMetaActive || hasExistingConnection;
   const metaInputsLocked = isConfigured;
@@ -171,6 +192,77 @@ const Settings = () => {
       authUser: authUser || { id: userId, email: storedAccount.email },
       userId,
     };
+  };
+
+  const loadQuickReplies = async () => {
+    try {
+      const { userId } = await getActiveAccount();
+      setQuickReplyWorkspaceId(userId);
+      setQuickReplies(readQuickReplies(userId));
+    } catch {
+      setQuickReplyWorkspaceId('default');
+      setQuickReplies(readQuickReplies('default'));
+    }
+  };
+
+  useEffect(() => {
+    loadQuickReplies();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const updateQuickReplyField = (field, value) => {
+    setQuickReplyError('');
+    setQuickReplyForm((current) => ({
+      ...current,
+      [field]: field === 'body'
+        ? sanitizeQuickReplyBody(value)
+        : sanitizeQuickReplyText(value, field === 'title' ? 40 : 240),
+    }));
+  };
+
+  const insertQuickReplyVariable = (token) => {
+    if (!QUICK_REPLY_VARIABLES.includes(token)) return;
+    const textarea = quickReplyBodyRef.current;
+    const currentBody = quickReplyForm.body || '';
+    const start = textarea?.selectionStart ?? currentBody.length;
+    const end = textarea?.selectionEnd ?? start;
+    const nextBody = sanitizeQuickReplyBody(`${currentBody.slice(0, start)}${token}${currentBody.slice(end)}`);
+    setQuickReplyForm((current) => ({ ...current, body: nextBody }));
+    window.requestAnimationFrame(() => {
+      textarea?.focus();
+      const nextCursor = Math.min(start + token.length, nextBody.length);
+      textarea?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
+  const saveQuickReply = () => {
+    const candidate = sanitizeQuickReplyRecord({
+      ...quickReplyForm,
+      id: `qr_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const validation = validateQuickReplyRecord(candidate, quickReplies);
+    if (!validation.ok) {
+      setQuickReplyError(validation.message);
+      return;
+    }
+
+    const nextReplies = writeQuickReplies(quickReplyWorkspaceId || 'default', [validation.record, ...quickReplies]);
+    setQuickReplies(nextReplies);
+    setQuickReplyForm(emptyQuickReplyForm);
+    setQuickReplyError('');
+    showToast('success', 'Quick reply saved securely.');
+  };
+
+  const deleteQuickReply = (replyId) => {
+    const safeId = sanitizeQuickReplyText(replyId, 80).replace(/[^\w-]/g, '');
+    const nextReplies = writeQuickReplies(
+      quickReplyWorkspaceId || 'default',
+      quickReplies.filter((reply) => reply.id !== safeId)
+    );
+    setQuickReplies(nextReplies);
+    showToast('success', 'Quick reply removed.');
   };
 
   const hydrateProfile = async ({ force = false } = {}) => {
@@ -455,7 +547,7 @@ const Settings = () => {
         showToast('error', 'Server did not confirm the Meta connection. Please try again.');
       }
     } catch (error) {
-      console.error('Supabase Settings Sync Error:', error);
+      console.error('Supabase Settings Sync Error: redacted connection save failure.');
       playConnectionAnimation('error');
       showToast('error', error?.response?.data?.message || error.message || 'Failed to update connection settings. Please try again.');
     } finally {
@@ -731,6 +823,140 @@ const Settings = () => {
                 </button>
               )}
             </div>
+          </section>
+
+          <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm sm:p-8">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                  <MessageSquare size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-950">Clinic Quick Replies</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">
+                    Saved slash shortcuts for manual inbox replies.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickReplyManagerOpen((value) => !value)}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#501638] px-6 py-4 text-sm font-black uppercase tracking-widest text-[#FF6B00] shadow-lg shadow-slate-200 transition hover:shadow-[#FFD701]/60 hover:ring-4 hover:ring-[#FFD701]/30 active:scale-95 sm:w-auto"
+              >
+                <Sparkles size={18} />
+                Manage Quick Replies
+              </button>
+            </div>
+
+            {quickReplyManagerOpen && (
+              <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="rounded-3xl border border-slate-100 bg-blue-50/40 p-4 sm:p-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Short-key Title</label>
+                      <input
+                        type="text"
+                        value={quickReplyForm.title}
+                        onChange={(event) => updateQuickReplyField('title', event.target.value)}
+                        placeholder="e.g., location, fees, consult_time"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Keywords Filter</label>
+                      <input
+                        type="text"
+                        value={quickReplyForm.keywords}
+                        onChange={(event) => updateQuickReplyField('keywords', event.target.value)}
+                        placeholder="e.g., location clinic dmch, address consult, fees clinic doctor"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Template Body</label>
+                      <div className="flex flex-wrap gap-2">
+                        {QUICK_REPLY_VARIABLES.map((token) => (
+                          <button
+                            key={token}
+                            type="button"
+                            onClick={() => insertQuickReplyVariable(token)}
+                            className="rounded-full border border-[#FF6B00] bg-[#501638] px-3 py-1.5 text-[10px] font-black text-white shadow-sm transition hover:bg-[#632047] active:scale-95"
+                          >
+                            {token}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <textarea
+                      ref={quickReplyBodyRef}
+                      value={quickReplyForm.body}
+                      onChange={(event) => updateQuickReplyField('body', event.target.value)}
+                      placeholder="e.g., Our clinic is located at DMCH Patna. Map link: http://maps.google.com/?q=0..., Consultation fees is ₹500."
+                      rows={7}
+                      maxLength={1024}
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                    />
+                    <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-400">
+                      <span>{quickReplyForm.body.length}/1024 chars</span>
+                      <span>Variables resolve server-side at dispatch.</span>
+                    </div>
+                  </div>
+
+                  {quickReplyError && (
+                    <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                      {quickReplyError}
+                    </div>
+                  )}
+
+                  <div className="mt-5 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={saveQuickReply}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95 sm:w-auto"
+                    >
+                      <Plus size={18} />
+                      Add Quick Reply
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Saved Replies</h3>
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">{quickReplies.length}/50</span>
+                  </div>
+                  <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
+                    {quickReplies.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
+                        No quick replies saved yet.
+                      </div>
+                    ) : quickReplies.map((reply) => (
+                      <div key={reply.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-slate-950">/{reply.title}</p>
+                            <p className="mt-1 truncate text-[11px] font-bold text-[#FF6B00]">{reply.keywords}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => deleteQuickReply(reply.id)}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                            aria-label={`Delete ${reply.title} quick reply`}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                        <p className="mt-3 line-clamp-3 text-xs font-semibold leading-5 text-slate-600">{reply.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <div className="sticky bottom-4 z-10 rounded-3xl border border-slate-100 bg-white/95 p-4 shadow-xl shadow-slate-200/60 backdrop-blur">

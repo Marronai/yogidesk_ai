@@ -27,6 +27,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
+import { readQuickReplies, sanitizeQuickReplyBody, sanitizeQuickReplyText } from '../utils/quickReplies';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.';
@@ -188,6 +189,11 @@ const InboxContent = () => {
   const [aiAccessLocked, setAiAccessLocked] = useState(false);
   const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
   const [aiToggleLoading, setAiToggleLoading] = useState(false);
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [quickReplyWorkspaceId, setQuickReplyWorkspaceId] = useState('');
+  const [showQuickReplyPopup, setShowQuickReplyPopup] = useState(false);
+  const [quickReplyQuery, setQuickReplyQuery] = useState('');
+  const [quickReplyActiveIndex, setQuickReplyActiveIndex] = useState(0);
   const bottomRef = useRef(null);
   const messagesViewportRef = useRef(null);
   const navigate = useNavigate();
@@ -263,6 +269,18 @@ const InboxContent = () => {
     (!lastTemplateSentAt || lastInboundAt > lastTemplateSentAt)
   );
   const canUseComposer = isPrivateNote || isReplyWindowOpen;
+  const isAiPausedForSelectedChat = aiAccessLocked || Boolean(selectedChat?.metadata?.ai_paused ?? doctorAiPaused);
+  const isManualWorkspaceMode = Boolean(isAiPausedForSelectedChat && !aiAccessLocked);
+
+  const filteredQuickReplies = useMemo(() => {
+    const query = sanitizeQuickReplyText(quickReplyQuery, 40).toLowerCase().replace(/^\//, '');
+    const rows = Array.isArray(quickReplies) ? quickReplies : [];
+    if (!query) return rows.slice(0, 8);
+    return rows.filter((reply) => (
+      reply.title.includes(query) ||
+      reply.keywords.includes(query)
+    )).slice(0, 8);
+  }, [quickReplies, quickReplyQuery]);
 
   const getUser = useCallback(async () => {
     const storedUserId = localStorage.getItem('user_id') || sessionStorage.getItem('user_id');
@@ -554,6 +572,35 @@ const InboxContent = () => {
     loadAiSettings();
   }, [loadAiSettings]);
 
+  useEffect(() => {
+    let active = true;
+
+    getUser().then((user) => {
+      if (!active) return;
+      const workspaceId = user?.id || 'default';
+      setQuickReplyWorkspaceId(workspaceId);
+      setQuickReplies(readQuickReplies(workspaceId));
+    }).catch(() => {
+      if (!active) return;
+      setQuickReplyWorkspaceId('default');
+      setQuickReplies(readQuickReplies('default'));
+    });
+
+    const refreshQuickReplies = (event) => {
+      const workspaceId = event?.detail?.workspaceId || quickReplyWorkspaceId || 'default';
+      setQuickReplies(readQuickReplies(workspaceId));
+    };
+
+    window.addEventListener('yogidesk:quick-replies-updated', refreshQuickReplies);
+    window.addEventListener('storage', refreshQuickReplies);
+
+    return () => {
+      active = false;
+      window.removeEventListener('yogidesk:quick-replies-updated', refreshQuickReplies);
+      window.removeEventListener('storage', refreshQuickReplies);
+    };
+  }, [getUser, quickReplyWorkspaceId]);
+
   const messagesScrollKey = useMemo(() => (
     (Array.isArray(messages) ? messages : [])
       .map((item) => `${messageIdentity(item)}:${item.status || ''}`)
@@ -805,6 +852,79 @@ const InboxContent = () => {
     }
   };
 
+  const closeQuickReplyPopup = () => {
+    setShowQuickReplyPopup(false);
+    setQuickReplyQuery('');
+    setQuickReplyActiveIndex(0);
+  };
+
+  const selectQuickReply = (reply) => {
+    if (!reply || !isManualWorkspaceMode) return;
+    const safeBody = sanitizeQuickReplyBody(reply.body);
+    const slashIndex = message.lastIndexOf('/');
+    const prefix = slashIndex >= 0 ? message.slice(0, slashIndex) : '';
+    setMessage(sanitizeTextInput(`${prefix}${safeBody}`));
+    closeQuickReplyPopup();
+  };
+
+  const handleTextChange = (event) => {
+    const rawValue = event.target.value;
+    const safeValue = sanitizeTextInput(rawValue);
+    setMessage(safeValue);
+
+    if (!isManualWorkspaceMode || isPrivateNote) {
+      closeQuickReplyPopup();
+      return;
+    }
+
+    const slashIndex = safeValue.lastIndexOf('/');
+    if (slashIndex < 0) {
+      closeQuickReplyPopup();
+      return;
+    }
+
+    const commandText = safeValue.slice(slashIndex + 1);
+    const hasWhitespaceAfterSlash = /\s/.test(commandText);
+    if (hasWhitespaceAfterSlash) {
+      closeQuickReplyPopup();
+      return;
+    }
+
+    setQuickReplyQuery(commandText);
+    setQuickReplyActiveIndex(0);
+    setShowQuickReplyPopup(true);
+  };
+
+  const handleComposerKeyDown = (event) => {
+    if (!showQuickReplyPopup) {
+      if (event.key === 'Enter') handleSendMessage();
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setQuickReplyActiveIndex((index) => Math.min(index + 1, Math.max(filteredQuickReplies.length - 1, 0)));
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setQuickReplyActiveIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      selectQuickReply(filteredQuickReplies[quickReplyActiveIndex]);
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeQuickReplyPopup();
+    }
+  };
+
   const appendTag = async (tag) => {
     if (!selectedChat || selectedTags.includes(tag)) return;
     const metadata = { ...(selectedChat.metadata || {}), tags: [...selectedTags, tag] };
@@ -859,8 +979,6 @@ const InboxContent = () => {
     loadChatBackground(chat.id);
     loadMessages(chat);
   };
-
-  const isAiPausedForSelectedChat = aiAccessLocked || Boolean(selectedChat?.metadata?.ai_paused ?? doctorAiPaused);
 
   const chatViewportStyle = chatBg.type === 'image'
     ? { backgroundImage: `url(${chatBg.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
@@ -1224,7 +1342,49 @@ const InboxContent = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className={`flex items-center gap-3 rounded-2xl border p-2 transition-all ${isPrivateNote ? 'border-yellow-300 bg-yellow-50 ring-2 ring-yellow-100' : 'border-slate-100 bg-slate-50'}`}>
+                  <div className={`relative flex items-center gap-3 rounded-2xl border p-2 transition-all ${isPrivateNote ? 'border-yellow-300 bg-yellow-50 ring-2 ring-yellow-100' : 'border-slate-100 bg-slate-50'}`}>
+                    {showQuickReplyPopup && isManualWorkspaceMode && !isPrivateNote && (
+                      <div className="absolute bottom-[calc(100%+0.75rem)] left-0 z-40 w-full overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-2xl shadow-blue-950/10 ring-1 ring-black/5 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                        <div className="flex items-center justify-between border-b border-slate-100 bg-blue-50 px-4 py-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Quick Replies</p>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">Manual mode shortcuts</p>
+                          </div>
+                          <span className="rounded-full bg-[#FFD701] px-2 py-1 text-[10px] font-black text-slate-950">/</span>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto p-2">
+                          {filteredQuickReplies.length === 0 ? (
+                            <div className="px-4 py-5 text-center text-xs font-bold text-slate-400">
+                              No saved quick replies match this shortcut.
+                            </div>
+                          ) : filteredQuickReplies.map((reply, index) => (
+                            <button
+                              key={reply.id}
+                              type="button"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => selectQuickReply(reply)}
+                              className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-3 text-left transition-all ${
+                                index === quickReplyActiveIndex
+                                  ? 'bg-[#FF6B00] text-white shadow-md shadow-orange-100'
+                                  : 'text-slate-700 hover:bg-blue-50'
+                              }`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block truncate text-sm font-black">/{reply.title}</span>
+                                <span className={`mt-0.5 block truncate text-[11px] font-semibold ${index === quickReplyActiveIndex ? 'text-white/80' : 'text-slate-400'}`}>
+                                  {reply.keywords}
+                                </span>
+                              </span>
+                              <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-black uppercase ${
+                                index === quickReplyActiveIndex ? 'border-white/40 text-white' : 'border-orange-200 text-orange-600'
+                              }`}>
+                                Insert
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Smile size={20} /></button>
                     <button className="rounded-full p-2 text-slate-400 hover:bg-slate-100"><Paperclip size={20} /></button>
                     <input
@@ -1233,8 +1393,8 @@ const InboxContent = () => {
                       disabled={isGhostMode || aiAccessLocked}
                       className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
                       value={message}
-                      onChange={(event) => setMessage(sanitizeTextInput(event.target.value))}
-                      onKeyDown={(event) => event.key === 'Enter' && handleSendMessage()}
+                      onChange={handleTextChange}
+                      onKeyDown={handleComposerKeyDown}
                     />
                     {!isGhostMode && (
                       <button onClick={handleSendMessage} className={`rounded-xl p-3 shadow-lg transition-all ${isPrivateNote ? 'bg-yellow-400 text-yellow-900' : 'bg-green-500 text-white shadow-green-100 hover:bg-green-600'}`}>

@@ -230,6 +230,7 @@ const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a
 const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/[<>]/g, '')
+    .replace(/(--|\/\*|\*\/|;|\b(ALTER|CREATE|DELETE|DROP|EXEC|INSERT|MERGE|SELECT|TRUNCATE|UNION|UPDATE)\b)/gi, '')
     .split('')
     .filter((char) => {
         const code = char.charCodeAt(0);
@@ -238,6 +239,41 @@ const sanitizePlainText = (value, maxLength = 2048) => String(value || '')
     .join('')
     .trim()
     .slice(0, maxLength);
+const sanitizeQuickReplyResolvedValue = (value, fallback = '') => sanitizePlainText(value || fallback, 160);
+const resolveQuickReplyVariablesForDispatch = async ({ db, userId, activeChat, messageText }) => {
+    let safeText = sanitizePlainText(messageText, 1024);
+    if (!/\{\{(DOCTOR_NAME|CLINIC_NAME|PATIENT_NAME)\}\}/.test(safeText)) return safeText;
+
+    let doctorProfile = {};
+    try {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('name, clinic_name')
+            .eq('id', userId)
+            .maybeSingle();
+        if (!error && data) doctorProfile = data;
+    } catch {
+        doctorProfile = {};
+    }
+
+    const replacements = {
+        '{{DOCTOR_NAME}}': sanitizeQuickReplyResolvedValue(doctorProfile.name, 'Doctor'),
+        '{{CLINIC_NAME}}': sanitizeQuickReplyResolvedValue(
+            doctorProfile.clinic_name,
+            'Clinic'
+        ),
+        '{{PATIENT_NAME}}': sanitizeQuickReplyResolvedValue(
+            activeChat?.patient_name || activeChat?.name || activeChat?.metadata?.patient_name,
+            'Patient'
+        )
+    };
+
+    Object.entries(replacements).forEach(([token, value]) => {
+        safeText = safeText.replaceAll(token, value);
+    });
+
+    return sanitizePlainText(safeText, 1024);
+};
 const cleanCredentialValue = (value) => String(value || '').trim();
 const invalidMetaConfigurationResponse = {
     success: false,
@@ -4083,7 +4119,7 @@ const handleInboxSendMessage = async (req, res) => {
 
         const userId = await resolveInboxRequestUserId(req);
         const chatId = String(req.body?.chatId || req.body?.activeChatId || '').trim();
-        const messageText = String(req.body?.messageText || req.body?.text || req.body?.body || '').trim();
+        let messageText = sanitizePlainText(req.body?.messageText || req.body?.text || req.body?.body || '', 1024);
         const mediaUrl = String(req.body?.mediaUrl || req.body?.fileUrl || '').trim();
         const mediaType = String(req.body?.mediaType || '').trim().toLowerCase();
         const mediaMimeType = String(req.body?.mimeType || '').trim();
@@ -4114,6 +4150,8 @@ const handleInboxSendMessage = async (req, res) => {
                 metadata: canonicalChat.metadata || activeChat.metadata || {}
             };
         }
+        messageText = await resolveQuickReplyVariablesForDispatch({ db, userId, activeChat, messageText });
+        if (!messageText && !mediaUrl) return res.status(400).json({ success: false, message: 'Message text or media is required.' });
 
         const credentials = await getUserMetaCredentials(userId);
         const tokenCandidates = Array.isArray(credentials.accessTokens) && credentials.accessTokens.length
@@ -4155,7 +4193,7 @@ const handleInboxSendMessage = async (req, res) => {
             if (!candidateToken) continue;
             console.log('Meta free-form inbox send attempt:', {
                 chatId: activeChat.id,
-                to: payload.to,
+                toSuffix: String(payload.to || '').slice(-4),
                 phoneNumberId: finalPhoneId,
                 hasToken: Boolean(candidateToken),
                 tokenSource: candidate?.source || 'unknown',
@@ -4188,13 +4226,17 @@ const handleInboxSendMessage = async (req, res) => {
         if (!metaResponse) {
             const providerMessage = lastMetaError?.response?.data?.error?.message || lastMetaError?.message || 'Meta free-form send failed.';
             const providerCode = lastMetaError?.response?.data?.error?.code || null;
-            console.error('Meta free-form inbox send failed:', lastMetaError?.response?.data || providerMessage);
+            console.error('Meta free-form inbox send failed:', {
+                code: providerCode,
+                status: lastMetaError?.response?.status || 400,
+                message: sanitizePlainText(providerMessage, 240)
+            });
             return res.status(lastMetaError?.response?.status || 400).json({
                 success: false,
                 message: providerCode === 190
                     ? 'Meta authentication failed. Please update the permanent WhatsApp access token in Settings or backend .env.'
-                    : providerMessage,
-                provider: lastMetaError?.response?.data || null
+                    : sanitizePlainText(providerMessage, 240),
+                provider: providerCode ? { code: providerCode } : null
             });
         }
 
