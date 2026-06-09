@@ -825,14 +825,14 @@ const Settings = () => {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm sm:p-8">
+          <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm shadow-blue-100/40 sm:p-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#0B1F4D] text-[#FFD701] shadow-lg shadow-blue-950/10">
                   <MessageSquare size={24} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-slate-950">Clinic Quick Replies</h2>
+                  <h2 className="text-xl font-black text-[#0B1F4D]">Clinic Quick Replies</h2>
                   <p className="mt-1 text-sm font-semibold text-slate-500">
                     Saved slash shortcuts for manual inbox replies.
                   </p>
@@ -841,7 +841,7 @@ const Settings = () => {
               <button
                 type="button"
                 onClick={() => setQuickReplyManagerOpen((value) => !value)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#501638] px-6 py-4 text-sm font-black uppercase tracking-widest text-[#FF6B00] shadow-lg shadow-slate-200 transition hover:shadow-[#FFD701]/60 hover:ring-4 hover:ring-[#FFD701]/30 active:scale-95 sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0B1F4D] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-blue-950/20 transition hover:bg-[#FFD701] hover:text-slate-950 hover:shadow-[#FFD701]/50 hover:ring-4 hover:ring-[#FFD701]/25 active:scale-95 sm:w-auto"
               >
                 <Sparkles size={18} />
                 Manage Quick Replies
@@ -850,41 +850,41 @@ const Settings = () => {
 
             {quickReplyManagerOpen && (
               <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="rounded-3xl border border-slate-100 bg-blue-50/40 p-4 sm:p-5">
+                <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50/70 via-white to-[#FFD701]/10 p-4 shadow-inner shadow-blue-100/40 sm:p-5">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Short-key Title</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Short-key Title</label>
                       <input
                         type="text"
                         value={quickReplyForm.title}
                         onChange={(event) => updateQuickReplyField('title', event.target.value)}
                         placeholder="e.g., location, fees, consult_time"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Keywords Filter</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Keywords Filter</label>
                       <input
                         type="text"
                         value={quickReplyForm.keywords}
                         onChange={(event) => updateQuickReplyField('keywords', event.target.value)}
                         placeholder="e.g., location clinic dmch, address consult, fees clinic doctor"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
                       />
                     </div>
                   </div>
 
                   <div className="mt-4 space-y-2">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-xs font-black uppercase tracking-widest text-slate-500">Template Body</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Template Body</label>
                       <div className="flex flex-wrap gap-2">
                         {QUICK_REPLY_VARIABLES.map((token) => (
                           <button
                             key={token}
                             type="button"
                             onClick={() => insertQuickReplyVariable(token)}
-                            className="rounded-full border border-[#FF6B00] bg-[#501638] px-3 py-1.5 text-[10px] font-black text-white shadow-sm transition hover:bg-[#632047] active:scale-95"
+                            className="rounded-full border border-[#FF6B00] bg-gradient-to-r from-white via-orange-50/70 to-[#FFD701]/10 px-3 py-1.5 text-[10px] font-black text-[#0B1F4D] shadow-sm transition hover:border-[#FFD701] hover:bg-[#FFD701]/20 hover:shadow-[#FFD701]/30 active:scale-95"
                           >
                             {token}
                           </button>
@@ -898,7 +898,7 @@ const Settings = () => {
                       placeholder="e.g., Our clinic is located at DMCH Patna. Map link: http://maps.google.com/?q=0..., Consultation fees is ₹500."
                       rows={7}
                       maxLength={1024}
-                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
                     />
                     <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-400">
                       <span>{quickReplyForm.body.length}/1024 chars</span>
@@ -907,7 +907,7 @@ const Settings = () => {
                   </div>
 
                   {quickReplyError && (
-                    <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                    <div className="mt-4 rounded-2xl border border-[#FFD701]/40 bg-[#FFD701]/10 px-4 py-3 text-sm font-bold text-[#0B1F4D]">
                       {quickReplyError}
                     </div>
                   )}
@@ -916,7 +916,7 @@ const Settings = () => {
                     <button
                       type="button"
                       onClick={saveQuickReply}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95 sm:w-auto"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-[#FFD701] hover:text-slate-950 hover:shadow-[#FFD701]/50 active:scale-95 sm:w-auto"
                     >
                       <Plus size={18} />
                       Add Quick Reply
@@ -924,10 +924,10 @@ const Settings = () => {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm">
+                <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-sm shadow-blue-100/40">
                   <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Saved Replies</h3>
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700">{quickReplies.length}/50</span>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Saved Replies</h3>
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">{quickReplies.length}/50</span>
                   </div>
                   <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
                     {quickReplies.length === 0 ? (
@@ -935,16 +935,16 @@ const Settings = () => {
                         No quick replies saved yet.
                       </div>
                     ) : quickReplies.map((reply) => (
-                      <div key={reply.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                      <div key={reply.id} className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 transition hover:border-[#FFD701]/70 hover:bg-white hover:shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-black text-slate-950">/{reply.title}</p>
+                            <p className="truncate text-sm font-black text-[#0B1F4D]">/{reply.title}</p>
                             <p className="mt-1 truncate text-[11px] font-bold text-[#FF6B00]">{reply.keywords}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => deleteQuickReply(reply.id)}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 transition hover:bg-red-50 hover:text-red-600 active:scale-95"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 transition hover:bg-[#FFD701]/20 hover:text-[#0B1F4D] active:scale-95"
                             aria-label={`Delete ${reply.title} quick reply`}
                           >
                             <Trash2 size={15} />

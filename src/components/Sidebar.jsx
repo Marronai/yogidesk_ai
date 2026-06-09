@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   HeartPulse,
   LayoutDashboard,
+  BarChart3,
   LifeBuoy,
   LayoutTemplate,
   LogOut,
@@ -96,6 +97,7 @@ const Sidebar = () => {
     { name: 'Campaigns', path: '/campaigns', icon: Send },
     !isStaff && { name: 'WA Template', path: '/templates', icon: LayoutTemplate },
     { name: 'Inbox', path: '/dashboard/inbox', icon: MessageSquare },
+    { name: 'Delivery Reports', path: '/dashboard/delivery-reports', icon: BarChart3 },
     { name: 'Patients', path: '/dashboard/contacts', icon: Users },
     !isStaff && { name: 'Yogi Wallet', path: '/dashboard/wallet', icon: Wallet },
     !isStaff && { name: 'AI Assistant Slots', path: '/dashboard/ai-settings', icon: Bot, premiumLocked: true },
