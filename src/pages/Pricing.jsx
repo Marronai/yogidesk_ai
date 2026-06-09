@@ -216,14 +216,15 @@ export default function Pricing() {
         amount: order.amount,
         currency: order.currency || 'INR',
         name: 'YogiDesk AI',
-        description: order.planName || 'Workspace subscription',
+        description: order.planName ? `${order.planName} Subscription` : 'YogiDesk AI Subscription',
+        image: `${window.location.origin}/assets/yogidesk-logo.png`,
         order_id: order.order_id,
         prefill: {
           name: user?.user_metadata?.full_name || localStorage.getItem('user_name') || 'Doctor',
           email: user?.email || localStorage.getItem('user_email') || '',
         },
         notes: { plan_id: securePlanId },
-        theme: { color: '#13233f' },
+        theme: { color: '#F97316' },
         handler: () => {
           setCheckoutStatus({
             type: 'success',
@@ -234,6 +235,8 @@ export default function Pricing() {
           }, 1600);
         },
         modal: {
+          escape: true,
+          backdropclose: true,
           ondismiss: () => setLoadingPlanId(''),
         },
       });
