@@ -1,6 +1,10 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://api.yogidesk-ai.com/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/:path*", "destination": "https://api.yogidesk-ai.com/api/:path*" },
+    { "source": "/superadmin/login", "destination": "/index.html" },
+    { "source": "/superadmin/dashboard/:path*", "destination": "/index.html" },
+    { "source": "/dashboard/:path*", "destination": "/index.html" },
+    { "source": "/staff/dashboard/:path*", "destination": "/index.html" },
+    { "source": "/:path*", "destination": "/index.html" }
   ]
 }
