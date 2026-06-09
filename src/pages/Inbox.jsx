@@ -28,6 +28,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 import { readQuickReplies, sanitizeQuickReplyBody, sanitizeQuickReplyText } from '../utils/quickReplies';
+import { useAuth } from '../context/AuthContext';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.';
@@ -197,6 +198,7 @@ const InboxContent = () => {
   const bottomRef = useRef(null);
   const messagesViewportRef = useRef(null);
   const navigate = useNavigate();
+  const { isMetaReviewSession } = useAuth();
 
   const selectedTags = useMemo(() => safeTags(selectedChat), [selectedChat]);
   const allTags = useMemo(() => {
@@ -1348,7 +1350,7 @@ const InboxContent = () => {
                         <div className="flex items-center justify-between border-b border-slate-100 bg-blue-50 px-4 py-3">
                           <div>
                             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Quick Replies</p>
-                            <p className="mt-0.5 text-xs font-semibold text-slate-500">Manual mode shortcuts</p>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">{isMetaReviewSession ? 'Saved shortcuts' : 'Manual mode shortcuts'}</p>
                           </div>
                           <span className="rounded-full bg-[#FFD701] px-2 py-1 text-[10px] font-black text-slate-950">/</span>
                         </div>

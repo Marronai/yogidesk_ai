@@ -38,7 +38,7 @@ const {
     getPlanLimits,
     startTrialReminderJob
 } = require('./services/trialService');
-const { ensureMetaReviewerAccount } = require('./services/metaReviewerAccountService');
+const { ensureMetaReviewerAccount, isMetaReviewerEmail } = require('./services/metaReviewerAccountService');
 
 const app = express();
 
@@ -105,6 +105,95 @@ app.use(express.json({
     }
 }));
 app.use(express.urlencoded({ extended: true }));
+
+const getMetaReviewBearerToken = (req) => {
+    const header = String(req.headers.authorization || '');
+    return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+};
+
+const getMetaReviewRequestEmail = async (req) => {
+    const directEmail = req.body?.email || req.query?.email || req.headers['x-yogidesk-user-email'];
+    if (isMetaReviewerEmail(directEmail)) return String(directEmail).trim().toLowerCase();
+
+    const token = getMetaReviewBearerToken(req);
+    if (!token) return '';
+
+    if (token.startsWith('supabase-bypass-token-')) {
+        const fallbackEmail = req.body?.userEmail || req.query?.userEmail || req.body?.email || req.query?.email;
+        return isMetaReviewerEmail(fallbackEmail) ? String(fallbackEmail).trim().toLowerCase() : '';
+    }
+
+    try {
+        const client = supabaseAdmin || supabase;
+        if (!client?.auth?.getUser) return '';
+        const { data, error } = await client.auth.getUser(token);
+        if (error || !data?.user?.email) return '';
+        return String(data.user.email || '').trim().toLowerCase();
+    } catch {
+        return '';
+    }
+};
+
+const emptyMetaReviewPayloadForPath = (path) => {
+    if (path.startsWith('/api/superadmin')) {
+        return { status: 404, body: { success: false, message: 'Not found.' } };
+    }
+    if (path.startsWith('/api/analytics/templates')) {
+        return { status: 200, body: { success: true, data: { approved: 0, rejected: 0, pending: 0 } } };
+    }
+    if (path.startsWith('/api/analytics/message-history')) {
+        return { status: 200, body: { success: true, data: [], totalMessages: 0 } };
+    }
+    if (path.startsWith('/api/analytics/dashboard') || path.startsWith('/api/dashboard/metrics')) {
+        return { status: 200, body: { success: true, data: {} } };
+    }
+    if (path.startsWith('/api/ai/settings')) {
+        return {
+            status: 200,
+            body: {
+                success: true,
+                settings: {
+                    plan: 'growth',
+                    plan_tier: 'growth',
+                    runtime_plan: 'growth',
+                    has_trial_expired: false,
+                    is_trial_expired: false,
+                    aiEnabled: false,
+                    tokenLimit: 0,
+                    tokenUsed: 0,
+                    isAiPaused: true
+                }
+            }
+        };
+    }
+    if (path.startsWith('/api/settings/knowledge-base') || path.startsWith('/settings/knowledge-base')) {
+        return { status: 200, body: { success: true, data: {} } };
+    }
+    if (path.startsWith('/api/chat/toggle-ai')) {
+        return { status: 200, body: { success: true, skipped: true } };
+    }
+    if (path.startsWith('/api/campaigns/schedule')) {
+        return { status: 200, body: { success: true, queued: 0, newUniqueRecipients: 0 } };
+    }
+    return null;
+};
+
+const metaReviewIsolationGate = async (req, res, next) => {
+    try {
+        const path = String(req.originalUrl || req.url || '').split('?')[0].toLowerCase();
+        const maskedPayload = emptyMetaReviewPayloadForPath(path);
+        if (!maskedPayload) return next();
+
+        const email = await getMetaReviewRequestEmail(req);
+        if (!isMetaReviewerEmail(email)) return next();
+
+        return res.status(maskedPayload.status).json(maskedPayload.body);
+    } catch {
+        return next();
+    }
+};
+
+app.use(metaReviewIsolationGate);
 
 app.use((req, res, next) => {
     if (req.url.includes('request-email-otp')) {

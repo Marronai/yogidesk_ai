@@ -65,6 +65,11 @@ api.interceptors.request.use(
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
+    const sessionEmail = localStorage.getItem('user_email') || sessionStorage.getItem('user_email');
+    if (sessionEmail) {
+      config.headers = config.headers || {};
+      config.headers['X-YogiDesk-User-Email'] = sessionEmail;
+    }
     return config;
   },
   (error) => {

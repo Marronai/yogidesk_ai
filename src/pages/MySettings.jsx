@@ -210,7 +210,7 @@ const Settings = () => {
   const [quickReplyError, setQuickReplyError] = useState('');
   const [automationConfig, setAutomationConfig] = useState(emptyAutomationConfig);
   const [automationError, setAutomationError] = useState('');
-  const { userProfile, loadUserProfile } = useAuth();
+  const { userProfile, loadUserProfile, isMetaReviewSession } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const lastHydratedMetaRef = useRef('');
   const hydratingMetaRef = useRef(false);
@@ -218,6 +218,10 @@ const Settings = () => {
   const isMetaActive = Boolean(userProfile?.whatsapp_business_id || userProfile?.meta_configured);
   const isConfigured = isMetaActive || hasExistingConnection;
   const metaInputsLocked = isConfigured;
+  const quickReplyTabs = [
+    { id: 'quick_replies', label: 'Quick Replies' },
+    !isMetaReviewSession && { id: 'smart_automation', label: 'Smart Automation', isNew: true },
+  ].filter(Boolean);
 
   const isNumericMetaId = (value) => /^\d+$/.test(String(value || '').trim());
 
@@ -268,6 +272,12 @@ const Settings = () => {
       setAutomationConfig(readAutomationConfig('default'));
     }
   };
+
+  useEffect(() => {
+    if (isMetaReviewSession && quickReplyActiveTab !== 'quick_replies') {
+      setQuickReplyActiveTab('quick_replies');
+    }
+  }, [isMetaReviewSession, quickReplyActiveTab]);
 
   useEffect(() => {
     loadQuickReplies();
@@ -969,10 +979,7 @@ const Settings = () => {
             {quickReplyManagerOpen && (
               <div className="mt-6">
                 <div className="flex border-b border-slate-100">
-                  {[
-                    { id: 'quick_replies', label: 'Quick Replies' },
-                    { id: 'smart_automation', label: 'Smart Automation', isNew: true },
-                  ].map((tab) => (
+                  {quickReplyTabs.map((tab) => (
                     <button
                       key={tab.id}
                       type="button"

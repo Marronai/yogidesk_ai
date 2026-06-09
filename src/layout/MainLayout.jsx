@@ -4,9 +4,12 @@ import Sidebar from '../components/Sidebar';
 import ErrorBoundary from '../components/ErrorBoundary';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
+import { useAuth } from '../context/AuthContext';
+import { blockLiveSupportWidgetsForMetaReview } from '../utils/metaReviewSession';
 
 const MainLayout = () => {
   const navigate = useNavigate();
+  const { isMetaReviewSession } = useAuth();
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
   useEffect(() => {
@@ -65,6 +68,10 @@ const MainLayout = () => {
     loadTrialState();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (isMetaReviewSession) blockLiveSupportWidgetsForMetaReview();
+  }, [isMetaReviewSession]);
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 font-sans md:flex-row">

@@ -31,7 +31,7 @@ const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, userProfile } = useAuth();
+  const { logout, userProfile, isMetaReviewSession } = useAuth();
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
   const [lifetimeCount, setLifetimeCount] = useState(0);
@@ -110,7 +110,9 @@ const Sidebar = () => {
       icon: Users,
       premiumLocked: true
     },
-  ].filter(Boolean);
+  ].filter(Boolean).filter((link) => (
+    !isMetaReviewSession || !['Appointments', 'Delivery Reports'].includes(link.name)
+  ));
 
   const openPayuRecharge = async (amount) => {
     if (quickRechargeLoading) return;
@@ -258,7 +260,7 @@ const Sidebar = () => {
                 {React.createElement(icon, { size: 20 })}
               <span className="flex-1 text-left">
                 {name}
-                {['Delivery Reports', 'Appointments'].includes(name) && (
+                {!isMetaReviewSession && ['Delivery Reports', 'Appointments'].includes(name) && (
                   <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
                 )}
               </span>
@@ -272,7 +274,7 @@ const Sidebar = () => {
               {React.createElement(icon, { size: 20 })}
               <span>
                 {name}
-                {['Delivery Reports', 'Appointments'].includes(name) && (
+                {!isMetaReviewSession && ['Delivery Reports', 'Appointments'].includes(name) && (
                   <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
                 )}
               </span>

@@ -45,12 +45,13 @@ import HiddenNotFound from './components/superadmin/HiddenNotFound';
 import SuperAdminLogin from './components/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from './components/superadmin/SuperAdminDashboard';
 import { WalletProvider } from './context/WalletContext';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
  // Agar navbar bhi global hai
 
 
 const AppContent = () => {
   const location = useLocation();
+  const { isMetaReviewSession } = useAuth();
   
   // Comprehensive internal route exclusion array
   const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/superadmin'];
@@ -96,6 +97,7 @@ const AppContent = () => {
 
           <Route element={<SuperAdminRoute />}>
             <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
+            <Route path="/superadmin/dashboard/*" element={<SuperAdminDashboard />} />
           </Route>
           <Route path="/superadmin/*" element={<HiddenNotFound />} />
           
@@ -110,9 +112,10 @@ const AppContent = () => {
               <Route element={<MainLayout />}>
                 <Route path="/dashboard" element={<DashboardHome />} />
                 <Route path="/staff/dashboard" element={<DashboardHome />} />
+                <Route path="/staff/dashboard/*" element={<Navigate to="/staff/dashboard" replace />} />
                 <Route path="/dashboard/inbox" element={<Inbox />} />
-                <Route path="/dashboard/appointments" element={<Appointments />} />
-                <Route path="/dashboard/delivery-reports" element={<DeliveryReports />} />
+                <Route path="/dashboard/appointments" element={isMetaReviewSession ? <Navigate to="/dashboard" replace /> : <Appointments />} />
+                <Route path="/dashboard/delivery-reports" element={isMetaReviewSession ? <Navigate to="/dashboard" replace /> : <DeliveryReports />} />
                 <Route path="/dashboard/contacts" element={<Contacts />} />
                 <Route path="/dashboard/support" element={<Support />} />
                 <Route path="/dashboard/settings" element={<Settings />} />
@@ -120,6 +123,7 @@ const AppContent = () => {
                 <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
                 <Route path="/dashboard/subscription" element={<Subscription />} />
                 <Route path="/dashboard/wallet" element={<YogiWallet />} />
+                <Route path="/dashboard/*" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/campaigns" element={<Campaigns />} />
                 <Route path="/templates" element={<TemplateManager />} />
                 <Route path="/team" element={<Team />} />
