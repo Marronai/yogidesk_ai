@@ -374,8 +374,9 @@ exports.requestEmailOTP = async (req, res) => {
     const monthlyCount = Number(profile.otp_count_this_month || profile.auth_count || 0);
     const profileEmail = normalizeEmail(profile.email || req.body?.email);
     const profilePhone = profile.phone_number || profile.phone || profile.mobile || req.body?.phone;
+    const requestedEmailFlow = Boolean(requestedEmail && requestedEmail.includes('@'));
 
-    if (monthlyCount < MONTHLY_SMS_OTP_CAP && profilePhone) {
+    if (!requestedEmailFlow && monthlyCount < MONTHLY_SMS_OTP_CAP && profilePhone) {
       try {
         const result = await dispatchFirebasePhoneOtp({
           phone: profilePhone,
