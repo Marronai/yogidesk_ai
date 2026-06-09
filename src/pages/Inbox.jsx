@@ -15,6 +15,7 @@ import {
   Send,
   Settings,
   ShieldAlert,
+  SlidersHorizontal,
   Smile,
   User,
   UserCog,
@@ -33,6 +34,8 @@ const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired.
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
 const safeInitial = (value) => String(value || 'P').trim().charAt(0).toUpperCase() || 'P';
+const sanitizeTextInput = (value) => String(value || '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trimStart();
+const normalizeFilterText = (value) => sanitizeTextInput(value).toLowerCase().trim();
 const normalizeDeliveryStatus = (status) => String(status || '').trim().toUpperCase();
 const deliveryStatusRank = (status) => ({
   SENDING: 0,
@@ -165,6 +168,17 @@ const InboxContent = () => {
   const [now, setNow] = useState(() => Date.now());
   const [reloadToken, setReloadToken] = useState(0);
   const [tagFilter, setTagFilter] = useState('ALL');
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filterDraft, setFilterDraft] = useState({
+    search: '',
+    lifecycle: 'ALL',
+    duration: 'TODAY',
+  });
+  const [activeFilters, setActiveFilters] = useState({
+    search: '',
+    lifecycle: 'ALL',
+    duration: 'TODAY',
+  });
   const [customTagInput, setCustomTagInput] = useState('');
   const [showPhone, setShowPhone] = useState(false);
   const [showBgMenu, setShowBgMenu] = useState(false);
@@ -186,11 +200,42 @@ const InboxContent = () => {
     });
     return Array.from(tags);
   }, [conversations]);
-  const visibleConversations = useMemo(() => (
-    tagFilter === 'ALL'
+  const visibleConversations = useMemo(() => {
+    const rows = tagFilter === 'ALL'
       ? (Array.isArray(conversations) ? conversations : [])
-      : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter))
-  ), [conversations, tagFilter]);
+      : (Array.isArray(conversations) ? conversations : []).filter((chat) => safeTags(chat).includes(tagFilter));
+    const query = normalizeFilterText(activeFilters.search);
+    const durationDays = { TODAY: 1, SEVEN_DAYS: 7, THIRTY_DAYS: 30 }[activeFilters.duration] || 1;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const oldestAllowed = activeFilters.duration === 'TODAY'
+      ? todayStart.getTime()
+      : Date.now() - durationDays * 24 * 60 * 60 * 1000;
+
+    return rows.filter((chat) => {
+      const haystack = normalizeFilterText([
+        chat.name,
+        chat.phone,
+        chat.lastMsg,
+        chat.status,
+        ...safeTags(chat),
+      ].join(' '));
+      const updatedAt = new Date(chat.updated_at || chat.metadata?.updated_at || '').getTime();
+      const matchesText = !query || haystack.includes(query);
+      const matchesDuration = Number.isFinite(updatedAt) ? updatedAt >= oldestAllowed : activeFilters.duration !== 'TODAY';
+      const status = String(chat.status || '').toUpperCase();
+      const aiConverted = Boolean(chat.metadata?.ai_converted || chat.metadata?.converted_by_ai || chat.metadata?.ai_conversion_at);
+      const archived = ['ARCHIVED', 'RESOLVED', 'CLOSED'].includes(status) || Boolean(chat.metadata?.archived_at || chat.metadata?.resolved_at);
+      const matchesLifecycle = (
+        activeFilters.lifecycle === 'ALL' ||
+        (activeFilters.lifecycle === 'UNREAD' && Number(chat.unread || 0) > 0) ||
+        (activeFilters.lifecycle === 'ACTIVE_AI' && (aiConverted || status === 'ACTIVE')) ||
+        (activeFilters.lifecycle === 'ARCHIVED' && archived)
+      );
+
+      return matchesText && matchesDuration && matchesLifecycle;
+    });
+  }, [activeFilters, conversations, tagFilter]);
   const lastInboundAt = useMemo(() => {
     const metadataTime = selectedChat?.metadata?.last_customer_message_at || selectedChat?.metadata?.last_inbound_at;
     const metadataMs = metadataTime ? new Date(metadataTime).getTime() : 0;
@@ -376,6 +421,7 @@ const InboxContent = () => {
           phone: chat?.phone || chat?.patient_phone || '',
           lastMsg: chat.last_message || '',
           time: chat.updated_at ? new Date(chat.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          updated_at: chat.updated_at || '',
           unread: count,
           status: chat.status || 'Offline',
           deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
@@ -477,6 +523,27 @@ const InboxContent = () => {
     if (normalized === 'READ') return <CheckCheck size={14} className="text-sky-400" style={{ color: '#34B7F1' }} />;
     if (normalized === 'FAILED') return <AlertCircle size={13} className="text-rose-500" />;
     return null;
+  };
+
+  const updateFilterDraft = (key, value) => {
+    setFilterDraft((current) => ({
+      ...current,
+      [key]: key === 'search' ? sanitizeTextInput(value) : value,
+    }));
+  };
+
+  const openFilterModal = () => {
+    setFilterDraft(activeFilters);
+    setShowFilterModal(true);
+  };
+
+  const applyFilterDraft = () => {
+    setActiveFilters((current) => ({
+      ...current,
+      ...filterDraft,
+      search: sanitizeTextInput(filterDraft.search).trim(),
+    }));
+    setShowFilterModal(false);
   };
 
   useEffect(() => {
@@ -751,7 +818,7 @@ const InboxContent = () => {
   };
 
   const addCustomTag = () => {
-    const tag = customTagInput.trim();
+    const tag = sanitizeTextInput(customTagInput).trim();
     if (!tag) return;
     appendTag(tag.startsWith('#') ? tag : `#${tag}`);
     setCustomTagInput('');
@@ -830,6 +897,114 @@ const InboxContent = () => {
         </div>
       )}
 
+      {showFilterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] transition-all duration-300 ease-out">
+          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/10 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between bg-[#501638] px-6 py-5 text-white">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#FFD701]">Secure Inbox Gate</p>
+                <h2 className="mt-1 text-xl font-black tracking-tight">Filter Conversations</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-full text-white/80 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+                aria-label="Close filter conversations"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="grid min-h-[360px] grid-cols-1 md:grid-cols-[220px_1fr]">
+              <div className="border-b border-slate-100 bg-slate-50 p-5 md:border-b-0 md:border-r">
+                {['Search', 'Chat Status', 'Duration'].map((item) => (
+                  <div key={item} className="rounded-xl px-3 py-3 text-xs font-black uppercase tracking-widest text-slate-500">
+                    {item}
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-6 p-6">
+                <div>
+                  <label htmlFor="inbox-filter-search" className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
+                    Explicit Text Search
+                  </label>
+                  <div className="relative mt-2">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input
+                      id="inbox-filter-search"
+                      type="text"
+                      value={filterDraft.search}
+                      onChange={(event) => updateFilterDraft('search', event.target.value)}
+                      placeholder="Search patient name, phone, tag, or message..."
+                      className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-12 pr-4 text-sm font-semibold text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="inbox-filter-lifecycle" className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
+                    Chat Lifecycle Status
+                  </label>
+                  <select
+                    id="inbox-filter-lifecycle"
+                    value={filterDraft.lifecycle}
+                    onChange={(event) => updateFilterDraft('lifecycle', event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition-all focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                  >
+                    <option value="ALL">All Incoming Queries</option>
+                    <option value="UNREAD">🔴 Unread / Action Needed</option>
+                    <option value="ACTIVE_AI">🟢 Active AI Converted</option>
+                    <option value="ARCHIVED">📁 Archived / Resolved Cases</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="inbox-filter-duration" className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
+                    Time Duration Window
+                  </label>
+                  <select
+                    id="inbox-filter-duration"
+                    value={filterDraft.duration}
+                    onChange={(event) => updateFilterDraft('duration', event.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition-all focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                  >
+                    <option value="TODAY">Today's Activity Logs</option>
+                    <option value="SEVEN_DAYS">Past 7 Days Logs</option>
+                    <option value="THIRTY_DAYS">Past 30 Days Records</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setFilterDraft({ search: '', lifecycle: 'ALL', duration: 'TODAY' })}
+                  className="text-[10px] font-black uppercase tracking-[0.22em] text-[#501638] transition-all hover:text-[#7b2456] active:scale-95"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-white px-6 py-4 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowFilterModal(false)}
+                className="rounded-xl border border-slate-200 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-500 transition-all hover:bg-slate-50 active:scale-95"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyFilterDraft}
+                className="rounded-xl bg-[#FFD701] px-6 py-3 text-xs font-black uppercase tracking-widest text-[#501638] shadow-lg shadow-yellow-200/70 transition-all hover:brightness-95 active:scale-95"
+              >
+                Apply Filter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex w-80 flex-col border-r border-slate-200 bg-white lg:w-96">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-4">
           <div className="mb-4 flex items-center justify-between">
@@ -841,7 +1016,21 @@ const InboxContent = () => {
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="Search chats..." className="w-full rounded-xl border border-slate-100 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none transition-all focus:bg-white" />
+            <input
+              type="text"
+              value={activeFilters.search}
+              onChange={(event) => setActiveFilters((current) => ({ ...current, search: sanitizeTextInput(event.target.value) }))}
+              placeholder="Search chats..."
+              className="w-full rounded-xl border border-slate-100 bg-slate-50 py-2.5 pl-10 pr-12 text-sm font-semibold outline-none transition-all focus:border-[#FFD701] focus:bg-white focus:ring-2 focus:ring-[#FFD701]/20"
+            />
+            <button
+              type="button"
+              onClick={openFilterModal}
+              className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-white hover:text-[#501638] active:scale-95"
+              aria-label="Open inbound chat filters"
+            >
+              <SlidersHorizontal size={16} />
+            </button>
           </div>
           {loading && (
             <div className="flex items-center justify-center py-4 text-sm font-semibold text-slate-400">
@@ -865,6 +1054,11 @@ const InboxContent = () => {
               Your inbox is empty. Waiting for new patient chats...
             </div>
           )}
+          {!loading && conversations.length > 0 && visibleConversations.length === 0 && (
+            <div className="flex h-full items-center justify-center p-8 text-center text-sm font-semibold text-slate-400">
+              No conversations match the active filters.
+            </div>
+          )}
           {visibleConversations.map((chat) => (
             <button
               key={chat.id}
@@ -878,7 +1072,7 @@ const InboxContent = () => {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <h3 className="truncate text-sm font-bold text-slate-800">{chat.name}</h3>
+                  <h3 className="truncate text-sm font-bold text-slate-800">{sanitizeTextInput(chat.name)}</h3>
                   <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400">
                     {chat.time}
                     {renderStatusBadge(chat.deliveryStatus || chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status)}
@@ -890,7 +1084,7 @@ const InboxContent = () => {
                     {formatCountdown(chat.scheduled_at)}
                   </p>
                 ) : (
-                  <p className="truncate text-xs text-slate-500">{chat.lastMsg}</p>
+                  <p className="truncate text-xs text-slate-500">{sanitizeTextInput(chat.lastMsg)}</p>
                 )}
               </div>
               {chat.unread > 0 && <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">{chat.unread}</div>}
@@ -956,7 +1150,7 @@ const InboxContent = () => {
               )}
               {(Array.isArray(messages) ? messages : []).map((msg) => {
                 const isSentByMe = msg.from_me === true || msg.sender === 'doctor';
-                const messageText = msg.text || msg.body || msg.message_body || "Template Dispatched";
+                const messageText = sanitizeTextInput(msg.text || msg.body || msg.message_body || "Template Dispatched");
                 
                 return (
                 <div key={msg.id} className={`flex ${isSentByMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2`}>
@@ -1039,7 +1233,7 @@ const InboxContent = () => {
                       disabled={isGhostMode || aiAccessLocked}
                       className={`flex-1 border-none bg-transparent py-2 text-sm font-medium outline-none ${isPrivateNote ? 'text-yellow-900 placeholder:text-yellow-500' : 'text-slate-700'}`}
                       value={message}
-                      onChange={(event) => setMessage(event.target.value)}
+                      onChange={(event) => setMessage(sanitizeTextInput(event.target.value))}
                       onKeyDown={(event) => event.key === 'Enter' && handleSendMessage()}
                     />
                     {!isGhostMode && (
@@ -1183,7 +1377,7 @@ const InboxContent = () => {
               <div className="mt-3 flex gap-2">
                 <input
                   value={customTagInput}
-                  onChange={(event) => setCustomTagInput(event.target.value)}
+                  onChange={(event) => setCustomTagInput(sanitizeTextInput(event.target.value))}
                   onKeyDown={(event) => event.key === 'Enter' && addCustomTag()}
                   placeholder="Custom tag"
                   className="min-w-0 flex-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold outline-none"
