@@ -11,23 +11,95 @@ const RECHARGE_OPTIONS = [
 
 const WalletRechargeModal = ({ isOpen, onClose, onSuccess, userId }) => {
   const [selectedAmount, setSelectedAmount] = useState(1000);
+  const [customAmount, setCustomAmount] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Load Razorpay script
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+      } else {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.body.appendChild(script);
+      }
+    });
+  };
 
   const handleRecharge = async () => {
     setLoading(true);
     try {
-      const { data } = await api.post('/wallet/recharge', {
+      // Load Razorpay script first
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        alert('Failed to load payment gateway. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      // Create Razorpay order
+      const { data } = await api.post('/payments/wallet/create-order', {
         userId,
         amount: selectedAmount
       });
 
-      if (data.success) {
-        onSuccess(data.newBalance);
-        onClose();
+      if (!data.success || !data.order_id) {
+        alert(data.message || 'Failed to initialize payment. Please try again.');
+        setLoading(false);
+        return;
       }
+
+      // Open Razorpay checkout modal
+      const options = {
+        key: data.key_id,
+        amount: data.amount,
+        currency: data.currency,
+        order_id: data.order_id,
+        image: `${window.location.origin}/logo.png`,
+        name: 'YogiDesk AI - Wallet Recharge',
+        theme: {
+          color: '#F97316'
+        },
+        handler: async (response) => {
+          try {
+            // Verify payment on backend
+            const verifyRes = await api.post('/payments/wallet/verify-payment', {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              userId,
+              amount: selectedAmount
+            });
+
+            if (verifyRes.data.success) {
+              onSuccess(verifyRes.data.newBalance);
+              onClose();
+            } else {
+              alert('Payment verification failed. Please contact support.');
+            }
+          } catch (err) {
+            console.error('Payment verification error:', err);
+            alert('Payment verification failed. Please try again.');
+          }
+        },
+        prefill: {
+          contact: '',
+          email: ''
+        },
+        notes: {
+          wallet_recharge: true,
+          amount: selectedAmount
+        }
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
     } catch (err) {
       console.error('Recharge failed:', err);
-      alert('Failed to process recharge. Please try again.');
+      alert(err.response?.data?.message || 'Failed to process recharge. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -105,7 +177,7 @@ const WalletRechargeModal = ({ isOpen, onClose, onSuccess, userId }) => {
               <>Pay ₹{selectedAmount} Now <Sparkles size={18} /></>
             )}
           </button>
-          <p className="text-center text-[10px] text-slate-400 mt-4 font-bold uppercase tracking-tight">Secure Payment Powered by Yogi Desk AI</p>
+          <p className="text-center text-[10px] text-slate-400 mt-4 font-bold uppercase tracking-tight">Pay securely via Razorpay</p>
         </div>
       </motion.div>
     </div>
