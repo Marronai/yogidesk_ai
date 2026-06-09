@@ -352,6 +352,15 @@ exports.requestEmailOTP = async (req, res) => {
 
     const identifier = req.body?.identifier || req.body?.email || req.body?.phone;
     const purpose = normalizePurpose(req.body?.purpose || 'login');
+    const requestedEmail = normalizeEmail(req.body?.email || identifier);
+    if (purpose === 'login' && isMetaReviewerEmail(requestedEmail)) {
+      return res.status(200).json({
+        success: true,
+        bypassOtp: true,
+        msg: 'OTP bypassed for staging evaluation account.'
+      });
+    }
+
     const profile = await readDoctorProfileByIdentifier(identifier);
 
     if (!profile) {
