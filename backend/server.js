@@ -210,8 +210,6 @@ app.use('/api/auth', authRoutes);
 app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });
-// Serve the Vite build so direct browser hits like /superadmin/login hydrate React routes.
-app.use(express.static(frontendBuildDir));
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminControlRoutes);
 app.use('/api/superadmin', superadminRoutes);
@@ -5458,7 +5456,11 @@ if (process.env.DISABLE_META_SYNC_WORKER !== 'true') {
     process.once('SIGINT', stopMetaSyncWorker);
 }
 
-app.get(/^\/(?!api(?:\/|$)).*/, (req, res, next) => {
+// Serve the Vite build only after every API route has been registered.
+app.use(express.static(frontendBuildDir));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
   if (!fs.existsSync(frontendIndexPath)) return next();
   return res.sendFile(frontendIndexPath);
 });
