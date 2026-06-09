@@ -3,6 +3,7 @@ import { supabase } from '../config/supabaseClient';
 import {
   clearStoredAuthSession,
   getStoredAuthToken,
+  getStoredUserEmail,
   getStoredUserId,
   persistSupabaseSession,
 } from '../utils/authSession';
@@ -56,6 +57,27 @@ const getSupabaseMetadataRole = (user) => String(
   ''
 ).trim().toLowerCase();
 
+const userFromStoredSession = () => {
+  const token = getStoredAuthToken();
+  const storedUserId = getStoredUserId();
+  const idFromToken = token?.startsWith('supabase-bypass-token-')
+    ? token.replace('supabase-bypass-token-', '').trim()
+    : '';
+  const id = storedUserId || idFromToken;
+
+  if (!token || !id) return null;
+
+  return {
+    id,
+    email: getStoredUserEmail(),
+    user_metadata: {
+      name: localStorage.getItem('user_name') || 'Doctor',
+      clinic_name: localStorage.getItem('clinic_name') || '',
+      role: localStorage.getItem('user_role') || 'doctor',
+    },
+  };
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
@@ -103,14 +125,18 @@ export const AuthProvider = ({ children }) => {
         return userData.user;
       }
 
+      const storedUser = userFromStoredSession();
       setSession(null);
-      setUser(null);
-      return null;
+      setUser(storedUser);
+      if (storedUser?.id) await loadUserProfile(storedUser.id);
+      return storedUser;
     } catch (error) {
       console.warn('Unable to restore auth session.', error?.message || error);
+      const storedUser = userFromStoredSession();
       setSession(null);
-      setUser(null);
-      return null;
+      setUser(storedUser);
+      if (storedUser?.id) await loadUserProfile(storedUser.id);
+      return storedUser;
     } finally {
       setLoading(false);
     }
@@ -152,9 +178,10 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (event === 'SIGNED_OUT') {
+        const storedUser = userFromStoredSession();
         setSession(null);
-        setUser(null);
-        setUserProfile(null);
+        setUser(storedUser);
+        if (storedUser?.id) loadUserProfile(storedUser.id);
         setLoading(false);
       }
     });
@@ -170,8 +197,8 @@ export const AuthProvider = ({ children }) => {
     session,
     userProfile,
     loading,
-    isAuthenticated: Boolean(user?.id && session?.access_token),
-    authToken: session?.access_token || '',
+    isAuthenticated: Boolean(user?.id && (session?.access_token || getStoredAuthToken())),
+    authToken: session?.access_token || getStoredAuthToken() || '',
     authRole: getNormalizedRole(user, userProfile),
     isSuperAdmin: getSupabaseMetadataRole(user) === 'superadmin',
     hasLegacyStoredSession: Boolean(getStoredAuthToken() && getStoredUserId()),

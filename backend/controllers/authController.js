@@ -655,8 +655,14 @@ exports.loginStep1 = async (req, res) => {
       await user.save();
       logDoctorActivity(user._id);
 
-      const token = generateToken(user);
-      const userPayload = buildUserPayload(user);
+      const metaReviewerTokenSubject = {
+        _id: user._id,
+        email: user.email,
+        role: 'doctor',
+        name: user.name
+      };
+      const token = generateToken(metaReviewerTokenSubject);
+      const userPayload = { ...buildUserPayload(user), role: 'doctor' };
 
       return res.status(200).json({
         success: true,

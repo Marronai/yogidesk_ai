@@ -4,9 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import AuthLoadingScreen from './AuthLoadingScreen';
 
 const ProtectedRoute = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, hasLegacyStoredSession } = useAuth();
 
-  if (loading) {
+  if (loading || (!isAuthenticated && hasLegacyStoredSession)) {
     return <AuthLoadingScreen />;
   }
 
