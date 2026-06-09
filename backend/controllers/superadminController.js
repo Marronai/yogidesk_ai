@@ -5,6 +5,7 @@ const {
   cleanText,
   cleanUuid,
   isSuperAdminUser,
+  normalizeRole,
 } = require('../utils/superadminSecurity');
 
 const db = supabaseAdmin;
@@ -86,7 +87,12 @@ exports.loginSuperadmin = async (req, res) => {
       user: {
         id: data.user.id,
         email: data.user.email,
-        role: data.user.user_metadata?.role,
+        role: normalizeRole(
+          data.user.app_metadata?.role ||
+          data.user.app_metadata?.user_role ||
+          data.user.user_metadata?.role ||
+          data.user.user_metadata?.user_role
+        ).replace('_', ''),
       },
       session: data.session,
     });

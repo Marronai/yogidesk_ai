@@ -26,7 +26,20 @@ const cleanMoney = (value) => {
   return Number(amount.toFixed(2));
 };
 
-const isSuperAdminUser = (user = {}) => String(user?.user_metadata?.role || '').trim() === 'superadmin';
+const normalizeRole = (value) => String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+
+const isSuperAdminRole = (value) => ['superadmin', 'super_admin'].includes(normalizeRole(value));
+
+const isSuperAdminUser = (user = {}) => [
+  user?.app_metadata?.role,
+  user?.app_metadata?.user_role,
+  user?.app_metadata?.account_role,
+  user?.user_metadata?.role,
+  user?.user_metadata?.user_role,
+  user?.user_metadata?.account_role,
+  user?.role,
+  user?.user_role,
+].some(isSuperAdminRole);
 
 const createLocalRateLimiter = ({ windowMs = 15 * 60 * 1000, max = 8 } = {}) => {
   const buckets = new Map();
@@ -55,5 +68,7 @@ module.exports = {
   cleanText,
   cleanUuid,
   createLocalRateLimiter,
+  isSuperAdminRole,
   isSuperAdminUser,
+  normalizeRole,
 };
