@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const axios = require('axios');
 const { supabase, supabaseAdmin } = require('./config/supabase');
@@ -41,6 +42,8 @@ const {
 const { ensureMetaReviewerAccount, isMetaReviewerEmail } = require('./services/metaReviewerAccountService');
 
 const app = express();
+const frontendBuildDir = path.resolve(__dirname, '..', 'dist');
+const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
 
 ensureMetaReviewerAccount({ db: supabaseAdmin || supabase })
     .then((result) => {
@@ -207,8 +210,8 @@ app.use('/api/auth', authRoutes);
 app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });
-// Yeh line frontend ki saari HTML/CSS/JS files ko automatic utha legi
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve the Vite build so direct browser hits like /superadmin/login hydrate React routes.
+app.use(express.static(frontendBuildDir));
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminControlRoutes);
 app.use('/api/superadmin', superadminRoutes);
@@ -5454,6 +5457,11 @@ if (process.env.DISABLE_META_SYNC_WORKER !== 'true') {
     process.once('SIGTERM', stopMetaSyncWorker);
     process.once('SIGINT', stopMetaSyncWorker);
 }
+
+app.get(/^\/(?!api(?:\/|$)).*/, (req, res, next) => {
+  if (!fs.existsSync(frontendIndexPath)) return next();
+  return res.sendFile(frontendIndexPath);
+});
 
 // ====== PORT LISTEN ENGINE ======
 if (require.main !== module) {
