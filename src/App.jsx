@@ -17,6 +17,7 @@ import YogiWallet from './pages/YogiWallet';
 import LandingPage from './pages/LandingPage';
 import Inbox from './pages/Inbox';
 import DeliveryReports from './pages/DeliveryReports';
+import Appointments from './pages/Appointments';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import Contacts from './pages/Contacts'; 
@@ -100,6 +101,7 @@ const AppContent = () => {
                 <Route path="/dashboard" element={<DashboardHome />} />
                 <Route path="/staff/dashboard" element={<DashboardHome />} />
                 <Route path="/dashboard/inbox" element={<Inbox />} />
+                <Route path="/dashboard/appointments" element={<Appointments />} />
                 <Route path="/dashboard/delivery-reports" element={<DeliveryReports />} />
                 <Route path="/dashboard/contacts" element={<Contacts />} />
                 <Route path="/dashboard/support" element={<Support />} />

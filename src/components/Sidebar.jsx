@@ -4,6 +4,7 @@ import {
   HeartPulse,
   LayoutDashboard,
   BarChart3,
+  CalendarCheck,
   LifeBuoy,
   LayoutTemplate,
   LogOut,
@@ -97,6 +98,7 @@ const Sidebar = () => {
     { name: 'Campaigns', path: '/campaigns', icon: Send },
     !isStaff && { name: 'WA Template', path: '/templates', icon: LayoutTemplate },
     { name: 'Inbox', path: '/dashboard/inbox', icon: MessageSquare },
+    { name: 'Appointments', path: '/dashboard/appointments', icon: CalendarCheck },
     { name: 'Delivery Reports', path: '/dashboard/delivery-reports', icon: BarChart3 },
     { name: 'Patients', path: '/dashboard/contacts', icon: Users },
     !isStaff && { name: 'Yogi Wallet', path: '/dashboard/wallet', icon: Wallet },
@@ -256,7 +258,7 @@ const Sidebar = () => {
                 {React.createElement(icon, { size: 20 })}
               <span className="flex-1 text-left">
                 {name}
-                {name === 'Delivery Reports' && (
+                {['Delivery Reports', 'Appointments'].includes(name) && (
                   <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
                 )}
               </span>
@@ -270,7 +272,7 @@ const Sidebar = () => {
               {React.createElement(icon, { size: 20 })}
               <span>
                 {name}
-                {name === 'Delivery Reports' && (
+                {['Delivery Reports', 'Appointments'].includes(name) && (
                   <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
                 )}
               </span>
