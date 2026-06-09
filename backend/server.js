@@ -30,6 +30,8 @@ const adminControlRoutes = require('./routes/adminControlRoutes');
 const authRoutes = require('./routes/authRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const superadminRoutes = require('./routes/superadminRoutes');
+const { loginSuperadmin } = require('./controllers/superadminController');
+const { createLocalRateLimiter } = require('./utils/superadminSecurity');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 const {
@@ -44,6 +46,7 @@ const { ensureMetaReviewerAccount, isMetaReviewerEmail } = require('./services/m
 const app = express();
 const frontendBuildDir = path.resolve(__dirname, '..', 'dist');
 const frontendIndexPath = path.join(frontendBuildDir, 'index.html');
+const explicitSuperadminLoginLimiter = createLocalRateLimiter({ windowMs: 15 * 60 * 1000, max: 6 });
 
 ensureMetaReviewerAccount({ db: supabaseAdmin || supabase })
     .then((result) => {
@@ -212,6 +215,7 @@ app.get('/', (req, res) => {
 });
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminControlRoutes);
+app.post('/api/superadmin/login', explicitSuperadminLoginLimiter, loginSuperadmin);
 app.use('/api/superadmin', superadminRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
