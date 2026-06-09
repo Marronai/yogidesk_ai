@@ -28,6 +28,7 @@ const {
 const adminControlRoutes = require('./routes/adminControlRoutes');
 const authRoutes = require('./routes/authRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const superadminRoutes = require('./routes/superadminRoutes');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 const {
@@ -121,6 +122,7 @@ app.get('/', (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminControlRoutes);
+app.use('/api/superadmin', superadminRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
@@ -452,6 +454,52 @@ const attachDoctorSession = (req, res, next) => {
     if (doctorId) req.user = { ...(req.user || {}), id: doctorId };
     next();
 };
+
+const shouldCheckDoctorSuspension = (req = {}) => {
+    if (isMetaWebhookRequest(req)) return false;
+    const path = String(req.originalUrl || req.url || '').toLowerCase();
+    if (path.startsWith('/api/superadmin')) return false;
+    return [
+        '/api/campaigns/send',
+        '/api/campaign/broadcast',
+        '/api/inbox/send-message',
+        '/api/messages/send',
+        '/api/whatsapp',
+        '/api/templates',
+        '/api/payments/meta-connection'
+    ].some((prefix) => path.startsWith(prefix));
+};
+
+const rejectSuspendedDoctorMetaOperations = async (req, res, next) => {
+    try {
+        if (!shouldCheckDoctorSuspension(req)) return next();
+        const doctorId = req.user?.id || req.query?.doctorId || req.query?.doctor_id || req.query?.userId || req.query?.user_id || req.body?.doctorId || req.body?.doctor_id || req.body?.userId || req.body?.user_id;
+        if (!doctorId || !isUuid(doctorId)) return next();
+
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return next();
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('system_status,status')
+            .eq('id', doctorId)
+            .maybeSingle();
+
+        if (error && !isMissingColumnError(error)) throw error;
+        const statusValue = String(data?.system_status || data?.status || '').toUpperCase();
+        if (statusValue === 'SUSPENDED') {
+            return res.status(423).json({
+                success: false,
+                message: 'Workspace suspended. Meta operations are disabled for this account.'
+            });
+        }
+        return next();
+    } catch (error) {
+        console.error('Suspended doctor Meta operation check failed:', error.message || error);
+        return res.status(500).json({ success: false, message: 'Unable to verify workspace status.' });
+    }
+};
+
+app.use(rejectSuspendedDoctorMetaOperations);
 
 app.get('/api/user/usage', attachDoctorSession, getUserUsage);
 app.get('/api/wallet/balance', attachDoctorSession, getWalletBalance);

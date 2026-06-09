@@ -40,6 +40,10 @@ import AdminLogin from './admin/AdminLogin';
 import AdminPrivateRoute from './admin/AdminPrivateRoute';
 import TermsConditions from './pages/TermsConditions';
 import Footer from './components/Footer';
+import SuperAdminRoute from './components/SuperAdminRoute';
+import HiddenNotFound from './components/superadmin/HiddenNotFound';
+import SuperAdminLogin from './components/superadmin/SuperAdminLogin';
+import SuperAdminDashboard from './components/superadmin/SuperAdminDashboard';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider } from './context/AuthContext';
  // Agar navbar bhi global hai
@@ -49,7 +53,7 @@ const AppContent = () => {
   const location = useLocation();
   
   // Comprehensive internal route exclusion array
-  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team'];
+  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/superadmin'];
   
   // Check if current URL starts with any internal application route
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
@@ -75,6 +79,7 @@ const AppContent = () => {
           <Route path="/signup" element={<SignUp />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/superadmin/login" element={<SuperAdminLogin />} />
           
           <Route path="/auth-success" element={<AuthSuccess />} />  
           
@@ -88,6 +93,11 @@ const AppContent = () => {
           <Route element={<AdminPrivateRoute />}>
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
           </Route>
+
+          <Route element={<SuperAdminRoute />}>
+            <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
+          </Route>
+          <Route path="/superadmin/*" element={<HiddenNotFound />} />
           
           
           {/* ============================== */}

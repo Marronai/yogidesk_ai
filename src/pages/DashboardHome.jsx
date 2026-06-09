@@ -146,7 +146,7 @@ const TemplateStatusRing = ({ approved, pending, rejected }) => {
   const ring = `conic-gradient(#22c55e 0 ${approvedPct}%, #eab308 ${approvedPct}% ${approvedPct + pendingPct}%, #ef4444 ${approvedPct + pendingPct}% ${approvedPct + pendingPct + rejectedPct}%, #f1f5f9 ${approvedPct + pendingPct + rejectedPct}% 100%)`;
 
   return (
-    <div className="flex items-center gap-8">
+    <div className="flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:gap-8">
       <div className="relative h-36 w-36 rounded-full" style={{ background: ring }}>
         <div className="absolute inset-5 flex items-center justify-center rounded-full bg-white">
           <span className="text-3xl font-black text-slate-950">{total}</span>
@@ -638,7 +638,7 @@ const DashboardHome = () => {
         </div>
 
         <div className="white-card overflow-hidden p-0 lg:col-span-2">
-          <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 p-6">
+          <div className="flex flex-col gap-3 border-b border-slate-100 bg-slate-50/70 p-6 sm:flex-row sm:items-center sm:justify-between">
             <h3 className="flex items-center gap-2 text-lg font-black text-slate-900"><Facebook size={20} className="text-blue-600" /> Live Ad Campaigns</h3>
             <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-black text-orange-700">COMING SOON - BETA TESTING</span>
           </div>

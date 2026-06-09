@@ -389,6 +389,27 @@ const getDoctorAiEligibility = (doctor = {}) => {
     return { eligible: true, plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
 };
 
+const isDoctorSuspendedForMeta = async (doctorId) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !doctorId) return false;
+
+    try {
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('*')
+            .eq('id', doctorId)
+            .maybeSingle();
+        if (error) {
+            if (!isSchemaCacheError(error)) console.warn('Doctor suspension lookup failed:', error.message || error);
+            return false;
+        }
+        return String(data?.system_status || data?.status || '').toUpperCase() === 'SUSPENDED';
+    } catch (error) {
+        console.warn('Doctor suspension lookup crashed:', error.message || error);
+        return false;
+    }
+};
+
 const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit = 12 }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return [];
@@ -897,6 +918,16 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                 return {
                     ...inbound,
                     ai: { provider: 'gemini', skipped: true, reason: 'doctor_not_found' },
+                    replyTexts: [],
+                    metaReplies: []
+                };
+            }
+
+            if (await isDoctorSuspendedForMeta(doctor.id)) {
+                return {
+                    ...inbound,
+                    doctorId: doctor.id,
+                    ai: { provider: 'gemini', skipped: true, reason: 'workspace_suspended' },
                     replyTexts: [],
                     metaReplies: []
                 };

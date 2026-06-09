@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import { Loader2 } from 'lucide-react';
+import HiddenNotFound from './superadmin/HiddenNotFound';
 
 const SuperAdminRoute = () => {
   const [auth, setAuth] = useState({ loading: true, isSuperAdmin: false });
@@ -15,19 +16,8 @@ const SuperAdminRoute = () => {
           return setAuth({ loading: false, isSuperAdmin: false });
         }
 
-        const { data: profile, error: profileError } = await supabase
-          .from('doctor_profiles')
-          .select('user_role, role')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        const roleValue = String(profile?.user_role || profile?.role || user?.user_metadata?.role || user?.role || '').toUpperCase();
-        const isSuper = roleValue === 'SUPER_ADMIN';
-        if (profileError) {
-          console.warn('Unable to validate super admin profile:', profileError.message || profileError);
-        }
-
-        setAuth({ loading: false, isSuperAdmin: !!isSuper });
+        const isSuper = String(user?.user_metadata?.role || '').trim() === 'superadmin';
+        setAuth({ loading: false, isSuperAdmin: isSuper });
       } catch {
         console.error('Super admin route validation failed.');
         setAuth({ loading: false, isSuperAdmin: false });
@@ -42,7 +32,7 @@ const SuperAdminRoute = () => {
     </div>
   );
 
-  return auth.isSuperAdmin ? <Outlet /> : <Navigate to="/dashboard" replace />;
+  return auth.isSuperAdmin ? <Outlet /> : <HiddenNotFound />;
 };
 
 export default SuperAdminRoute;
