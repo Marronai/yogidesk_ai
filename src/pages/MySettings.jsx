@@ -34,6 +34,35 @@ const emptyQuickReplyForm = {
   body: '',
 };
 
+const supportedAutomationMediaTypes = {
+  text: ['text/plain'],
+  image: ['image/jpeg', 'image/png', 'image/webp'],
+  video: ['video/mp4', 'video/3gpp'],
+  document: ['application/pdf'],
+};
+
+const emptyAutomationConfig = {
+  welcome: {
+    enabled: false,
+    body: '',
+    media_type: 'text',
+    media_mime_type: 'text/plain',
+    media_url: '',
+  },
+  businessHours: {
+    enabled: false,
+    start_time: '09:00',
+    end_time: '18:00',
+    days: 'mon_sat',
+    body: '',
+  },
+  delayedResponse: {
+    enabled: false,
+    delay_minutes: '5',
+    body: '',
+  },
+};
+
 const sanitizeKnowledgeBaseValue = (value, maxLength = 1200) => String(value || '')
   .replace(/[\u0000-\u001F\u007F]/g, ' ')
   .replace(/[<>`]/g, '')
@@ -41,6 +70,36 @@ const sanitizeKnowledgeBaseValue = (value, maxLength = 1200) => String(value || 
   .replace(/\s+/g, ' ')
   .trim()
   .slice(0, maxLength);
+
+const sanitizeAutomationText = (value, maxLength = 1200) => String(value || '')
+  .replace(/<[^>]*>/g, '')
+  .replace(/[<>`]/g, '')
+  .replace(/[\u0000-\u001F\u007F]/g, ' ')
+  .replace(/\$\{/g, '{')
+  .replace(/\s+/g, ' ')
+  .trimStart()
+  .slice(0, maxLength);
+
+const sanitizeAutomationUrl = (value) => {
+  const safeValue = sanitizeAutomationText(value, 600).trim();
+  if (!safeValue) return '';
+  if (!/^https?:\/\//i.test(safeValue)) return '';
+  return safeValue;
+};
+
+const getAutomationCacheKey = (workspaceId) => `yogidesk_smart_automation_${String(workspaceId || 'default').replace(/[^\w-]/g, '') || 'default'}`;
+const readAutomationConfig = (workspaceId) => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getAutomationCacheKey(workspaceId)) || 'null');
+    return parsed ? {
+      welcome: { ...emptyAutomationConfig.welcome, ...(parsed.welcome || {}) },
+      businessHours: { ...emptyAutomationConfig.businessHours, ...(parsed.businessHours || {}) },
+      delayedResponse: { ...emptyAutomationConfig.delayedResponse, ...(parsed.delayedResponse || {}) },
+    } : emptyAutomationConfig;
+  } catch {
+    return emptyAutomationConfig;
+  }
+};
 
 const isKnowledgeBaseEmpty = (data = {}) => Object.keys(emptyKnowledgeBaseForm)
   .every((key) => !String(data[key] || '').trim());
@@ -144,10 +203,13 @@ const Settings = () => {
   const [formData, setFormData] = useState(emptyForm);
   const [knowledgeBaseForm, setKnowledgeBaseForm] = useState(emptyKnowledgeBaseForm);
   const [quickReplyManagerOpen, setQuickReplyManagerOpen] = useState(false);
+  const [quickReplyActiveTab, setQuickReplyActiveTab] = useState('quick_replies');
   const [quickReplyWorkspaceId, setQuickReplyWorkspaceId] = useState('');
   const [quickReplies, setQuickReplies] = useState([]);
   const [quickReplyForm, setQuickReplyForm] = useState(emptyQuickReplyForm);
   const [quickReplyError, setQuickReplyError] = useState('');
+  const [automationConfig, setAutomationConfig] = useState(emptyAutomationConfig);
+  const [automationError, setAutomationError] = useState('');
   const { userProfile, loadUserProfile } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const lastHydratedMetaRef = useRef('');
@@ -199,9 +261,11 @@ const Settings = () => {
       const { userId } = await getActiveAccount();
       setQuickReplyWorkspaceId(userId);
       setQuickReplies(readQuickReplies(userId));
+      setAutomationConfig(readAutomationConfig(userId));
     } catch {
       setQuickReplyWorkspaceId('default');
       setQuickReplies(readQuickReplies('default'));
+      setAutomationConfig(readAutomationConfig('default'));
     }
   };
 
@@ -218,6 +282,60 @@ const Settings = () => {
         ? sanitizeQuickReplyBody(value)
         : sanitizeQuickReplyText(value, field === 'title' ? 40 : 240),
     }));
+  };
+
+  const persistAutomationConfig = (nextConfig) => {
+    const workspaceId = quickReplyWorkspaceId || 'default';
+    localStorage.setItem(getAutomationCacheKey(workspaceId), JSON.stringify(nextConfig));
+    setAutomationConfig(nextConfig);
+  };
+
+  const updateAutomationSection = (section, patch) => {
+    setAutomationError('');
+    setAutomationConfig((current) => {
+      const nextSection = { ...(current[section] || {}), ...patch };
+      const nextConfig = { ...current, [section]: nextSection };
+      localStorage.setItem(getAutomationCacheKey(quickReplyWorkspaceId || 'default'), JSON.stringify(nextConfig));
+      return nextConfig;
+    });
+  };
+
+  const updateAutomationText = (section, value, maxLength = 1200) => {
+    updateAutomationSection(section, { body: sanitizeAutomationText(value, maxLength) });
+  };
+
+  const updateWelcomeMediaType = (mediaType) => {
+    const safeType = Object.prototype.hasOwnProperty.call(supportedAutomationMediaTypes, mediaType) ? mediaType : 'text';
+    updateAutomationSection('welcome', {
+      media_type: safeType,
+      media_mime_type: supportedAutomationMediaTypes[safeType][0],
+      media_url: safeType === 'text' ? '' : automationConfig.welcome.media_url,
+    });
+  };
+
+  const updateWelcomeMimeType = (mimeType) => {
+    const allowed = supportedAutomationMediaTypes[automationConfig.welcome.media_type] || supportedAutomationMediaTypes.text;
+    if (!allowed.includes(mimeType)) {
+      setAutomationError('Selected media format is not supported for this message type.');
+      return;
+    }
+    updateAutomationSection('welcome', { media_mime_type: mimeType });
+  };
+
+  const updateWelcomeMediaUrl = (value) => {
+    updateAutomationSection('welcome', { media_url: sanitizeAutomationUrl(value) });
+  };
+
+  const saveAutomationConfig = () => {
+    const mediaType = automationConfig.welcome.media_type;
+    const allowed = supportedAutomationMediaTypes[mediaType] || [];
+    if (!allowed.includes(automationConfig.welcome.media_mime_type)) {
+      setAutomationError('Selected media format is not supported for this message type.');
+      return;
+    }
+    persistAutomationConfig(automationConfig);
+    setAutomationError('');
+    showToast('success', 'Smart automation settings saved.');
   };
 
   const insertQuickReplyVariable = (token) => {
@@ -825,14 +943,14 @@ const Settings = () => {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm shadow-blue-100/40 sm:p-8">
+          <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/60 sm:p-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#0B1F4D] text-[#FFD701] shadow-lg shadow-blue-950/10">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-[#FF6B00] ring-1 ring-orange-100">
                   <MessageSquare size={24} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-black text-[#0B1F4D]">Clinic Quick Replies</h2>
+                  <h2 className="text-xl font-black text-slate-950">Clinic Quick Replies</h2>
                   <p className="mt-1 text-sm font-semibold text-slate-500">
                     Saved slash shortcuts for manual inbox replies.
                   </p>
@@ -841,7 +959,7 @@ const Settings = () => {
               <button
                 type="button"
                 onClick={() => setQuickReplyManagerOpen((value) => !value)}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#0B1F4D] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-blue-950/20 transition hover:bg-[#FFD701] hover:text-slate-950 hover:shadow-[#FFD701]/50 hover:ring-4 hover:ring-[#FFD701]/25 active:scale-95 sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 active:scale-95 sm:w-auto"
               >
                 <Sparkles size={18} />
                 Manage Quick Replies
@@ -849,42 +967,68 @@ const Settings = () => {
             </div>
 
             {quickReplyManagerOpen && (
+              <div className="mt-6">
+                <div className="flex border-b border-slate-100">
+                  {[
+                    { id: 'quick_replies', label: 'Quick Replies' },
+                    { id: 'smart_automation', label: 'Smart Automation', isNew: true },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setQuickReplyActiveTab(tab.id)}
+                      className={`relative flex items-center px-4 py-3 text-sm font-black transition ${
+                        quickReplyActiveTab === tab.id ? 'text-slate-950' : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                    >
+                      {tab.label}
+                      {tab.isNew && (
+                        <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
+                      )}
+                      <span className={`absolute bottom-0 left-4 right-4 h-0.5 rounded-full bg-[#FF6B00] transition-all ${
+                        quickReplyActiveTab === tab.id ? 'opacity-100' : 'opacity-0'
+                      }`} />
+                    </button>
+                  ))}
+                </div>
+
+                {quickReplyActiveTab === 'quick_replies' ? (
               <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50/70 via-white to-[#FFD701]/10 p-4 shadow-inner shadow-blue-100/40 sm:p-5">
+                <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-200/50 sm:p-5">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Short-key Title</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-400">Short-key Title</label>
                       <input
                         type="text"
                         value={quickReplyForm.title}
                         onChange={(event) => updateQuickReplyField('title', event.target.value)}
                         placeholder="e.g., location, fees, consult_time"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                       />
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Keywords Filter</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-400">Keywords Filter</label>
                       <input
                         type="text"
                         value={quickReplyForm.keywords}
                         onChange={(event) => updateQuickReplyField('keywords', event.target.value)}
                         placeholder="e.g., location clinic dmch, address consult, fees clinic doctor"
-                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                       />
                     </div>
                   </div>
 
                   <div className="mt-4 space-y-2">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <label className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Template Body</label>
+                      <label className="text-xs font-black uppercase tracking-widest text-slate-400">Template Body</label>
                       <div className="flex flex-wrap gap-2">
                         {QUICK_REPLY_VARIABLES.map((token) => (
                           <button
                             key={token}
                             type="button"
                             onClick={() => insertQuickReplyVariable(token)}
-                            className="rounded-full border border-[#FF6B00] bg-gradient-to-r from-white via-orange-50/70 to-[#FFD701]/10 px-3 py-1.5 text-[10px] font-black text-[#0B1F4D] shadow-sm transition hover:border-[#FFD701] hover:bg-[#FFD701]/20 hover:shadow-[#FFD701]/30 active:scale-95"
+                            className="rounded-full border border-[#FF6B00] bg-orange-50/50 px-3 py-1.5 text-[10px] font-black text-slate-800 shadow-sm transition hover:bg-orange-100 active:scale-95"
                           >
                             {token}
                           </button>
@@ -898,7 +1042,7 @@ const Settings = () => {
                       placeholder="e.g., Our clinic is located at DMCH Patna. Map link: http://maps.google.com/?q=0..., Consultation fees is ₹500."
                       rows={7}
                       maxLength={1024}
-                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                     />
                     <div className="flex items-center justify-between gap-3 text-[11px] font-bold text-slate-400">
                       <span>{quickReplyForm.body.length}/1024 chars</span>
@@ -907,7 +1051,7 @@ const Settings = () => {
                   </div>
 
                   {quickReplyError && (
-                    <div className="mt-4 rounded-2xl border border-[#FFD701]/40 bg-[#FFD701]/10 px-4 py-3 text-sm font-bold text-[#0B1F4D]">
+                    <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
                       {quickReplyError}
                     </div>
                   )}
@@ -916,7 +1060,7 @@ const Settings = () => {
                     <button
                       type="button"
                       onClick={saveQuickReply}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-[#FFD701] hover:text-slate-950 hover:shadow-[#FFD701]/50 active:scale-95 sm:w-auto"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95 sm:w-auto"
                     >
                       <Plus size={18} />
                       Add Quick Reply
@@ -924,10 +1068,10 @@ const Settings = () => {
                   </div>
                 </div>
 
-                <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-sm shadow-blue-100/40">
+                <div className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm shadow-slate-200/50">
                   <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Saved Replies</h3>
-                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-black text-blue-700 ring-1 ring-blue-100">{quickReplies.length}/50</span>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">Saved Replies</h3>
+                    <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[10px] font-black text-slate-600 ring-1 ring-slate-100">{quickReplies.length}/50</span>
                   </div>
                   <div className="max-h-[430px] space-y-3 overflow-y-auto pr-1">
                     {quickReplies.length === 0 ? (
@@ -935,16 +1079,16 @@ const Settings = () => {
                         No quick replies saved yet.
                       </div>
                     ) : quickReplies.map((reply) => (
-                      <div key={reply.id} className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 transition hover:border-[#FFD701]/70 hover:bg-white hover:shadow-sm">
+                      <div key={reply.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 transition hover:border-orange-100 hover:bg-white hover:shadow-sm">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-black text-[#0B1F4D]">/{reply.title}</p>
+                            <p className="truncate text-sm font-black text-slate-950">/{reply.title}</p>
                             <p className="mt-1 truncate text-[11px] font-bold text-[#FF6B00]">{reply.keywords}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => deleteQuickReply(reply.id)}
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 transition hover:bg-[#FFD701]/20 hover:text-[#0B1F4D] active:scale-95"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 transition hover:bg-orange-50 hover:text-[#FF6B00] active:scale-95"
                             aria-label={`Delete ${reply.title} quick reply`}
                           >
                             <Trash2 size={15} />
@@ -955,6 +1099,185 @@ const Settings = () => {
                     ))}
                   </div>
                 </div>
+              </div>
+                ) : (
+                  <div className="mt-6 space-y-5">
+                    <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/50">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-black text-slate-950">Welcome Message Setup</h3>
+                          <p className="mt-1 text-sm font-semibold text-slate-500">Auto-trigger greeting for new patient conversations.</p>
+                        </div>
+                        <label className="inline-flex cursor-pointer items-center gap-3">
+                          <span className="text-xs font-black uppercase tracking-widest text-slate-400">{automationConfig.welcome.enabled ? 'Enabled' : 'Disabled'}</span>
+                          <input
+                            type="checkbox"
+                            checked={automationConfig.welcome.enabled}
+                            onChange={(event) => updateAutomationSection('welcome', { enabled: event.target.checked })}
+                            className="h-5 w-5 rounded border-slate-300 accent-[#FF6B00]"
+                          />
+                        </label>
+                      </div>
+                      <textarea
+                        value={automationConfig.welcome.body}
+                        onChange={(event) => updateAutomationText('welcome', event.target.value, 1200)}
+                        placeholder="e.g., Namaste! Yogi Desk AI Clinic mein aapka swagat hai. Please share your name and health issue."
+                        rows={4}
+                        className="mt-4 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                      />
+                      <div className="mt-4 grid gap-3 md:grid-cols-[180px_220px_1fr]">
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Media Type</span>
+                          <select
+                            value={automationConfig.welcome.media_type}
+                            onChange={(event) => updateWelcomeMediaType(event.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                          >
+                            <option value="text">text</option>
+                            <option value="image">image</option>
+                            <option value="video">video</option>
+                            <option value="document">document</option>
+                          </select>
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Format</span>
+                          <select
+                            value={automationConfig.welcome.media_mime_type}
+                            onChange={(event) => updateWelcomeMimeType(event.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                          >
+                            {(supportedAutomationMediaTypes[automationConfig.welcome.media_type] || supportedAutomationMediaTypes.text).map((mimeType) => (
+                              <option key={mimeType} value={mimeType}>{mimeType}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Media Link</span>
+                          <input
+                            type="url"
+                            value={automationConfig.welcome.media_url}
+                            onChange={(event) => updateWelcomeMediaUrl(event.target.value)}
+                            disabled={automationConfig.welcome.media_type === 'text'}
+                            placeholder="Paste image/document link (e.g., clinic brochure, clinic video introduction)"
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/50">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-black text-slate-950">Out of Office / Business Hours</h3>
+                          <p className="mt-1 text-sm font-semibold text-slate-500">Clinic closed message for inactive hours.</p>
+                        </div>
+                        <label className="inline-flex cursor-pointer items-center gap-3">
+                          <span className="text-xs font-black uppercase tracking-widest text-slate-400">{automationConfig.businessHours.enabled ? 'Enabled' : 'Disabled'}</span>
+                          <input
+                            type="checkbox"
+                            checked={automationConfig.businessHours.enabled}
+                            onChange={(event) => updateAutomationSection('businessHours', { enabled: event.target.checked })}
+                            className="h-5 w-5 rounded border-slate-300 accent-[#FF6B00]"
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Time</span>
+                          <input
+                            type="time"
+                            value={automationConfig.businessHours.start_time}
+                            onChange={(event) => updateAutomationSection('businessHours', { start_time: sanitizeAutomationText(event.target.value, 8) })}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">End Time</span>
+                          <input
+                            type="time"
+                            value={automationConfig.businessHours.end_time}
+                            onChange={(event) => updateAutomationSection('businessHours', { end_time: sanitizeAutomationText(event.target.value, 8) })}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                          />
+                        </label>
+                        <label className="space-y-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Days</span>
+                          <select
+                            value={automationConfig.businessHours.days}
+                            onChange={(event) => updateAutomationSection('businessHours', { days: sanitizeAutomationText(event.target.value, 20) })}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                          >
+                            <option value="mon_sat">Mon-Sat</option>
+                            <option value="mon_fri">Mon-Fri</option>
+                            <option value="all_days">All Days</option>
+                            <option value="weekends">Weekends</option>
+                          </select>
+                        </label>
+                      </div>
+                      <textarea
+                        value={automationConfig.businessHours.body}
+                        onChange={(event) => updateAutomationText('businessHours', event.target.value, 1200)}
+                        placeholder="e.g., Right now our clinic is closed. Our active timings are Mon-Sat, 9AM to 6PM. For medical emergency, call 98765xxxxx."
+                        rows={4}
+                        className="mt-4 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                      />
+                    </div>
+
+                    <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/50">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-black text-slate-950">Delayed Response Alert</h3>
+                          <p className="mt-1 text-sm font-semibold text-slate-500">Staff busy message after a waiting threshold.</p>
+                        </div>
+                        <label className="inline-flex cursor-pointer items-center gap-3">
+                          <span className="text-xs font-black uppercase tracking-widest text-slate-400">{automationConfig.delayedResponse.enabled ? 'Enabled' : 'Disabled'}</span>
+                          <input
+                            type="checkbox"
+                            checked={automationConfig.delayedResponse.enabled}
+                            onChange={(event) => updateAutomationSection('delayedResponse', { enabled: event.target.checked })}
+                            className="h-5 w-5 rounded border-slate-300 accent-[#FF6B00]"
+                          />
+                        </label>
+                      </div>
+                      <label className="mt-4 block space-y-2">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Delay Threshold</span>
+                        <select
+                          value={automationConfig.delayedResponse.delay_minutes}
+                          onChange={(event) => updateAutomationSection('delayedResponse', { delay_minutes: sanitizeAutomationText(event.target.value, 2) })}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100 md:w-64"
+                        >
+                          <option value="5">After 5 Mins</option>
+                          <option value="10">After 10 Mins</option>
+                          <option value="15">After 15 Mins</option>
+                        </select>
+                      </label>
+                      <textarea
+                        value={automationConfig.delayedResponse.body}
+                        onChange={(event) => updateAutomationText('delayedResponse', event.target.value, 1200)}
+                        placeholder="e.g., We are experiencing high patient volumes at the clinic counter right now. Thank you for your patience, we will text you shortly!"
+                        rows={4}
+                        className="mt-4 w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-semibold leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
+                      />
+                    </div>
+
+                    {automationError && (
+                      <div className="rounded-2xl border border-orange-100 bg-orange-50 px-4 py-3 text-sm font-bold text-orange-700">
+                        {automationError}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={saveAutomationConfig}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95 sm:w-auto"
+                      >
+                        <Save size={18} />
+                        Save Automation
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </section>

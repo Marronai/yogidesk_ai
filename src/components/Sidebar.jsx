@@ -254,7 +254,12 @@ const Sidebar = () => {
                 className={`${menuClass(path)} w-full cursor-not-allowed opacity-75`}
               >
                 {React.createElement(icon, { size: 20 })}
-                <span className="flex-1 text-left">{name}</span>
+              <span className="flex-1 text-left">
+                {name}
+                {name === 'Delivery Reports' && (
+                  <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
+                )}
+              </span>
                 <Lock size={15} />
               </button>
             );
@@ -263,7 +268,12 @@ const Sidebar = () => {
           return (
             <Link key={path} to={path} className={menuClass(path)}>
               {React.createElement(icon, { size: 20 })}
-              <span>{name}</span>
+              <span>
+                {name}
+                {name === 'Delivery Reports' && (
+                  <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold text-white bg-[#FFD701] rounded animate-pulse">NEW</span>
+                )}
+              </span>
             </Link>
           );
         })}

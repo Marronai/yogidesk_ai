@@ -239,11 +239,11 @@ const DeliveryReports = () => {
       sublabel: 'कुल भेजे गए',
       value: metrics.total,
       icon: Send,
-      card: 'border-[#0B1F4D] bg-[#0B1F4D] text-white shadow-blue-950/20',
-      iconBox: 'bg-white/10 text-[#FFD701] ring-white/20',
-      valueClass: 'text-white',
-      labelClass: 'text-white/75',
-      sublabelClass: 'text-[#FFD701]',
+      card: 'border-slate-100 bg-white text-slate-900',
+      iconBox: 'bg-slate-100 text-slate-700 ring-slate-200',
+      valueClass: 'text-slate-950',
+      labelClass: 'text-slate-500',
+      sublabelClass: 'text-slate-600',
     },
     {
       label: 'Successfully Delivered',
@@ -283,17 +283,17 @@ const DeliveryReports = () => {
   return (
     <div className="min-h-screen bg-blue-50/40 px-4 py-6 sm:px-6 lg:px-8">
       {showCustomRangeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0B1F4D]/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-blue-100">
-            <div className="flex items-center justify-between bg-[#0B1F4D] px-6 py-5 text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-2xl shadow-slate-200/70">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-white px-6 py-5">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#FFD701]">Custom Range</p>
-                <h2 className="mt-1 text-xl font-black">Select report dates</h2>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#FF6B00]">Custom Range</p>
+                <h2 className="mt-1 text-xl font-black text-slate-950">Select report dates</h2>
               </div>
               <button
                 type="button"
                 onClick={() => setShowCustomRangeModal(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white active:scale-95"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 active:scale-95"
                 aria-label="Close custom date range"
               >
                 <X size={20} />
@@ -306,7 +306,7 @@ const DeliveryReports = () => {
                   type="date"
                   value={draftRange.from}
                   onChange={(event) => setDraftRange((current) => ({ ...current, from: sanitizeCell(event.target.value, 10) }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                 />
               </label>
               <label className="space-y-2">
@@ -315,7 +315,7 @@ const DeliveryReports = () => {
                   type="date"
                   value={draftRange.to}
                   onChange={(event) => setDraftRange((current) => ({ ...current, to: sanitizeCell(event.target.value, 10) }))}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/25"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                 />
               </label>
             </div>
@@ -330,7 +330,7 @@ const DeliveryReports = () => {
               <button
                 type="button"
                 onClick={applyCustomRange}
-                className="rounded-2xl bg-[#FF6B00] px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-[#FFD701] hover:text-slate-950 active:scale-95"
+                className="rounded-2xl bg-[#FF6B00] px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95"
               >
                 Apply Range
               </button>
@@ -340,21 +340,21 @@ const DeliveryReports = () => {
       )}
 
       <div className="mx-auto max-w-7xl space-y-6">
-        <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm">
-          <div className="flex flex-col gap-5 bg-[#0B1F4D] px-6 py-7 text-white sm:flex-row sm:items-center sm:justify-between">
+        <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm shadow-slate-200/60">
+          <div className="flex flex-col gap-5 bg-white px-6 py-7 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-[#FFD701] ring-1 ring-white/20">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-[#FF6B00] ring-1 ring-orange-100">
                 <BarChart3 size={26} />
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.25em] text-[#FFD701]">Message Analytics</p>
-                <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">Delivery Reports</h1>
-                <p className="mt-2 max-w-2xl text-sm font-semibold text-blue-100">
+                <p className="text-xs font-black uppercase tracking-[0.25em] text-[#FF6B00]">Message Analytics</p>
+                <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Delivery Reports</h1>
+                <p className="mt-2 max-w-2xl text-sm font-semibold text-slate-500">
                   Simple WhatsApp delivery status for your clinic workspace.
                 </p>
               </div>
             </div>
-            <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-blue-50 ring-1 ring-white/15">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-600">
               {formatDateTime(activeRange.from)} - {formatDateTime(activeRange.to)}
             </div>
           </div>
@@ -377,10 +377,10 @@ const DeliveryReports = () => {
           ))}
         </section>
 
-        <section className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+        <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/50">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Date Filter</p>
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400">Date Filter</p>
               <h2 className="mt-1 text-lg font-black text-slate-950">Choose reporting window</h2>
             </div>
             <div className="grid gap-3 sm:grid-cols-[260px_auto] sm:items-end">
@@ -389,7 +389,7 @@ const DeliveryReports = () => {
                 <select
                   value={dateFilter}
                   onChange={(event) => handleDateFilterChange(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FFD701] focus:ring-4 focus:ring-[#FFD701]/20"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-800 outline-none transition focus:border-[#FF6B00] focus:ring-4 focus:ring-orange-100"
                 >
                   {FILTER_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -403,7 +403,7 @@ const DeliveryReports = () => {
                     setDraftRange(customRange);
                     setShowCustomRangeModal(true);
                   }}
-                  className="rounded-2xl border border-[#FFD701]/60 bg-[#FFD701]/10 px-4 py-3 text-xs font-black uppercase tracking-widest text-[#0B1F4D] transition hover:bg-[#FFD701] active:scale-95"
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-[#FF6B00] active:scale-95"
                 >
                   Edit Calendar Range
                 </button>
@@ -412,10 +412,10 @@ const DeliveryReports = () => {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
+        <section className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm shadow-slate-200/50">
           <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-black uppercase tracking-widest text-[#0B1F4D]">Delivery Log</p>
+              <p className="text-xs font-black uppercase tracking-widest text-slate-400">Delivery Log</p>
               <p className="mt-1 text-sm font-bold text-slate-600">{logs.length} records in current filter</p>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -423,7 +423,7 @@ const DeliveryReports = () => {
                 type="button"
                 onClick={exportCsv}
                 disabled={exporting || logs.length === 0}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-5 py-3 text-sm font-black uppercase tracking-widest text-slate-950 shadow-lg shadow-orange-200 transition hover:bg-[#FFD701] hover:shadow-[#FFD701]/50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               >
                 {exporting ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
                 📥 Export Report to Excel/CSV
