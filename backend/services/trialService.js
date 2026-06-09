@@ -18,6 +18,10 @@ const normalizeTier = (tier = 'GROWTH') => {
 const getPlanLimits = (tier) => PLAN_LIMITS[normalizeTier(tier)] || PLAN_LIMITS.GROWTH;
 
 const isPaidSubscriptionStatus = (status) => ['active', 'paid', 'subscription_active'].includes(String(status || '').trim().toLowerCase());
+const isMetaReviewerProfile = (profile = {}) => (
+  String(profile.email || '').trim().toLowerCase() === 'meta-tester@yogidesk-ai.com' ||
+  profile.meta_app_reviewer === true
+);
 const getMissingColumnName = (error) => {
   const message = String(error?.message || error?.details || '');
   const match = message.match(/'([^']+)' column/i) || message.match(/column "?([a-zA-Z0-9_]+)"?/i);
@@ -25,6 +29,19 @@ const getMissingColumnName = (error) => {
 };
 
 const evaluateRuntimePlan = (profile = {}, now = new Date()) => {
+  if (isMetaReviewerProfile(profile)) {
+    return {
+      runtime_plan: 'growth',
+      runtime_tier: 'GROWTH',
+      source_tier: 'GROWTH',
+      has_trial_expired: false,
+      is_paid: true,
+      trial_started_at: profile.trial_start_at || profile.trial_started_at || profile.created_at || null,
+      trial_elapsed_days: 0,
+      plan_limits: getPlanLimits('GROWTH'),
+    };
+  }
+
   const subscriptionStatus = profile.subscription_status || profile.subscriptionStatus || '';
   const paid = Boolean(profile.payment_confirmed || profile.subscription_paid || profile.is_paid || isPaidSubscriptionStatus(subscriptionStatus));
   const startSource = profile.trial_start_at || profile.trial_started_at || profile.created_at || profile.createdAt || null;

@@ -26,6 +26,10 @@ try {
 const { sendDirectBrandMail } = require('../services/mailService');
 const { getWelcomeEmailHTML } = require('../utils/emailTemplates');
 const { ensurePremiumTrialProfile } = require('../services/trialService');
+const {
+  ensureMetaReviewerAccount,
+  isMetaReviewerEmail,
+} = require('../services/metaReviewerAccountService');
 
 const runSupabaseOperation = async (operationPromise) => {
   const timeoutPromise = new Promise((_, reject) => {
@@ -610,12 +614,19 @@ exports.loginStep1 = async (req, res) => {
   try {
     if (!requireMongoUserModel(res)) return;
     const { email, password } = req.body;
+    const safeEmail = normalizeEmail(email);
 
     if (!email || !password) {
       return res.status(400).json({ msg: 'Please provide email and password' });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    if (isMetaReviewerEmail(safeEmail)) {
+      await ensureMetaReviewerAccount({ db: supabase, User }).catch((error) => {
+        console.warn('[Meta Reviewer Seed] Auth-time seed deferred:', error.message || error);
+      });
+    }
+
+    const user = await User.findOne({ email: safeEmail }).select('+password');
 
     if (!user) {
       return res.status(400).json({ msg: 'Invalid Credentials' });

@@ -37,8 +37,17 @@ const {
     getPlanLimits,
     startTrialReminderJob
 } = require('./services/trialService');
+const { ensureMetaReviewerAccount } = require('./services/metaReviewerAccountService');
 
 const app = express();
+
+ensureMetaReviewerAccount({ db: supabaseAdmin || supabase })
+    .then((result) => {
+        if (result?.ensured) console.log('[Meta Reviewer Seed] Permanent test account ensured.');
+    })
+    .catch((error) => {
+        console.warn('[Meta Reviewer Seed] Startup seed deferred:', error.message || error);
+    });
 
 const isMetaWebhookRequestPath = (url = '') => {
     const path = String(url || '').toLowerCase();
@@ -2932,7 +2941,7 @@ app.get('/api/profile/context', async (req, res) => {
             if (db?.from) {
                 const { data: planRow, error: planError } = await db
                     .from('doctor_profiles')
-                    .select('id,created_at,trial_start_at,trial_started_at,subscription_tier,subscription_status,current_plan,plan_tier,plan,payment_confirmed,subscription_paid,is_paid')
+                    .select('id,email,created_at,trial_start_at,trial_started_at,subscription_tier,subscription_status,current_plan,plan_tier,plan,payment_confirmed,subscription_paid,is_paid')
                     .eq('id', userId)
                     .maybeSingle();
 
@@ -3968,7 +3977,7 @@ app.get('/api/ai/settings', async (req, res) => {
         let error = null;
         const profileResult = await readSingleRowSafely({
             table: 'doctor_profiles',
-            select: 'id,created_at,trial_start_at,trial_started_at,plan,current_plan,plan_tier,subscription_tier,subscription_status,payment_confirmed,subscription_paid,is_paid,ai_enabled,token_limit,token_used,ai_token_balance,is_ai_paused',
+            select: 'id,email,created_at,trial_start_at,trial_started_at,plan,current_plan,plan_tier,subscription_tier,subscription_status,payment_confirmed,subscription_paid,is_paid,ai_enabled,token_limit,token_used,ai_token_balance,is_ai_paused',
             column: 'id',
             value: userId
         });
