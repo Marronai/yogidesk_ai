@@ -84,9 +84,9 @@ const MainLayout = () => {
           <div className="flex items-center gap-3 min-w-0">
             <Link to="/dashboard" className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white" aria-label="Yogidesk.ai dashboard">
               <img
-                src="/assets/yogidesk-logo.png"
-                alt="Yogidesk.ai"
-                className="h-10 w-10 object-contain"
+                src="/logo.png"
+                alt="YogiDesk AI Logo"
+                className="h-8 w-auto object-contain"
               />
             </Link>
             <div className="min-w-0">

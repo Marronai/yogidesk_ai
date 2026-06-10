@@ -195,7 +195,7 @@ const buildGeminiSystemInstruction = (dbData = {}) => [
     '2. Keep the tone warm, reassuring, concise, human-like, and highly precise.',
     `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
     '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
-    '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.'
+    '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When a patient explicitly confirms a preferred date and time slot for an appointment, you MUST automatically invoke the `bookPatientAppointment` function tool passing the patient\'s parsed credentials. If native tool calling is unavailable in this channel, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end so the booking hook can execute securely.'
 ].join('\n');
 
 const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
@@ -567,6 +567,53 @@ const parseGeminiBookingConfirmation = (replyText = '') => {
     return { cleanText, booking };
 };
 
+const normalizeAppointmentDateValue = (value) => sanitizeGeminiContextValue(value, '', 80);
+const normalizeAppointmentTimeValue = (value) => sanitizeGeminiContextValue(value, '', 40);
+const normalizeAppointmentNameValue = (value) => sanitizeGeminiContextValue(value, 'Patient', 120);
+
+const resolveDoctorNotificationPhone = (doctor = {}) => {
+    const candidates = [
+        doctor.phone,
+        doctor.mobile,
+        doctor.phone_number,
+        doctor.whatsapp_number,
+        doctor.owner_phone,
+        doctor.clinic_phone
+    ];
+    return phoneDigitsOnly(candidates.find((candidate) => phoneDigitsOnly(candidate)) || '');
+};
+
+const buildDoctorAppointmentNotification = (appointment = {}) => [
+    'Hello Doctor,',
+    '',
+    'You have received a NEW Appointment booking via YogiDesk AI!',
+    '',
+    `📌 Patient Name: ${appointment.patient_name || 'Patient'}`,
+    `📞 Phone: ${appointment.patient_phone || '-'}`,
+    `📅 Date: ${appointment.appointment_date || '-'}`,
+    `⏰ Time: ${appointment.appointment_time || '-'}`,
+    '',
+    'Please check your YogiDesk Appointments Tab for more details.'
+].join('\n');
+
+const notifyDoctorOfAppointment = async ({ doctor = {}, inbound = {}, appointment = {} }) => {
+    const doctorPhone = resolveDoctorNotificationPhone(doctor);
+    if (!doctorPhone) return { success: false, reason: 'doctor_phone_missing' };
+
+    try {
+        await sendGeminiWhatsAppTextReply({
+            toPhone: doctorPhone,
+            text: buildDoctorAppointmentNotification(appointment),
+            phoneNumberId: doctor.meta_phone_number_id || doctor.whatsapp_phone_number_id || inbound.phoneNumberId,
+            businessAccountId: doctor.meta_waba_id || doctor.whatsapp_business_account_id || inbound.businessAccountId
+        });
+        return { success: true };
+    } catch (error) {
+        console.warn('Doctor appointment WhatsApp notification failed:', error.message || error);
+        return { success: false, reason: 'notification_failed', error };
+    }
+};
+
 const insertWithSchemaFallback = async ({ table, row, dbClient = supabaseAdmin || supabase }) => {
     if (!dbClient?.from || !table || !row) return { success: false, reason: 'database_unavailable' };
     let payload = removeUndefinedValues(row);
@@ -590,34 +637,76 @@ const insertWithSchemaFallback = async ({ table, row, dbClient = supabaseAdmin |
     return { success: false, reason: 'empty_payload' };
 };
 
+const bookPatientAppointment = async ({
+    doctor = {},
+    inbound = {},
+    patientName,
+    patientPhone,
+    appointmentDate,
+    appointmentTime,
+    source = 'whatsapp_gemini',
+    metadata = {}
+}) => {
+    const doctorId = doctor?.id;
+    const safePatientName = normalizeAppointmentNameValue(patientName || inbound.patientName);
+    const safePatientPhone = phoneDigitsOnly(patientPhone || inbound.fromPhone || '');
+    const safeAppointmentDate = normalizeAppointmentDateValue(appointmentDate);
+    const safeAppointmentTime = normalizeAppointmentTimeValue(appointmentTime);
+
+    if (!doctorId || !safePatientName || !safePatientPhone || !safeAppointmentDate || !safeAppointmentTime) {
+        return { success: false, reason: 'missing_required_appointment_fields' };
+    }
+
+    const nowIso = new Date().toISOString();
+    const result = await insertWithSchemaFallback({
+        table: 'appointments',
+        row: {
+            user_id: doctorId,
+            doctor_id: doctorId,
+            patient_name: safePatientName,
+            patient_phone: safePatientPhone,
+            appointment_date: safeAppointmentDate,
+            appointment_time: safeAppointmentTime,
+            status: 'Pending',
+            source,
+            metadata: {
+                ...metadata,
+                inbound_message_id: inbound.messageId || null,
+                whatsapp_business_account_id: inbound.businessAccountId || null,
+                whatsapp_phone_number_id: inbound.phoneNumberId || null,
+                created_by_ai: source === 'whatsapp_gemini',
+                tool_name: 'bookPatientAppointment'
+            },
+            created_at: nowIso,
+            updated_at: nowIso
+        }
+    });
+
+    if (!result.success) return result;
+
+    const appointment = result.data || {
+        patient_name: safePatientName,
+        patient_phone: safePatientPhone,
+        appointment_date: safeAppointmentDate,
+        appointment_time: safeAppointmentTime,
+        status: 'Pending'
+    };
+    await notifyDoctorOfAppointment({ doctor, inbound, appointment });
+    return { success: true, data: appointment };
+};
+
 const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
     if (!booking?.patientName || !booking?.appointmentDate || !booking?.appointmentTime) return;
 
     Promise.resolve()
         .then(async () => {
-            const db = supabaseAdmin || supabase;
-            const nowIso = new Date().toISOString();
-            const result = await insertWithSchemaFallback({
-                table: 'appointments',
-                dbClient: db,
-                row: {
-                    user_id: doctor?.id || null,
-                    doctor_id: doctor?.id || null,
-                    patient_name: booking.patientName,
-                    patient_phone: phoneDigitsOnly(inbound.fromPhone || ''),
-                    appointment_date: booking.appointmentDate,
-                    appointment_time: booking.appointmentTime,
-                    status: 'Pending',
-                    source: 'whatsapp_gemini',
-                    metadata: {
-                        inbound_message_id: inbound.messageId || null,
-                        whatsapp_business_account_id: inbound.businessAccountId || null,
-                        whatsapp_phone_number_id: inbound.phoneNumberId || null,
-                        created_by_ai: true
-                    },
-                    created_at: nowIso,
-                    updated_at: nowIso
-                }
+            const result = await bookPatientAppointment({
+                doctor,
+                inbound,
+                patientName: booking.patientName,
+                patientPhone: inbound.fromPhone,
+                appointmentDate: booking.appointmentDate,
+                appointmentTime: booking.appointmentTime
             });
             if (!result.success) console.error('Gemini appointment save failed:', result.error?.message || result.error || result.reason);
         })
@@ -2160,3 +2249,4 @@ exports.extractWhatsAppInboundTextMessages = extractWhatsAppInboundTextMessages;
 exports.handleGeminiWhatsAppMessage = handleGeminiWhatsAppMessage;
 exports.handleWhatsAppGeminiWebhook = handleWhatsAppGeminiWebhook;
 exports.sendGeminiWhatsAppTextReply = sendGeminiWhatsAppTextReply;
+exports.bookPatientAppointment = bookPatientAppointment;

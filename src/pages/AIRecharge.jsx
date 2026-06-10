@@ -3,6 +3,7 @@ import { Bot, CheckCircle2, Clock, CreditCard, Download, Gauge, IndianRupee, Mes
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
+import { exportFinancialStatementPdf } from '../utils/statementExport';
 
 const AI_PACKAGES = [
   { id: 'starter_ai', name: 'Starter AI', price: 299, messages: 600, cost: '~Rs. 0.49 / message' },
@@ -10,6 +11,7 @@ const AI_PACKAGES = [
   { id: 'professional_ai', name: 'Professional AI', price: 999, messages: 3000, cost: '~Rs. 0.33 / message' },
   { id: 'clinic_pro_ai', name: 'Clinic Pro AI', price: 1999, messages: 7000, cost: '~Rs. 0.28 / message' },
 ];
+const ITEMS_PER_PAGE = 10;
 
 const loadRazorpayScript = () => new Promise((resolve) => {
   if (window.Razorpay) {
@@ -30,33 +32,6 @@ const calculateCustomMessages = (price) => {
   return Math.floor(value * (value < 500 ? 2.0 : 2.5));
 };
 
-const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
-
-const downloadCsv = (rows) => {
-  const headers = ['Date', 'Package', 'Amount INR', 'AI Messages', 'Payment ID', 'Status'];
-  const body = rows.map((row) => {
-    const metadata = row.metadata || {};
-    return [
-      new Date(row.created_at).toLocaleString('en-IN'),
-      metadata.package_id || 'AI Message Credits',
-      Number(row.amount || 0).toFixed(2),
-      Number(metadata.ai_messages || 0),
-      metadata.razorpay_payment_id || '',
-      'Success',
-    ].map(csvCell).join(',');
-  });
-
-  const blob = new Blob([[headers.map(csvCell).join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `yogidesk-ai-message-statement-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
 const AIRecharge = () => {
   const navigate = useNavigate();
   const [selectedPackage, setSelectedPackage] = useState(AI_PACKAGES[1]);
@@ -65,6 +40,7 @@ const AIRecharge = () => {
   const [loading, setLoading] = useState(false);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [aiLedger, setAiLedger] = useState([]);
+  const [ledgerPage, setLedgerPage] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
@@ -72,6 +48,15 @@ const AIRecharge = () => {
   const checkoutDetails = mode === 'custom'
     ? { packageId: 'custom', name: 'Custom AI Messages', price: Number(customAmount), messages: customMessages }
     : selectedPackage;
+  const sortedAiLedger = useMemo(() => (
+    [...aiLedger].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+  ), [aiLedger]);
+  const totalLedgerPages = Math.max(1, Math.ceil(sortedAiLedger.length / ITEMS_PER_PAGE));
+  const visibleAiLedger = sortedAiLedger.slice(ledgerPage * ITEMS_PER_PAGE, (ledgerPage + 1) * ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    if (ledgerPage > totalLedgerPages - 1) setLedgerPage(Math.max(0, totalLedgerPages - 1));
+  }, [ledgerPage, totalLedgerPages]);
 
   const fetchAiLedger = async () => {
     try {
@@ -103,6 +88,22 @@ const AIRecharge = () => {
   useEffect(() => {
     fetchAiLedger();
   }, []);
+
+  const exportAiStatement = async () => {
+    await exportFinancialStatementPdf({
+      title: 'AI Credits Statement',
+      filenamePrefix: 'ai-credits-statement',
+      rows: sortedAiLedger.map((row) => {
+        const metadata = row.metadata || {};
+        return {
+          date: new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
+          activity: metadata.package_id || 'AI Message Credits',
+          value: `+${Number(metadata.ai_messages || 0).toLocaleString()} AI Messages / Rs. ${Number(row.amount || 0).toFixed(2)}`,
+          status: 'Success',
+        };
+      }),
+    });
+  };
 
   const startCheckout = async () => {
     setError('');
@@ -327,8 +328,8 @@ const AIRecharge = () => {
             </div>
             <button
               type="button"
-              onClick={() => downloadCsv(aiLedger)}
-              disabled={aiLedger.length === 0}
+              onClick={exportAiStatement}
+              disabled={sortedAiLedger.length === 0}
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Download size={16} />
@@ -359,7 +360,7 @@ const AIRecharge = () => {
                     </tr>
                   ))
                 ) : (
-                  aiLedger.map((row) => {
+                  visibleAiLedger.map((row) => {
                     const metadata = row.metadata || {};
                     return (
                       <tr key={row.id} className="transition hover:bg-slate-50/70">
@@ -382,6 +383,31 @@ const AIRecharge = () => {
               </div>
             )}
           </div>
+          {sortedAiLedger.length > ITEMS_PER_PAGE && (
+            <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                Page {ledgerPage + 1} of {totalLedgerPages}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={ledgerPage === 0}
+                  onClick={() => setLedgerPage((page) => Math.max(0, page - 1))}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Previous Page
+                </button>
+                <button
+                  type="button"
+                  disabled={ledgerPage >= totalLedgerPages - 1}
+                  onClick={() => setLedgerPage((page) => Math.min(totalLedgerPages - 1, page + 1))}
+                  className="rounded-xl bg-orange-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next Page
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

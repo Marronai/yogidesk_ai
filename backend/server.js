@@ -15,7 +15,8 @@ const {
     buildQueuedInboxChatPayload,
     insertCampaignQueueRows,
     insertQueuedInboxChatRows,
-    handleGeminiWhatsAppMessage
+    handleGeminiWhatsAppMessage,
+    bookPatientAppointment
 } = require('./controllers/whatsappController');
 const { getWalletBalance } = require('./controllers/adminController');
 const { getTemplateStatusAggregation, getMessageSentHistory, getDashboardMetrics } = require('./controllers/analyticsController');
@@ -607,6 +608,83 @@ app.get('/api/user/usage', attachDoctorSession, getUserUsage);
 app.get('/api/wallet/balance', attachDoctorSession, getWalletBalance);
 app.post('/api/patients', attachDoctorSession, addPatient);
 app.post('/api/patients/bulk', attachDoctorSession, addPatients);
+
+app.get('/api/appointments', attachDoctorSession, async (req, res) => {
+    const doctorId = req.user?.id;
+    if (!doctorId) return res.status(401).json({ success: false, message: 'Doctor session is required.' });
+
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(200).json({ success: true, appointments: [] });
+
+        const { data, error } = await db
+            .from('appointments')
+            .select('id, patient_name, patient_phone, appointment_date, appointment_time, status, created_at')
+            .eq('doctor_id', doctorId)
+            .order('appointment_date', { ascending: true })
+            .order('appointment_time', { ascending: true });
+
+        if (error) {
+            console.warn('Appointment fetch returned empty ledger after database error:', error.message || error);
+            return res.status(200).json({ success: true, appointments: [] });
+        }
+
+        return res.status(200).json({ success: true, appointments: Array.isArray(data) ? data : [] });
+    } catch (error) {
+        console.warn('Appointment fetch recovered with empty ledger:', error.message || error);
+        return res.status(200).json({ success: true, appointments: [] });
+    }
+});
+
+app.post('/api/appointments', attachDoctorSession, async (req, res) => {
+    const doctorId = req.user?.id;
+    if (!doctorId) return res.status(401).json({ success: false, message: 'Doctor session is required.' });
+
+    const patientName = sanitizePlainText(req.body?.patient_name || req.body?.patientName, 120);
+    const patientPhone = phoneDigitsOnly(req.body?.patient_phone || req.body?.patientPhone);
+    const appointmentDate = sanitizePlainText(req.body?.appointment_date || req.body?.appointmentDate, 80);
+    const appointmentTime = sanitizePlainText(req.body?.appointment_time || req.body?.appointmentTime, 40);
+
+    if (!patientName || patientPhone.length < 10 || !appointmentDate || !appointmentTime) {
+        return res.status(400).json({
+            success: false,
+            message: 'patient_name, patient_phone, appointment_date, and appointment_time are required.'
+        });
+    }
+
+    try {
+        const db = supabaseAdmin || supabase;
+        let doctorProfile = { id: doctorId };
+        if (db?.from) {
+            const { data, error } = await db
+                .from('doctor_profiles')
+                .select('*')
+                .eq('id', doctorId)
+                .maybeSingle();
+            if (!error && data) doctorProfile = { ...data, id: doctorId };
+        }
+
+        const result = await bookPatientAppointment({
+            doctor: doctorProfile,
+            patientName,
+            patientPhone,
+            appointmentDate,
+            appointmentTime,
+            source: 'dashboard',
+            metadata: { reminder_settings_active: true }
+        });
+
+        if (!result.success) {
+            console.error('Dashboard appointment save failed:', result.error?.message || result.error || result.reason);
+            return res.status(500).json({ success: false, message: 'Unable to save appointment.' });
+        }
+
+        return res.status(201).json({ success: true, appointment: result.data });
+    } catch (error) {
+        console.error('Dashboard appointment save crashed:', error.message || error);
+        return res.status(500).json({ success: false, message: 'Unable to save appointment.' });
+    }
+});
 
 app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
     try {

@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowDownCircle, ArrowUpCircle, Clock, Gift, Send, Wallet } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Clock, Download, Gift, Send, Wallet } from 'lucide-react';
 import api from '../utils/api';
 import { PRICING_RULES } from '../constants/templateLibrary';
 import { useWallet } from '../context/WalletContext';
+import { exportFinancialStatementPdf } from '../utils/statementExport';
 
 const quickAmounts = [200, 500, 1000];
+const ITEMS_PER_PAGE = 10;
 
 const loadRazorpayScript = () => new Promise((resolve) => {
   if (window.Razorpay) {
@@ -26,6 +28,7 @@ const YogiWallet = () => {
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
+  const [passbookPage, setPassbookPage] = useState(0);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const profile = useMemo(() => ({
@@ -33,6 +36,32 @@ const YogiWallet = () => {
     email: localStorage.getItem('user_email') || '',
     phone: localStorage.getItem('user_phone') || '',
   }), []);
+
+  const sortedTransactions = useMemo(() => (
+    [...transactions].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+  ), [transactions]);
+  const totalPages = Math.max(1, Math.ceil(sortedTransactions.length / ITEMS_PER_PAGE));
+  const visibleTransactions = sortedTransactions.slice(passbookPage * ITEMS_PER_PAGE, (passbookPage + 1) * ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    if (passbookPage > totalPages - 1) setPassbookPage(Math.max(0, totalPages - 1));
+  }, [passbookPage, totalPages]);
+
+  const exportWalletStatement = async () => {
+    await exportFinancialStatementPdf({
+      title: 'Yogi Wallet Statement',
+      filenamePrefix: 'yogi-wallet-statement',
+      rows: sortedTransactions.map((tx) => {
+        const isCredit = tx.type === 'CREDIT' || tx.transaction_type === 'CREDIT' || tx.type === 'recharge';
+        return {
+          date: new Date(tx.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
+          activity: isCredit ? 'Wallet Recharge' : (tx.description || 'Wallet Debit'),
+          value: `${isCredit ? '+' : '-'} Rs. ${Math.abs(Number(tx.amount || 0)).toFixed(2)}`,
+          status: 'Success',
+        };
+      }),
+    });
+  };
 
   useEffect(() => {
     const status = searchParams.get('payment');
@@ -249,9 +278,20 @@ const YogiWallet = () => {
         </div>
 
         <div className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
-          <div className="mb-6 flex items-center gap-3">
-            <Clock className="text-slate-400" size={24} />
-            <h2 className="text-2xl font-black text-slate-950">Transaction Passbook</h2>
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <Clock className="text-slate-400" size={24} />
+              <h2 className="text-2xl font-black text-slate-950">Transaction Passbook</h2>
+            </div>
+            <button
+              type="button"
+              onClick={exportWalletStatement}
+              disabled={sortedTransactions.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={16} />
+              Export Statement
+            </button>
           </div>
 
           <div className="overflow-x-auto">
@@ -273,8 +313,8 @@ const YogiWallet = () => {
                     </tr>
                   ))
                 ) : (
-                  transactions.map((tx) => {
-                    const isCredit = tx.type === 'CREDIT' || tx.type === 'recharge';
+                  visibleTransactions.map((tx) => {
+                    const isCredit = tx.type === 'CREDIT' || tx.transaction_type === 'CREDIT' || tx.type === 'recharge';
                     return (
                       <tr key={tx.id} className="hover:bg-slate-50/30 transition-colors">
                         <td className="p-4 text-sm font-medium text-slate-600">
@@ -311,6 +351,31 @@ const YogiWallet = () => {
               </div>
             )}
           </div>
+          {sortedTransactions.length > ITEMS_PER_PAGE && (
+            <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                Page {passbookPage + 1} of {totalPages}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={passbookPage === 0}
+                  onClick={() => setPassbookPage((page) => Math.max(0, page - 1))}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Previous Page
+                </button>
+                <button
+                  type="button"
+                  disabled={passbookPage >= totalPages - 1}
+                  onClick={() => setPassbookPage((page) => Math.min(totalPages - 1, page + 1))}
+                  className="rounded-xl bg-orange-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next Page
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

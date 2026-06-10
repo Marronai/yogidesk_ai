@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarCheck, CheckCircle2, Clock3, Loader2, Lock, Plus, Save, Settings, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
+import api from '../utils/api';
 
 const emptyAppointmentForm = {
   patient_name: '',
@@ -107,12 +108,8 @@ const Appointments = () => {
       const tier = profile?.runtime_plan || profile?.plan_tier || profile?.current_plan || profile?.subscription_tier || 'growth';
       setPlanTier(String(tier || 'growth').toLowerCase());
 
-      const { data, error: appointmentError } = await supabase
-        .from('appointments')
-        .select('id, patient_name, patient_phone, appointment_date, appointment_time, status, created_at')
-        .eq('doctor_id', activeUserId)
-        .order('appointment_date', { ascending: true });
-      if (appointmentError) throw appointmentError;
+      const response = await api.get('/api/appointments', { params: { userId: activeUserId } });
+      const data = Array.isArray(response.data?.appointments) ? response.data.appointments : [];
       setAppointments((Array.isArray(data) ? data : []).map((row) => ({
         id: row.id,
         patient_name: sanitizeUnicodeText(row.patient_name, 100),
@@ -150,8 +147,6 @@ const Appointments = () => {
     setError('');
     try {
       const row = {
-        doctor_id: userId,
-        user_id: userId,
         patient_name: patientName,
         patient_phone: patientPhone,
         appointment_date: appointmentDate.toISOString().slice(0, 10),
@@ -160,12 +155,8 @@ const Appointments = () => {
         source: 'dashboard',
         metadata: { reminder_settings_active: true },
       };
-      const { data, error: insertError } = await supabase
-        .from('appointments')
-        .insert([row])
-        .select('id, patient_name, patient_phone, appointment_date, appointment_time, status')
-        .maybeSingle();
-      if (insertError) throw insertError;
+      const response = await api.post('/api/appointments', { ...row, userId });
+      const data = response.data?.appointment || {};
       setAppointments((current) => [{
         id: data?.id || `local-${Date.now()}`,
         patient_name: patientName,
