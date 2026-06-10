@@ -16,11 +16,27 @@ const corsOptions = {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-YogiDesk-User-Email', 'X-Hub-Signature-256', 'X-Requested-With'],
     credentials: true
 };
+const isWhatsAppWebhookBodyRoute = (req = {}) => {
+    const originalUrl = String(req.originalUrl || req.url || '');
+    return originalUrl.startsWith('/api/webhooks/whatsapp') ||
+        originalUrl.startsWith('/api/whatsapp-webhook') ||
+        originalUrl.startsWith('/api/webhook/meta');
+};
 
 // Body parser jisse Meta aur Supabase ka data read ho sake
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
-app.use(express.json());
+app.use(express.json({
+    type: (req) => (
+        isWhatsAppWebhookBodyRoute(req) ||
+        Boolean(req.is(['application/json', 'application/*+json']))
+    ),
+    verify: (req, res, buf, encoding) => {
+        if (isWhatsAppWebhookBodyRoute(req)) {
+            req.rawBody = buf.toString(encoding || 'utf8');
+        }
+    }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
