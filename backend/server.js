@@ -637,8 +637,13 @@ app.get('/api/appointments', attachDoctorSession, async (req, res) => {
 });
 
 app.post('/api/appointments', attachDoctorSession, async (req, res) => {
-    const doctorId = req.user?.id;
-    if (!doctorId) return res.status(401).json({ success: false, message: 'Doctor session is required.' });
+    const doctorId = String(req.user?.id || req.body?.doctor_id || req.body?.doctorId || '').trim();
+    if (!doctorId || !isUuid(doctorId)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Doctor ID context is missing or unauthenticated'
+        });
+    }
 
     const patientName = sanitizePlainText(req.body?.patient_name || req.body?.patientName, 120);
     const patientPhone = phoneDigitsOnly(req.body?.patient_phone || req.body?.patientPhone);
@@ -654,15 +659,23 @@ app.post('/api/appointments', attachDoctorSession, async (req, res) => {
 
     try {
         const db = supabaseAdmin || supabase;
-        let doctorProfile = { id: doctorId };
-        if (db?.from) {
-            const { data, error } = await db
-                .from('doctor_profiles')
-                .select('*')
-                .eq('id', doctorId)
-                .maybeSingle();
-            if (!error && data) doctorProfile = { ...data, id: doctorId };
+        if (!db?.from) {
+            return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
         }
+
+        const { data, error } = await db
+            .from('doctor_profiles')
+            .select('*')
+            .eq('id', doctorId)
+            .maybeSingle();
+        if (error) throw error;
+        if (!data?.id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Doctor ID context is missing or unauthenticated'
+            });
+        }
+        const doctorProfile = { ...data, id: doctorId };
 
         const result = await bookPatientAppointment({
             doctor: doctorProfile,
@@ -4067,6 +4080,60 @@ const safeInsertOptionalRows = async ({ table, rows, pruneMissingColumns = true 
     return { success: false, skipped: true };
 };
 
+const logOutboundMessageDelivery = async ({
+    doctorId,
+    patientPhone,
+    senderType = 'doctor',
+    messageBody,
+    messageType = 'Session',
+    status = 'sent'
+}) => {
+    const safeDoctorId = String(doctorId || '').trim();
+    const safePatientPhone = phoneDigitsOnly(patientPhone || '');
+    const safeMessageBody = sanitizePlainText(messageBody, 2000);
+    if (!safeDoctorId || !safePatientPhone || !safeMessageBody) return { success: false, skipped: true };
+
+    const sentAt = new Date().toISOString();
+    const rows = await Promise.allSettled([
+        safeInsertOptionalRows({
+            table: 'message_logs',
+            rows: [{
+                doctor_id: safeDoctorId,
+                patient_phone: safePatientPhone,
+                sender_type: senderType,
+                message_body: safeMessageBody,
+                status
+            }],
+            pruneMissingColumns: true
+        }),
+        safeInsertOptionalRows({
+            table: 'whatsapp_message_logs',
+            rows: [{
+                doctor_id: safeDoctorId,
+                recipient_phone: safePatientPhone,
+                patient_phone: safePatientPhone,
+                sender_type: senderType,
+                message_body: safeMessageBody,
+                message_type: messageType,
+                delivery_status: status,
+                status,
+                sent_at: sentAt,
+                created_at: sentAt
+            }],
+            pruneMissingColumns: true
+        })
+    ]);
+
+    for (const result of rows) {
+        const value = result.value || {};
+        if (result.status === 'rejected' || (!value.success && !value.skipped)) {
+            console.warn('Delivery report log insert skipped:', result.reason?.message || value.error?.message || 'unknown');
+        }
+    }
+
+    return { success: rows.some((result) => result.status === 'fulfilled' && result.value?.success) };
+};
+
 const resolveInboxRequestUserId = async (req) => {
     const sessionUser = await getSupabaseSessionUser(req);
     const requestedUserId = String(req.query.userId || req.body?.userId || '').trim();
@@ -4476,6 +4543,14 @@ const handleInboxSendMessage = async (req, res) => {
         const nowIso = new Date().toISOString();
         const messagePreview = messageText || mediaFilename || (normalizedMediaType === 'image' ? 'Image attachment' : normalizedMediaType === 'document' ? 'Document attachment' : mediaUrl);
         const storedBodyContent = mediaUrl || messageText;
+        await logOutboundMessageDelivery({
+            doctorId: userId,
+            patientPhone: recipientPhone,
+            senderType: 'doctor',
+            messageBody: messagePreview,
+            messageType: normalizedMediaType === 'text' ? 'Session' : normalizedMediaType,
+            status: 'sent'
+        });
         const messageRow = {
             chat_id: activeChat.id,
             workspace_id: userId,

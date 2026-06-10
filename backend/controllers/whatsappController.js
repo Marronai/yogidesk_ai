@@ -325,7 +325,7 @@ const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } 
     }
 };
 
-const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId }) => {
+const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId, logDelivery = null }) => {
     const safeText = String(text || '').trim();
     if (!toPhone || !safeText) return null;
 
@@ -361,6 +361,16 @@ const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, busin
     });
 
     console.log('[YogiDesk Debug] Meta reply response:', JSON.stringify(response.data, null, 2));
+    if (logDelivery?.doctorId) {
+        await logOutboundMessageDelivery({
+            doctorId: logDelivery.doctorId,
+            patientPhone: payload.to,
+            senderType: logDelivery.senderType || 'ai_assistant',
+            messageBody: safeText,
+            messageType: logDelivery.messageType || 'Session',
+            status: 'sent'
+        });
+    }
     return {
         ...response.data,
         _yogidesk: {
@@ -637,6 +647,61 @@ const insertWithSchemaFallback = async ({ table, row, dbClient = supabaseAdmin |
     return { success: false, reason: 'empty_payload' };
 };
 
+const logOutboundMessageDelivery = async ({
+    doctorId,
+    patientPhone,
+    senderType,
+    messageBody,
+    messageType = 'Session',
+    status = 'sent'
+}) => {
+    const db = supabaseAdmin || supabase;
+    const safeDoctorId = String(doctorId || '').trim();
+    const safePatientPhone = phoneDigitsOnly(patientPhone || '');
+    const safeMessageBody = sanitizeGeminiContextValue(messageBody, '', 2000);
+    if (!db?.from || !safeDoctorId || !safePatientPhone || !safeMessageBody) return { success: false, skipped: true };
+
+    const sentAt = new Date().toISOString();
+    const results = await Promise.allSettled([
+        insertWithSchemaFallback({
+            table: 'message_logs',
+            dbClient: db,
+            row: {
+                doctor_id: safeDoctorId,
+                patient_phone: safePatientPhone,
+                sender_type: senderType || 'ai_assistant',
+                message_body: safeMessageBody,
+                status
+            }
+        }),
+        insertWithSchemaFallback({
+            table: 'whatsapp_message_logs',
+            dbClient: db,
+            row: {
+                doctor_id: safeDoctorId,
+                recipient_phone: safePatientPhone,
+                patient_phone: safePatientPhone,
+                sender_type: senderType || 'ai_assistant',
+                message_body: safeMessageBody,
+                message_type: messageType,
+                delivery_status: status,
+                status,
+                sent_at: sentAt,
+                created_at: sentAt
+            }
+        })
+    ]);
+
+    for (const result of results) {
+        const value = result.value || {};
+        if (result.status === 'rejected' || (!value.success && !isSchemaCacheError(value.error))) {
+            console.warn('Delivery report log insert skipped:', result.reason?.message || value.error?.message || value.reason || 'unknown');
+        }
+    }
+
+    return { success: results.some((result) => result.status === 'fulfilled' && result.value?.success) };
+};
+
 const bookPatientAppointment = async ({
     doctor = {},
     inbound = {},
@@ -647,13 +712,13 @@ const bookPatientAppointment = async ({
     source = 'whatsapp_gemini',
     metadata = {}
 }) => {
-    const doctorId = doctor?.id;
+    const doctorId = String(doctor?.id || '').trim();
     const safePatientName = normalizeAppointmentNameValue(patientName || inbound.patientName);
     const safePatientPhone = phoneDigitsOnly(patientPhone || inbound.fromPhone || '');
     const safeAppointmentDate = normalizeAppointmentDateValue(appointmentDate);
     const safeAppointmentTime = normalizeAppointmentTimeValue(appointmentTime);
 
-    if (!doctorId || !safePatientName || !safePatientPhone || !safeAppointmentDate || !safeAppointmentTime) {
+    if (!isUuid(doctorId) || !safePatientName || !safePatientPhone || !safeAppointmentDate || !safeAppointmentTime) {
         return { success: false, reason: 'missing_required_appointment_fields' };
     }
 
@@ -1255,7 +1320,12 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                             toPhone: inbound.fromPhone,
                             text: finalReplyText,
                             phoneNumberId: inbound.phoneNumberId,
-                            businessAccountId: inbound.businessAccountId
+                            businessAccountId: inbound.businessAccountId,
+                            logDelivery: {
+                                doctorId: doctor.id,
+                                senderType: 'ai_assistant',
+                                messageType: 'Session'
+                            }
                         });
                         const inboxCommit = await commitGeminiOutboundReply({
                             inbound,
