@@ -107,10 +107,12 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json({
-    verify: (req, res, buf) => {
+    verify: (req, res, buf, encoding) => {
         const originalUrl = String(req.originalUrl || req.url || '');
-        if (originalUrl.includes('/api/webhooks/whatsapp') || originalUrl.includes('/whatsapp')) {
-            req.rawBody = buf.toString('utf8');
+        if (originalUrl.startsWith('/api/webhooks/whatsapp') ||
+            originalUrl.startsWith('/api/whatsapp-webhook') ||
+            originalUrl.startsWith('/api/webhook/meta')) {
+            req.rawBody = buf.toString(encoding || 'utf8');
         }
     }
 }));
@@ -1167,7 +1169,7 @@ const hasValidWhatsAppWebhookPayloadStructure = (payload = {}) => {
 const verifyMetaWebhookSignature = (req) => {
     const appSecret = getMetaWebhookAppSecret();
     const signature = String(req.get('x-hub-signature-256') || '').trim();
-    const payload = req.rawBody || JSON.stringify(req.body || {});
+    const payload = typeof req.rawBody === 'string' ? req.rawBody : '';
 
     if (!appSecret) return false;
     if (!payload || !signature || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;

@@ -20,7 +20,7 @@ const verifySignature = (req) => {
   const signature = String(req.get('x-hub-signature-256') || '').trim();
   if (!secret || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
 
-  const payload = req.rawBody || JSON.stringify(req.body || {});
+  const payload = typeof req.rawBody === 'string' ? req.rawBody : '';
   if (!payload) return false;
 
   const expected = `sha256=${crypto
