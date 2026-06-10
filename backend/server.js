@@ -71,6 +71,12 @@ const isMetaWebhookRequest = (req = {}) => ([
     req.path,
     `${req.baseUrl || ''}${req.path || ''}`
 ].some(isMetaWebhookRequestPath));
+const isWhatsAppWebhookBodyRoute = (req = {}) => {
+    const originalUrl = String(req.originalUrl || req.url || '');
+    return originalUrl.startsWith('/api/webhooks/whatsapp') ||
+        originalUrl.startsWith('/api/whatsapp-webhook') ||
+        originalUrl.startsWith('/api/webhook/meta');
+};
 
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-YogiDesk-User-Email, X-Hub-Signature-256, X-Requested-With';
@@ -107,8 +113,12 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 app.use(express.json({
+    type: (req) => (
+        isWhatsAppWebhookBodyRoute(req) ||
+        Boolean(req.is(['application/json', 'application/*+json']))
+    ),
     verify: (req, res, buf, encoding) => {
-        if (req.originalUrl && req.originalUrl.startsWith('/api/webhooks/whatsapp')) {
+        if (isWhatsAppWebhookBodyRoute(req)) {
             req.rawBody = buf.toString(encoding || 'utf8');
         }
     }
