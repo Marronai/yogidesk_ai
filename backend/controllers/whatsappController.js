@@ -195,7 +195,8 @@ const buildGeminiSystemInstruction = (dbData = {}) => [
     '2. Keep the tone warm, reassuring, concise, human-like, and highly precise.',
     `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
     '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
-    '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When a patient explicitly confirms a preferred date and time slot for an appointment, you MUST automatically invoke the `bookPatientAppointment` function tool passing the patient\'s parsed credentials. If native tool calling is unavailable in this channel, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end so the booking hook can execute securely.'
+    '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When a patient explicitly confirms a preferred date and time slot for an appointment, you MUST automatically invoke the `bookPatientAppointment` function tool passing the patient\'s parsed credentials. If native tool calling is unavailable in this channel, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end so the booking hook can execute securely.',
+    '6. Appointment date rule: The absolute date for the appointment. You MUST dynamically compute this relative to today\'s date (Current Date: 2026-06-10) and output it strictly in \'YYYY-MM-DD\' format. Never pass relative text strings like \'tomorrow\', \'parso\', or \'The day after tomorrow\'.'
 ].join('\n');
 
 const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
@@ -577,7 +578,41 @@ const parseGeminiBookingConfirmation = (replyText = '') => {
     return { cleanText, booking };
 };
 
-const normalizeAppointmentDateValue = (value) => sanitizeGeminiContextValue(value, '', 80);
+const formatDateOnly = (date) => {
+    if (!(date instanceof Date) || !Number.isFinite(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const parseRelativeAppointmentDate = (value) => {
+    let rawDate = sanitizeGeminiContextValue(value, '', 80);
+    if (!rawDate) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return rawDate;
+
+    const normalized = rawDate.toLowerCase();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (normalized.includes('after tomorrow') ||
+        normalized.includes('day after tomorrow') ||
+        normalized.includes('parso') ||
+        normalized.includes('parson') ||
+        normalized.includes('परसों')) {
+        today.setDate(today.getDate() + 2);
+        rawDate = formatDateOnly(today);
+    } else if (normalized.includes('tomorrow') ||
+        normalized.includes('kal') ||
+        normalized.includes('कल')) {
+        today.setDate(today.getDate() + 1);
+        rawDate = formatDateOnly(today);
+    }
+
+    return /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '';
+};
+
+const normalizeAppointmentDateValue = (value) => parseRelativeAppointmentDate(value);
 const normalizeAppointmentTimeValue = (value) => sanitizeGeminiContextValue(value, '', 40);
 const normalizeAppointmentNameValue = (value) => sanitizeGeminiContextValue(value, 'Patient', 120);
 
