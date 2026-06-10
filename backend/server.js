@@ -108,10 +108,7 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json({
     verify: (req, res, buf, encoding) => {
-        const originalUrl = String(req.originalUrl || req.url || '');
-        if (originalUrl.startsWith('/api/webhooks/whatsapp') ||
-            originalUrl.startsWith('/api/whatsapp-webhook') ||
-            originalUrl.startsWith('/api/webhook/meta')) {
+        if (req.originalUrl && req.originalUrl.startsWith('/api/webhooks/whatsapp')) {
             req.rawBody = buf.toString(encoding || 'utf8');
         }
     }
