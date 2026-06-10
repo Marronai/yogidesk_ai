@@ -46,6 +46,11 @@ const normalizeMessageType = (value) => {
   return sanitizeCell(value, 32) || 'Template';
 };
 
+const isOutboundInboxMessage = (row = {}) => {
+  const sender = sanitizeCell(row.sender, 24).toLowerCase();
+  return row.from_me === true || ['agent', 'doctor', 'bot', 'ai_assistant'].includes(sender);
+};
+
 const maskPhone = (value) => {
   const digits = String(value || '').replace(/\D/g, '');
   if (digits.length < 4) return 'Hidden';
@@ -121,6 +126,22 @@ const csvEscape = (value) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
+const dedupeReportRows = (rows = []) => {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const timeBucket = row.sent_at ? Math.floor(new Date(row.sent_at).getTime() / 60000) : '';
+    const key = [
+      timeBucket,
+      String(row.recipient_phone || '').replace(/\D/g, '').slice(-10),
+      row.message_type,
+      row.delivery_status,
+    ].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const DeliveryReports = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -146,26 +167,46 @@ const DeliveryReports = () => {
       if (authError && !userId) throw authError;
       if (!userId) throw new Error('Unable to identify the current doctor workspace.');
 
-      const { data, error: queryError } = await supabase
+      const reportResult = await supabase
         .from('whatsapp_message_logs')
-        .select('sent_at, recipient_phone, message_type, delivery_status')
+        .select('sent_at, recipient_phone, patient_phone, message_type, delivery_status, status')
         .eq('doctor_id', userId)
         .gte('sent_at', activeRange.from.toISOString())
         .lte('sent_at', activeRange.to.toISOString())
         .order('sent_at', { ascending: false })
         .limit(1000);
 
-      if (queryError) throw queryError;
+      const inboxResult = await supabase
+        .from('inbox_messages')
+        .select('created_at, receiver_phone, sender_phone, type, message_type, status, metadata, sender, from_me, is_private_note, workspace_id, sender_id')
+        .or(`workspace_id.eq.${userId},sender_id.eq.${userId}`)
+        .gte('created_at', activeRange.from.toISOString())
+        .lte('created_at', activeRange.to.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1000);
 
-      const safeRows = (Array.isArray(data) ? data : []).map((row, index) => ({
+      if (reportResult.error && inboxResult.error) throw reportResult.error;
+
+      const logRows = (Array.isArray(reportResult.data) ? reportResult.data : []).map((row, index) => ({
         id: `${sanitizeCell(row.sent_at, 40)}-${index}`,
         sent_at: safeDate(row.sent_at)?.toISOString() || '',
-        recipient_phone: sanitizeCell(row.recipient_phone, 40),
+        recipient_phone: sanitizeCell(row.recipient_phone || row.patient_phone, 40),
         message_type: normalizeMessageType(row.message_type),
-        delivery_status: normalizeStatus(row.delivery_status),
+        delivery_status: normalizeStatus(row.delivery_status || row.status),
       }));
 
-      setLogs(safeRows);
+      const inboxRows = (Array.isArray(inboxResult.data) ? inboxResult.data : [])
+        .filter((row) => !row.is_private_note && isOutboundInboxMessage(row))
+        .map((row, index) => ({
+          id: `inbox-${sanitizeCell(row.created_at, 40)}-${index}`,
+          sent_at: safeDate(row.created_at)?.toISOString() || '',
+          recipient_phone: sanitizeCell(row.receiver_phone || row.metadata?.recipient_phone || row.metadata?.patient_phone, 40),
+          message_type: normalizeMessageType(row.message_type || row.type),
+          delivery_status: normalizeStatus(row.status || row.metadata?.delivery_status),
+        }));
+
+      setLogs(dedupeReportRows([...logRows, ...inboxRows])
+        .sort((left, right) => new Date(right.sent_at || 0) - new Date(left.sent_at || 0)));
     } catch {
       setError('Unable to load delivery reports right now.');
       setLogs([]);
