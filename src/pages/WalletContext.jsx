@@ -114,6 +114,15 @@ export const WalletProvider = ({ children }) => {
   const fetchTransactions = useCallback(async (currentUserId) => {
     if (!isCleanFilterValue(currentUserId)) return [];
     try {
+      const response = await api.get('/api/wallet/transactions', { params: { userId: currentUserId } });
+      if (response.data?.success) {
+        return response.data.transactions || [];
+      }
+    } catch (error) {
+      console.warn('Wallet transactions API unavailable; retrying direct history lookup.', error?.message || error);
+    }
+
+    try {
       const { data, error } = await supabase
         .from('wallet_transactions')
         .select('*')
@@ -124,7 +133,7 @@ export const WalletProvider = ({ children }) => {
         console.warn('Wallet transactions unavailable; continuing without history.', error.message);
         return [];
       }
-      return data || [];
+      return (data || []).map((row) => ({ ...row, type: row.type || row.transaction_type }));
     } catch (error) {
       console.warn('Wallet transactions unavailable; continuing without history.', error?.message || error);
       return [];

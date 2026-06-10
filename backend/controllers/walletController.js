@@ -211,7 +211,52 @@ const verifyWalletPayment = async (req, res) => {
   }
 };
 
+const getWalletTransactions = async (req, res) => {
+  try {
+    const userId = String(req.query?.userId || req.body?.userId || '').trim();
+    const purpose = String(req.query?.purpose || '').trim();
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required.',
+      });
+    }
+
+    let query = db
+      .from('wallet_transactions')
+      .select('id,user_id,amount,transaction_type,description,metadata,created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (purpose === 'ai_message_recharge') {
+      query = query.eq('transaction_type', 'AI_MESSAGE_CREDIT');
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const transactions = (data || []).map((row) => ({
+      ...row,
+      type: row.transaction_type,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      transactions,
+    });
+  } catch (error) {
+    console.error('[YogiDesk Wallet] Transaction lookup failed:', error.message || error);
+    return res.status(500).json({
+      success: false,
+      message: 'Unable to load wallet transactions.',
+      transactions: [],
+    });
+  }
+};
+
 module.exports = {
   createWalletOrder,
+  getWalletTransactions,
   verifyWalletPayment,
 };

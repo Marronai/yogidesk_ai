@@ -30,7 +30,7 @@ const adminControlRoutes = require('./routes/adminControlRoutes');
 const authRoutes = require('./routes/authRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const superadminRoutes = require('./routes/superadminRoutes');
-const { createWalletOrder, verifyWalletPayment } = require('./controllers/walletController');
+const { createWalletOrder, getWalletTransactions, verifyWalletPayment } = require('./controllers/walletController');
 const { loginSuperadmin } = require('./controllers/superadminController');
 const { createLocalRateLimiter } = require('./utils/superadminSecurity');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
@@ -221,6 +221,7 @@ app.get('/', (req, res) => {
 app.use('/api/payments', paymentRoutes);
 app.post('/api/wallet/create-order', createWalletOrder);
 app.post('/api/wallet/verify-payment', verifyWalletPayment);
+app.get('/api/wallet/transactions', getWalletTransactions);
 app.use('/api/admin', adminControlRoutes);
 app.post('/api/superadmin/login', explicitSuperadminLoginLimiter, loginSuperadmin);
 app.use('/api/superadmin', superadminRoutes);

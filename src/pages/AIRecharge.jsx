@@ -83,17 +83,15 @@ const AIRecharge = () => {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('wallet_transactions')
-        .select('id, amount, transaction_type, description, metadata, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const { data } = await api.get('/api/wallet/transactions', {
+        params: {
+          userId,
+          purpose: 'ai_message_recharge',
+        },
+      });
 
-      if (error) throw error;
-      setAiLedger((data || []).filter((row) => (
-        row.transaction_type === 'AI_MESSAGE_CREDIT' ||
-        row.metadata?.purpose === 'ai_message_recharge'
-      )));
+      if (!data?.success) throw new Error(data?.message || 'Unable to load AI message statement.');
+      setAiLedger(data.transactions || []);
     } catch (ledgerError) {
       console.warn('AI message passbook unavailable:', ledgerError?.message || ledgerError);
       setAiLedger([]);
