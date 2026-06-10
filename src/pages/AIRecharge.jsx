@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Bot, CheckCircle2, CreditCard, Gauge, IndianRupee, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Bot, CheckCircle2, Clock, CreditCard, Download, Gauge, IndianRupee, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
@@ -30,12 +30,41 @@ const calculateCustomMessages = (price) => {
   return Math.floor(value * (value < 500 ? 2.0 : 2.5));
 };
 
+const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+const downloadCsv = (rows) => {
+  const headers = ['Date', 'Package', 'Amount INR', 'AI Messages', 'Payment ID', 'Status'];
+  const body = rows.map((row) => {
+    const metadata = row.metadata || {};
+    return [
+      new Date(row.created_at).toLocaleString('en-IN'),
+      metadata.package_id || 'AI Message Credits',
+      Number(row.amount || 0).toFixed(2),
+      Number(metadata.ai_messages || 0),
+      metadata.razorpay_payment_id || '',
+      'Success',
+    ].map(csvCell).join(',');
+  });
+
+  const blob = new Blob([[headers.map(csvCell).join(','), ...body].join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `yogidesk-ai-message-statement-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
 const AIRecharge = () => {
   const navigate = useNavigate();
   const [selectedPackage, setSelectedPackage] = useState(AI_PACKAGES[1]);
   const [customAmount, setCustomAmount] = useState(500);
   const [mode, setMode] = useState('package');
   const [loading, setLoading] = useState(false);
+  const [ledgerLoading, setLedgerLoading] = useState(true);
+  const [aiLedger, setAiLedger] = useState([]);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
 
@@ -43,6 +72,39 @@ const AIRecharge = () => {
   const checkoutDetails = mode === 'custom'
     ? { packageId: 'custom', name: 'Custom AI Messages', price: Number(customAmount), messages: customMessages }
     : selectedPackage;
+
+  const fetchAiLedger = async () => {
+    try {
+      setLedgerLoading(true);
+      const { data: userResult } = await supabase.auth.getUser();
+      const userId = userResult?.user?.id || localStorage.getItem('user_id');
+      if (!userId) {
+        setAiLedger([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('wallet_transactions')
+        .select('id, amount, transaction_type, description, metadata, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAiLedger((data || []).filter((row) => (
+        row.transaction_type === 'AI_MESSAGE_CREDIT' ||
+        row.metadata?.purpose === 'ai_message_recharge'
+      )));
+    } catch (ledgerError) {
+      console.warn('AI message passbook unavailable:', ledgerError?.message || ledgerError);
+      setAiLedger([]);
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAiLedger();
+  }, []);
 
   const startCheckout = async () => {
     setError('');
@@ -106,6 +168,7 @@ const AIRecharge = () => {
             }
 
             setStatus(`${Number(data.aiMessages).toLocaleString()} AI Assistant Messages added successfully.`);
+            await fetchAiLedger();
           } catch (verifyError) {
             setError(verifyError.response?.data?.message || verifyError.message || 'Payment verification failed. Please contact support.');
           } finally {
@@ -225,7 +288,7 @@ const AIRecharge = () => {
               <p className="text-sm font-black text-slate-950">
                 You will get {customMessages.toLocaleString()} AI Messages for Rs. {Number(customAmount || 0).toLocaleString()}
               </p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Custom formula: below Rs. 500 gives 2.0 messages per rupee; Rs. 500 and above gives 2.5 messages per rupee.</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">Every plan is customized to optimize patient care automation. Higher tiers unlock higher bonus assistant capabilities dynamically.</p>
             </div>
           </div>
 
@@ -248,8 +311,78 @@ const AIRecharge = () => {
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CreditCard size={18} />
-              {loading ? 'Opening Checkout...' : 'Pay With Razorpay'}
+              {loading ? 'Opening Checkout...' : 'Proceed to Buy Credits'}
             </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                <Clock size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-slate-950">AI Credits Passbook</h2>
+                <p className="text-xs font-bold text-slate-500">Statement of successful AI Assistant Message purchases.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => downloadCsv(aiLedger)}
+              disabled={aiLedger.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download size={16} />
+              Export Statement
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead className="border-b border-slate-100 bg-slate-50">
+                <tr>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Date</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Package</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Messages</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Amount</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Payment</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {ledgerLoading ? (
+                  [1, 2, 3].map((item) => (
+                    <tr key={item}>
+                      <td className="p-4"><div className="h-4 w-28 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-32 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-20 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-20 animate-pulse rounded bg-slate-100" /></td>
+                      <td className="p-4"><div className="h-4 w-36 animate-pulse rounded bg-slate-100" /></td>
+                    </tr>
+                  ))
+                ) : (
+                  aiLedger.map((row) => {
+                    const metadata = row.metadata || {};
+                    return (
+                      <tr key={row.id} className="transition hover:bg-slate-50/70">
+                        <td className="p-4 text-sm font-semibold text-slate-600">
+                          {new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </td>
+                        <td className="p-4 text-sm font-black text-slate-900">{metadata.package_id || 'AI Message Credits'}</td>
+                        <td className="p-4 text-sm font-black text-orange-700">+{Number(metadata.ai_messages || 0).toLocaleString()} AI Messages</td>
+                        <td className="p-4 text-sm font-black text-slate-900">Rs. {Number(row.amount || 0).toFixed(2)}</td>
+                        <td className="p-4 text-xs font-bold text-slate-500">{metadata.razorpay_payment_id || 'Verified payment'}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+            {!ledgerLoading && aiLedger.length === 0 && (
+              <div className="p-10 text-center text-xs font-bold uppercase tracking-widest text-slate-400">
+                No AI credit purchases found
+              </div>
+            )}
           </div>
         </div>
       </div>

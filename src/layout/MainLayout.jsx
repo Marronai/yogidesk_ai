@@ -82,15 +82,16 @@ const MainLayout = () => {
       <div className="block w-full border-b border-gray-200 bg-white md:hidden sticky top-0 z-40">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3 min-w-0">
-            <Link to="/dashboard" className="flex h-14 md:h-16 lg:h-20 items-center shrink-0" aria-label="Yogi Desk AI dashboard">
+            <Link to="/dashboard" className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-white" aria-label="Yogidesk.ai dashboard">
               <img
                 src="/assets/yogidesk-logo.png"
-                alt="Yogi Desk AI"
-                className="h-14 md:h-16 lg:h-20 w-auto object-contain"
+                alt="Yogidesk.ai"
+                className="h-10 w-10 object-contain"
               />
             </Link>
-            <div>
-              <p className="text-xs text-slate-500">Dashboard</p>
+            <div className="min-w-0">
+              <p className="truncate text-base font-black tracking-tight text-slate-950">Yogidesk.ai</p>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Dashboard</p>
             </div>
           </div>
           <button

@@ -147,6 +147,16 @@ export const WalletProvider = ({ children }) => {
     setLoading(false);
   }, [fetchTransactions, fetchWalletData, getUserId, userId]);
 
+  const fetchPassbookTransactions = useCallback(async (targetUserId = userId) => {
+    const resolvedUserId = targetUserId || await getUserId();
+    const currentUserId = normalizeSupabaseId(resolvedUserId);
+    if (!isCleanFilterValue(currentUserId)) return [];
+
+    const transactionData = await fetchTransactions(currentUserId);
+    setTransactions(transactionData);
+    return transactionData;
+  }, [fetchTransactions, getUserId, userId]);
+
   useEffect(() => {
     let isMounted = true;
     const init = async () => {
@@ -223,7 +233,7 @@ export const WalletProvider = ({ children }) => {
     };
   }, [userId, getUserId, fetchWalletData, fetchTransactions]);
 
-  const value = { wallet, transactions, loading, userId, fetchWalletData, fetchTransactions, refreshWalletData };
+  const value = { wallet, transactions, loading, userId, fetchWalletData, fetchTransactions, fetchPassbookTransactions, refreshWalletData };
 
   return (
     <WalletContext.Provider value={value}>

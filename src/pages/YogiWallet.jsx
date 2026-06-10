@@ -21,7 +21,7 @@ const loadRazorpayScript = () => new Promise((resolve) => {
 });
 
 const YogiWallet = () => {
-  const { wallet, transactions, loading, userId, refreshWalletData } = useWallet();
+  const { wallet, transactions, loading, userId, fetchPassbookTransactions, refreshWalletData } = useWallet();
   const [amount, setAmount] = useState(200);
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
@@ -123,6 +123,7 @@ const YogiWallet = () => {
             }
 
             setPaymentStatus(`Payment successful: Rs. ${rechargeAmount.toFixed(2)}. Wallet balance synced.`);
+            await fetchPassbookTransactions(userId);
             await refreshWalletData(userId);
           } catch (error) {
             console.error('Razorpay verification failed:', error);
