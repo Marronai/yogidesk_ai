@@ -3,13 +3,25 @@ import { useSearchParams } from 'react-router-dom';
 import { ArrowDownCircle, ArrowUpCircle, Clock, Gift, Send, Wallet } from 'lucide-react';
 import api from '../utils/api';
 import { PRICING_RULES } from '../constants/templateLibrary';
-import { useWallet } from '../context/WalletContext'; // Import useWallet hook
+import { useWallet } from '../context/WalletContext';
 
-// Removed normalizeSupabaseId and isCleanFilterValue as they are now handled by WalletContext
 const quickAmounts = [200, 500, 1000];
 
+const loadRazorpayScript = () => new Promise((resolve) => {
+  if (window.Razorpay) {
+    resolve(true);
+    return;
+  }
+
+  const script = document.createElement('script');
+  script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+  script.onload = () => resolve(true);
+  script.onerror = () => resolve(false);
+  document.body.appendChild(script);
+});
+
 const YogiWallet = () => {
-  const { wallet, transactions, loading, userId, refreshWalletData } = useWallet(); // Consume from WalletContext
+  const { wallet, transactions, loading, userId, refreshWalletData } = useWallet();
   const [amount, setAmount] = useState(200);
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState('');
@@ -38,86 +50,10 @@ const YogiWallet = () => {
     setSearchParams({}, { replace: true });
   }, [refreshWalletData, searchParams, setSearchParams, userId]);
 
-
-  // PayU Integration Logic
-  const handleProceedToRecharge = async (event) => {
+  const handleRazorpayRecharge = async (event) => {
     event.preventDefault();
     const rechargeAmount = Number(amount);
-
-    setPaymentError('');
-    if (!userId || !Number.isFinite(rechargeAmount)) return; // Use userId from context
-    if (rechargeAmount < 10) {
-      setPaymentError('Minimum recharge amount is ₹10.');
-      alert('Minimum recharge amount is ₹10.');
-      return;
-    }
-
-    try {
-      setPaying(true);
-
-      const txnid = `TXN${Date.now()}${Math.floor(Math.random() * 1000)}`;
-      const productinfo = 'Yogi Desk WhatsApp Credits';
-      const firstname = localStorage.getItem('user_name') || 'Yogi Desk User';
-      const email = localStorage.getItem('user_email') || '';
-      const phone = localStorage.getItem('user_phone') || '';
-
-      // 1. Get hash from backend
-      const { data: hashResponse } = await api.post('/payment/payu-hash', {
-        txnid,
-        amount: rechargeAmount,
-        productinfo,
-        firstname,
-        email,
-      });
-
-      if (!hashResponse?.hash) {
-        throw new Error('Failed to get payment hash from server.');
-      }
-
-      // 2. Dynamically create and submit form to PayU
-      const form = document.createElement('form');
-      form.method = 'post';
-      form.action = 'https://secure.payu.in/_payment'; // PayU production URL
-      form.target = '_self'; // Open in the same window
-
-      const payuParams = {
-        key: import.meta.env.VITE_PAYU_MERCHANT_KEY, // Ensure this is set in your .env and exposed to Vite
-        txnid: txnid,
-        amount: rechargeAmount,
-        productinfo: productinfo,
-        firstname: firstname,
-        email: email,
-        phone: phone,
-        hash: hashResponse.hash,
-        surl: `${window.location.origin}/payment-success`, // Success URL (you'll need to create this route)
-        furl: `${window.location.origin}/payment-failure`, // Failure URL (you'll need to create this route)
-        // Optional parameters, add as needed
-        // service_provider: 'payu_paisa',
-      };
-
-      for (const key in payuParams) {
-        if (payuParams.hasOwnProperty(key)) {
-          const hiddenField = document.createElement('input');
-          hiddenField.type = 'hidden';
-          hiddenField.name = key;
-          hiddenField.value = payuParams[key];
-          form.appendChild(hiddenField);
-        }
-      }
-
-      document.body.appendChild(form);
-      form.submit();
-      document.body.removeChild(form); // Clean up the form after submission
-    } catch (error) {
-      setPaying(false);
-      console.error('Razorpay initialization failed:', error);
-      alert('Payment gateway failed to initialize. Please try again.');
-    }
-  };
-
-  const handlePayuRecharge = async (event) => {
-    event.preventDefault();
-    const rechargeAmount = Number(amount);
+    const amountInput = String(amount).trim();
 
     setPaymentError('');
     setPaymentStatus('');
@@ -131,63 +67,79 @@ const YogiWallet = () => {
       return;
     }
     if (!profile.email) {
-      setPaymentError('Email is required before opening PayU checkout.');
+      setPaymentError('Email is required before opening Razorpay checkout.');
       return;
     }
 
     try {
       setPaying(true);
 
-      const { data } = await api.post('https://api.yogidesk-ai.com/api/payments/initiate-payu', {
-        userId,
-        amount: rechargeAmount,
-        firstname: profile.firstname,
-        email: profile.email,
-        phone: profile.phone,
-      });
-
-      const payuPayload = data?.payload;
-      if (!data?.success || !payuPayload?.hash) {
-        throw new Error(data?.msg || 'Failed to initialize PayU checkout.');
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        throw new Error('Payment gateway failed to load. Please try again.');
       }
 
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = data.checkoutUrl || 'https://test.payu.in/_payment';
-      form.target = '_self';
-      form.style.display = 'none';
-
-      [
-        'key',
-        'txnid',
-        'amount',
-        'productinfo',
-        'firstname',
-        'email',
-        'phone',
-        'udf1',
-        'udf2',
-        'udf3',
-        'udf4',
-        'udf5',
-        'surl',
-        'furl',
-        'hash',
-      ].forEach((key) => {
-        if (payuPayload[key] !== undefined && payuPayload[key] !== null) {
-          const hiddenField = document.createElement('input');
-          hiddenField.type = 'hidden';
-          hiddenField.name = key;
-          hiddenField.value = String(payuPayload[key]);
-          form.appendChild(hiddenField);
-        }
+      const { data } = await api.post('/api/wallet/create-order', {
+        userId,
+        amount: amountInput,
       });
 
-      document.body.appendChild(form);
-      form.submit();
+      if (!data?.success || !data?.order_id) {
+        throw new Error(data?.message || 'Failed to initialize Razorpay checkout.');
+      }
+
+      const checkout = new window.Razorpay({
+        key: data.key_id,
+        amount: data.amount,
+        currency: data.currency || 'INR',
+        order_id: data.order_id,
+        name: 'YogiDesk AI - Wallet Recharge',
+        image: `${window.location.origin}/logo.png`,
+        theme: {
+          color: '#F97316',
+        },
+        prefill: {
+          name: profile.firstname,
+          email: profile.email,
+          contact: profile.phone,
+        },
+        notes: {
+          user_id: userId,
+          purpose: 'wallet_recharge',
+          amount: amountInput,
+        },
+        handler: async (response) => {
+          try {
+            const verifyRes = await api.post('/api/wallet/verify-payment', {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              userId,
+              amount: amountInput,
+            });
+
+            if (!verifyRes.data?.success) {
+              throw new Error(verifyRes.data?.message || 'Payment verification failed.');
+            }
+
+            setPaymentStatus(`Payment successful: Rs. ${rechargeAmount.toFixed(2)}. Wallet balance synced.`);
+            await refreshWalletData(userId);
+          } catch (error) {
+            console.error('Razorpay verification failed:', error);
+            setPaymentError(error.response?.data?.message || error.message || 'Payment verification failed. Please contact support.');
+          } finally {
+            setPaying(false);
+          }
+        },
+        modal: {
+          ondismiss: () => setPaying(false),
+        },
+      });
+
+      checkout.open();
     } catch (error) {
       setPaying(false);
-      console.error('PayU initialization failed:', error);
+      console.error('Razorpay initialization failed:', error);
       setPaymentError(error.message || 'Payment gateway failed to initialize. Please try again.');
     }
   };
@@ -223,9 +175,9 @@ const YogiWallet = () => {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
-          <form onSubmit={handlePayuRecharge} className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+          <form onSubmit={handleRazorpayRecharge} className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <h2 className="text-2xl font-black text-slate-950">Recharge Wallet</h2>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Pay securely through PayU India.</p>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Pay securely via Razorpay.</p>
 
             <div className="mt-6 grid grid-cols-3 gap-3">
               {quickAmounts.map((quickAmount) => (
@@ -312,7 +264,6 @@ const YogiWallet = () => {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {loading ? (
-                  // Skeleton Rows
                   [1, 2, 3].map((i) => (
                     <tr key={i}>
                       <td className="p-4"><div className="h-4 w-24 animate-pulse rounded bg-slate-100" /></td>
