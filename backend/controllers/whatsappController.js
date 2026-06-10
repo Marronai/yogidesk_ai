@@ -87,23 +87,65 @@ const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
 const removeUndefinedValues = (value = {}) => Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined)
 );
-const GEMINI_BOUNCE_WINDOW_MS = 2000;
+const GEMINI_BOUNCE_WINDOW_MS = 4000;
 const GEMINI_RESULT_CACHE_MS = 30000;
+const GEMINI_429_RETRY_DELAY_MS = 10000;
 const geminiProcessingCache = new Map();
 const geminiResultCache = new Map();
+const geminiPatientDebounceQueue = new Map();
 const GEMINI_MODEL_NAME = 'gemini-2.5-flash';
 const GEMINI_REPORT_ESCALATION_REPLY = 'Main aapka appointment Dr. Sahab ke sath book kar deti hoon, wo live aapki reports check karke aapko sahi aur sateek salah denge. Kya main aapka slot confirm karoon?';
-let geminiModel = null;
+const BASELINE_GEMINI_SYSTEM_INSTRUCTION = [
+    'You are a polite, empathetic, professional female Clinic Desk Receptionist and Patient Care Assistant.',
+    'Use natural, warm, comforting conversational Hinglish like a real human coordinator.',
+    'Handle patient inquiries, doctor availability, clinic details, and appointment coordination only.',
+    'Never provide official prescriptions, independent diagnosis, lab-report conclusions, or treatment decisions.'
+].join('\n');
+let currentKeyIndex = 0;
 
-const getGeminiModel = () => {
-    if (geminiModel) return geminiModel;
-    const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) throw new Error('Gemini API key missing. Set GEMINI_API_KEY.');
+const getGeminiKeysPool = () => {
+    const sequentialKeys = Array.from({ length: 7 }, (_, index) => (
+        String(process.env[`GEMINI_KEY_${index + 1}`] || '').trim()
+    )).filter(Boolean);
+    const legacyKey = String(process.env.GEMINI_API_KEY || '').trim();
+    return uniqueValues(sequentialKeys.length ? sequentialKeys : [legacyKey]);
+};
+
+const getNextGeminiModel = () => {
+    const keysPool = getGeminiKeysPool();
+    if (keysPool.length === 0) throw new Error('Gemini API key missing. Set GEMINI_KEY_1 through GEMINI_KEY_7.');
+    const apiKey = keysPool[currentKeyIndex % keysPool.length];
+    currentKeyIndex = (currentKeyIndex + 1) % keysPool.length;
     const genAI = new GoogleGenerativeAI(apiKey);
-    geminiModel = genAI.getGenerativeModel({
-        model: GEMINI_MODEL_NAME
+    return genAI.getGenerativeModel({
+        model: GEMINI_MODEL_NAME,
+        systemInstruction: BASELINE_GEMINI_SYSTEM_INSTRUCTION
     });
-    return geminiModel;
+};
+
+const isGeminiRateLimitError = (error) => {
+    const status = Number(error?.status || error?.statusCode || error?.response?.status || error?.error?.code);
+    const text = JSON.stringify(error?.response?.data || error?.error || error?.message || error || '').toLowerCase();
+    return status === 429 || text.includes('429') || text.includes('too many requests') || text.includes('quota');
+};
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const generateGeminiContentWithRetry = async (prompt) => {
+    try {
+        return await getNextGeminiModel().generateContent(prompt);
+    } catch (error) {
+        if (!isGeminiRateLimitError(error)) throw error;
+        console.warn('[YogiDesk Secure AI] Gemini key rate-limited; retrying with next key.');
+        try {
+            return await getNextGeminiModel().generateContent(prompt);
+        } catch (retryError) {
+            if (!isGeminiRateLimitError(retryError)) throw retryError;
+            console.warn('[YogiDesk Secure AI] Gemini retry key rate-limited; queueing delayed retry.');
+            await wait(GEMINI_429_RETRY_DELAY_MS);
+            return getNextGeminiModel().generateContent(prompt);
+        }
+    }
 };
 
 const sanitizeGeminiContextValue = (value, fallback, maxLength = 1200) => {
@@ -139,7 +181,9 @@ const fetchClinicKnowledgeBaseForDoctor = async (doctorId) => {
 };
 
 const buildGeminiSystemInstruction = (dbData = {}) => [
-    'You are the official empathetic, professional AI medical receptionist for this clinic.',
+    'Identity: You are the official polite, empathetic, professional female Clinic Desk Receptionist and Patient Care Assistant for this clinic.',
+    'Tone & Language: Speak like a real warm human coordinator in natural comforting conversational Hinglish, mixing Hindi and English as patients normally do. Avoid cold robotic phrasing, stiff scripts, and overly technical medical jargon.',
+    'Behavior Boundary: You only handle patient inquiries, doctor availability, clinic information, and appointment slot coordination. Never issue official prescriptions, independent diagnosis, lab-report conclusions, or treatment decisions.',
     'Here is the strict, verified ground-truth data for this specific doctor only. Do NOT invent, hallucinate, or use any outside knowledge:',
     `- Clinic Timings: ${sanitizeGeminiContextValue(dbData.clinic_timing, 'Contact clinic directly', 500)}`,
     `- Services Offered: ${sanitizeGeminiContextValue(dbData.services_offered, 'General Consultation', 1200)}`,
@@ -148,7 +192,7 @@ const buildGeminiSystemInstruction = (dbData = {}) => [
     '',
     'Rules:',
     '1. Answer the patient query politely and conversationally in their preferred language: Hindi, English, or conversational Hinglish.',
-    '2. Keep the tone warm, comforting, and highly precise.',
+    '2. Keep the tone warm, reassuring, concise, human-like, and highly precise.',
     `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
     '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
     '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When confirmed, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end.'
@@ -173,6 +217,59 @@ const pruneGeminiCaches = (now = Date.now()) => {
     for (const [key, entry] of geminiResultCache.entries()) {
         if (!entry?.storedAt || now - entry.storedAt > GEMINI_RESULT_CACHE_MS) geminiResultCache.delete(key);
     }
+};
+
+const buildPatientPhoneNode = (inbound = {}) => [
+    phoneDigitsOnly(inbound.fromPhone),
+    String(inbound.phoneNumberId || '').trim(),
+    String(inbound.businessAccountId || '').trim()
+].filter(Boolean).join(':');
+
+const formatDebouncedGeminiText = (messages = []) => messages
+    .map((entry, index) => `[Text ${index + 1}] ${String(entry.text || '').trim()}`)
+    .filter((line) => line.trim())
+    .join('\n');
+
+const debounceGeminiInbound = (inbound = {}) => new Promise((resolve) => {
+    const patientPhoneNode = buildPatientPhoneNode(inbound);
+    if (!patientPhoneNode) {
+        resolve([inbound]);
+        return;
+    }
+
+    const existing = geminiPatientDebounceQueue.get(patientPhoneNode);
+    if (existing?.timer) clearTimeout(existing.timer);
+    if (existing?.resolve) existing.resolve([]);
+
+    const messages = [...(existing?.messages || []), inbound];
+    const entry = {
+        messages,
+        resolve,
+        timer: null,
+        patientPhoneNode
+    };
+
+    entry.timer = setTimeout(() => {
+        geminiPatientDebounceQueue.delete(patientPhoneNode);
+        const latest = messages[messages.length - 1] || inbound;
+        resolve([{
+            ...latest,
+            messageId: uniqueValues(messages.map((item) => item.messageId)).join('|') || latest.messageId,
+            text: formatDebouncedGeminiText(messages) || latest.text,
+            debounced: {
+                patient_phone_node: patientPhoneNode,
+                merged_message_count: messages.length,
+                window_ms: GEMINI_BOUNCE_WINDOW_MS
+            }
+        }]);
+    }, GEMINI_BOUNCE_WINDOW_MS);
+
+    geminiPatientDebounceQueue.set(patientPhoneNode, entry);
+});
+
+const debounceGeminiInbounds = async (inboundMessages = []) => {
+    const batches = await Promise.all(inboundMessages.map((inbound) => debounceGeminiInbound(inbound)));
+    return batches.flat().filter(Boolean);
 };
 const getPhoneMatchParts = (value) => {
     const digits = phoneDigitsOnly(value);
@@ -626,7 +723,7 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
 
     let response;
     try {
-        response = await getGeminiModel().generateContent(prompt);
+        response = await generateGeminiContentWithRetry(prompt);
     } catch (error) {
         console.error('[YogiDesk Secure AI] Execution bypassed due to model interface code');
         return {
@@ -953,11 +1050,16 @@ const commitGeminiOutboundReply = async ({
 };
 
 const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
-    const inboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
+    const rawInboundMessages = message ? [message] : extractWhatsAppInboundTextMessages(payload);
     const results = [];
 
-    if (!Array.isArray(inboundMessages) || inboundMessages.length === 0) {
+    if (!Array.isArray(rawInboundMessages) || rawInboundMessages.length === 0) {
         console.log("[YogiDesk Webhook] Received status or non-message event. Skipping AI trigger.");
+        return results;
+    }
+
+    const inboundMessages = await debounceGeminiInbounds(rawInboundMessages);
+    if (!Array.isArray(inboundMessages) || inboundMessages.length === 0) {
         return results;
     }
 
