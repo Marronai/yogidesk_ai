@@ -133,7 +133,7 @@ const SuperAdminDashboard = () => {
                   <th className="px-4 py-3">Plan</th>
                   <th className="px-4 py-3">Wallet</th>
                   <th className="px-4 py-3">Clinical Metrics</th>
-                  <th className="px-4 py-3">AI Tokens</th>
+                  <th className="px-4 py-3">AI Messages</th>
                   <th className="px-4 py-3">WhatsApp Delivery</th>
                   <th className="px-4 py-3">Login Activity</th>
                   <th className="px-4 py-3">Actions</th>

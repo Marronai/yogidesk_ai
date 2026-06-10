@@ -88,6 +88,7 @@ const buildTrialProfilePayload = ({
     trial_end_at: trialEnd.toISOString(),
     wallet_balance: 50.00,
     lifetime_patients_limit: 2000,
+    ai_message_balance: 1000,
     ai_token_balance: 1000,
     onboarding_tour_completed: false,
     trial_last_reminder_at: null,

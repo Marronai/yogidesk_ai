@@ -138,6 +138,7 @@ const SignUp = () => {
       trial_end_at: trialEndAt.toISOString(),
       wallet_balance: 50.00,
       lifetime_patients_limit: 2000,
+      ai_message_balance: 1000,
       ai_token_balance: 1000,
       onboarding_tour_completed: false,
       plan_limits: { patient_limit: 2000, staff_limit: 2, template_limit: 50 },

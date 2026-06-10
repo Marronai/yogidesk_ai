@@ -14,6 +14,8 @@ const defaultSettings = {
   aiEnabled: false,
   tokenLimit: 0,
   tokenUsed: 0,
+  aiMessageBalance: 0,
+  aiMessageUsed: 0,
   isAiPaused: false,
 };
 
@@ -28,9 +30,11 @@ const AISettings = () => {
   const usagePercent = useMemo(() => {
     const locked = settings.has_trial_expired || settings.is_trial_expired || String(settings.runtime_plan || settings.plan_tier || settings.plan || '').toLowerCase() === 'basic';
     if (locked) return 0;
-    const limit = Number(settings.tokenLimit || 0);
-    if (!limit) return 0;
-    return Math.min(100, Math.round((Number(settings.tokenUsed || 0) / limit) * 100));
+    const balance = Number(settings.aiMessageBalance ?? settings.tokenLimit ?? 0);
+    const used = Number(settings.aiMessageUsed ?? settings.tokenUsed ?? 0);
+    const total = balance + used;
+    if (!total) return 0;
+    return Math.min(100, Math.round((used / total) * 100));
   }, [settings]);
 
   const loadSettings = async () => {
@@ -69,8 +73,8 @@ const AISettings = () => {
   const planLabel = String(settings.runtime_plan || settings.plan_tier || settings.plan || 'growth').replace(/_/g, ' ');
   const isLocked = settings.has_trial_expired || settings.is_trial_expired || planLabel.toLowerCase() === 'basic';
   const assistantEnabled = settings.aiEnabled && !settings.isAiPaused && !isLocked;
-  const displayTokenLimit = isLocked ? 0 : Number(settings.tokenLimit || 0);
-  const displayTokenUsed = isLocked ? 0 : Number(settings.tokenUsed || 0);
+  const displayMessageBalance = isLocked ? 0 : Number(settings.aiMessageBalance ?? settings.tokenLimit ?? 0);
+  const displayMessageUsed = isLocked ? 0 : Number(settings.aiMessageUsed ?? settings.tokenUsed ?? 0);
   const displayPlanLabel = planLabel
     .split(' ')
     .filter(Boolean)
@@ -101,15 +105,15 @@ const AISettings = () => {
               </button>
             </div>
             <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">
-              Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.
+              Your 7-day complementary trial period has expired. Please recharge AI Assistant Messages to activate YogiDesk AI features again.
             </p>
             <button
               type="button"
-              onClick={() => navigate('/dashboard/wallet')}
+              onClick={() => navigate('/dashboard/ai-recharge')}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-orange-700"
             >
               <CreditCard size={18} />
-              Open Billing
+              Recharge AI Messages
             </button>
           </div>
         </div>
@@ -154,7 +158,7 @@ const AISettings = () => {
           <p className="text-xs font-black uppercase tracking-widest text-slate-400">Current Plan</p>
           <p className="mt-2 text-3xl font-black text-slate-950">{displayPlanLabel}</p>
           <p className="mt-3 text-sm font-semibold leading-6 text-slate-500">
-            {isLocked ? 'Your complementary access has expired. Recharge wallet balance to restore assistant automation.' : settings.aiEnabled ? 'Assistant automation is enabled for this workspace.' : 'Assistant automation is not enabled on this plan.'}
+            {isLocked ? 'Your complementary access has expired. Recharge AI Assistant Messages to restore assistant automation.' : settings.aiEnabled ? 'Assistant automation is enabled for this workspace.' : 'Assistant automation is not enabled on this plan.'}
           </p>
         </div>
 
@@ -165,8 +169,8 @@ const AISettings = () => {
                 <Gauge size={22} />
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Usage</p>
-                <p className="text-sm font-bold text-slate-700">Tokens/Messages Used: {displayTokenUsed} / {displayTokenLimit}</p>
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">AI Message Credits</p>
+                <p className="text-sm font-bold text-slate-700">AI Messages Used: {displayMessageUsed} | Available: {displayMessageBalance}</p>
               </div>
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{usagePercent}%</span>
@@ -176,11 +180,11 @@ const AISettings = () => {
           </div>
           <button
             type="button"
-            onClick={() => navigate('/pricing')}
+            onClick={() => navigate('/dashboard/ai-recharge')}
             className="mt-6 inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 hover:bg-orange-700"
           >
             <CreditCard size={18} />
-            Recharge / Upgrade Limit
+            Recharge AI Messages
           </button>
         </div>
       </div>
@@ -192,7 +196,7 @@ const AISettings = () => {
             <h2 className="text-sm font-black uppercase tracking-widest text-slate-600">Assistant Gate</h2>
           </div>
           <p className="text-sm font-semibold leading-6 text-slate-500">
-            Plan limits, disabled automation, exhausted usage, and human takeover all route patients to the inbox for manual reply.
+            Plan access, disabled automation, exhausted AI Message Credits, and human takeover all route patients to the inbox for manual reply.
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

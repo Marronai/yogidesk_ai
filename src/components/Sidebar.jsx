@@ -102,7 +102,7 @@ const Sidebar = () => {
     { name: 'Delivery Reports', path: '/dashboard/delivery-reports', icon: BarChart3 },
     { name: 'Patients', path: '/dashboard/contacts', icon: Users },
     !isStaff && { name: 'Yogi Wallet', path: '/dashboard/wallet', icon: Wallet },
-    !isStaff && { name: 'AI Assistant Slots', path: '/dashboard/ai-settings', icon: Bot, premiumLocked: true },
+    !isStaff && { name: 'AI Assistant Messages', path: '/dashboard/ai-recharge', icon: Bot, premiumLocked: true },
     { name: 'Ads CRM Manager', path: '/dashboard/ads-crm', icon: Megaphone, premiumLocked: true },
     {
       name: 'Team Setup Layouts',

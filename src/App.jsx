@@ -26,6 +26,7 @@ import Support from './pages/Support';
 import Settings from './pages/MySettings'; 
 import Campaigns from './pages/Campaigns'; 
 import AISettings from './pages/AISettings';
+import AIRecharge from './pages/AIRecharge';
 import HospitalDischarge from './pages/HospitalDischarge';
 import TemplateManager from './pages/TemplateManager';
 import Templates from './pages/Templates';
@@ -121,6 +122,7 @@ const AppContent = () => {
                 <Route path="/dashboard/support" element={<Support />} />
                 <Route path="/dashboard/settings" element={<Settings />} />
                 <Route path="/dashboard/ai-settings" element={<AISettings />} />
+                <Route path="/dashboard/ai-recharge" element={<AIRecharge />} />
                 <Route path="/dashboard/ads-crm" element={<LeadsCRM />} />
                 <Route path="/dashboard/subscription" element={<Subscription />} />
                 <Route path="/dashboard/wallet" element={<YogiWallet />} />

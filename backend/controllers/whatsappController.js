@@ -378,15 +378,22 @@ const fetchDoctorAiConfig = async ({ businessAccountId, phoneNumberId, displayPh
 const getDoctorAiEligibility = (doctor = {}) => {
     const plan = normalizeAiPlan(doctor);
     const aiEnabled = Boolean(doctor.ai_enabled ?? doctor.aiEnabled);
-    const tokenLimit = Number(doctor.token_limit ?? doctor.tokenLimit ?? 0);
-    const tokenUsed = Number(doctor.token_used ?? doctor.tokenUsed ?? 0);
+    const messageBalance = Number(
+        doctor.ai_message_balance ??
+        doctor.aiMessageBalance ??
+        doctor.ai_token_balance ??
+        doctor.token_limit ??
+        doctor.tokenLimit ??
+        0
+    );
+    const messageUsed = Number(doctor.ai_message_used ?? doctor.aiMessageUsed ?? doctor.token_used ?? doctor.tokenUsed ?? 0);
     const isAiPaused = Boolean(doctor.is_ai_paused ?? doctor.isAiPaused);
 
-    if (plan !== 'GROWTH') return { eligible: false, reason: 'growth_plan_required', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
-    if (!aiEnabled) return { eligible: false, reason: 'ai_disabled', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
-    if (isAiPaused) return { eligible: false, reason: 'human_takeover', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
-    if (tokenLimit <= 0 || tokenUsed >= tokenLimit) return { eligible: false, reason: 'token_limit_reached', plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
-    return { eligible: true, plan, aiEnabled, tokenLimit, tokenUsed, isAiPaused };
+    if (plan !== 'GROWTH') return { eligible: false, reason: 'growth_plan_required', plan, aiEnabled, messageBalance, messageUsed, isAiPaused };
+    if (!aiEnabled) return { eligible: false, reason: 'ai_disabled', plan, aiEnabled, messageBalance, messageUsed, isAiPaused };
+    if (isAiPaused) return { eligible: false, reason: 'human_takeover', plan, aiEnabled, messageBalance, messageUsed, isAiPaused };
+    if (messageBalance <= 0) return { eligible: false, reason: 'message_credit_depleted', plan, aiEnabled, messageBalance, messageUsed, isAiPaused };
+    return { eligible: true, plan, aiEnabled, messageBalance, messageUsed, isAiPaused };
 };
 
 const isDoctorSuspendedForMeta = async (doctorId) => {
@@ -531,6 +538,72 @@ const incrementDoctorTokenUsage = async ({ doctorId, currentUsed = 0, table = 'd
         .update({ token_used: nextUsed })
         .eq('id', doctorId);
     if (update.error) console.warn(`Gemini token usage increment failed in ${safeTable}:`, update.error.message || update.error);
+};
+
+const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, messageCost = 1 }) => {
+    const db = supabaseAdmin || supabase;
+    const doctorId = doctor.id;
+    if (!db?.from || !doctorId) return { success: false, reason: 'database_unavailable' };
+
+    const safeTable = ['doctors', 'doctor_profiles', 'profiles'].includes(doctor._aiTable) ? doctor._aiTable : 'doctor_profiles';
+    const currentBalance = Number(
+        doctor.ai_message_balance ??
+        doctor.aiMessageBalance ??
+        doctor.ai_token_balance ??
+        doctor.token_limit ??
+        0
+    );
+    const currentUsed = Number(doctor.ai_message_used ?? doctor.aiMessageUsed ?? doctor.token_used ?? 0);
+    const creditsToDeduct = Math.max(1, Number(messageCost || 1));
+    const nextBalance = Math.max(0, currentBalance - creditsToDeduct);
+    const nextUsed = currentUsed + creditsToDeduct;
+    const inputTokens = Number(usageMetadata.promptTokenCount || usageMetadata.inputTokenCount || 0);
+    const outputTokens = Number(usageMetadata.candidatesTokenCount || usageMetadata.outputTokenCount || 0);
+    const totalTokens = Number(usageMetadata.totalTokenCount || inputTokens + outputTokens || 0);
+    const lastAiUsage = {
+        provider: 'gemini',
+        model: GEMINI_MODEL_NAME,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: totalTokens,
+        credits_deducted: creditsToDeduct,
+        charged_at: new Date().toISOString()
+    };
+
+    const payload = {
+        ai_message_balance: nextBalance,
+        ai_message_used: nextUsed,
+        token_used: nextUsed,
+        last_ai_usage: lastAiUsage
+    };
+
+    let update = await db.from(safeTable).update(payload).eq('id', doctorId);
+    if (update.error && isSchemaCacheError(update.error)) {
+        const fallbackPayload = {
+            ai_message_balance: nextBalance,
+            token_used: nextUsed
+        };
+        update = await db.from(safeTable).update(fallbackPayload).eq('id', doctorId);
+    }
+    if (update.error && isSchemaCacheError(update.error)) {
+        update = await db.from(safeTable).update({
+            ai_token_balance: nextBalance,
+            token_limit: nextBalance,
+            token_used: nextUsed
+        }).eq('id', doctorId);
+    }
+
+    if (update.error) {
+        console.warn(`AI message credit deduction failed in ${safeTable}:`, update.error.message || update.error);
+        return { success: false, reason: 'update_failed', error: update.error };
+    }
+
+    return {
+        success: true,
+        aiMessageBalance: nextBalance,
+        aiMessageUsed: nextUsed,
+        usage: lastAiUsage
+    };
 };
 
 const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCode = 'hi' }) => {
@@ -1001,13 +1074,12 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                             phoneNumberId: inbound.phoneNumberId,
                             businessAccountId: inbound.businessAccountId
                         });
-                        await incrementDoctorTokenUsage({
-                            doctorId: doctor.id,
-                            currentUsed: doctor.token_used ?? doctor.tokenUsed ?? 0,
-                            table: doctor._aiTable || 'doctors',
-                            incrementBy: 1
+                        const creditDebit = await deductDoctorAiMessageCredit({
+                            doctor,
+                            usageMetadata: geminiResult.usageMetadata || {},
+                            messageCost: 1
                         });
-                        result.metaReplies.push({ success: true, response: metaReply, inboxCommit });
+                        result.metaReplies.push({ success: true, response: metaReply, inboxCommit, creditDebit });
                         console.log('[YogiDesk AI] Response successfully sent to patient.');
                     } catch (sendError) {
                         console.error('[YogiDesk Debug] Gemini Meta reply send failed:', {

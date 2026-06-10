@@ -170,6 +170,8 @@ const emptyMetaReviewPayloadForPath = (path) => {
                     aiEnabled: false,
                     tokenLimit: 0,
                     tokenUsed: 0,
+                    aiMessageBalance: 0,
+                    aiMessageUsed: 0,
                     isAiPaused: true
                 }
             }
@@ -3209,6 +3211,7 @@ app.post('/api/profile/onboarding', async (req, res) => {
             current_plan: 'growth',
             plan_tier: 'growth',
             lifetime_patients_limit: 2000,
+            ai_message_balance: 1000,
             ai_token_balance: 1000,
             plan_limits: getPlanLimits('GROWTH'),
             whatsapp_phone_number_id: phoneNumberId,
@@ -4160,7 +4163,7 @@ app.get('/api/ai/settings', async (req, res) => {
         let error = null;
         const profileResult = await readSingleRowSafely({
             table: 'doctor_profiles',
-            select: 'id,email,created_at,trial_start_at,trial_started_at,plan,current_plan,plan_tier,subscription_tier,subscription_status,payment_confirmed,subscription_paid,is_paid,ai_enabled,token_limit,token_used,ai_token_balance,is_ai_paused',
+            select: 'id,email,created_at,trial_start_at,trial_started_at,plan,current_plan,plan_tier,subscription_tier,subscription_status,payment_confirmed,subscription_paid,is_paid,ai_enabled,token_limit,token_used,ai_token_balance,ai_message_balance,ai_message_used,is_ai_paused',
             column: 'id',
             value: userId
         });
@@ -4171,9 +4174,10 @@ app.get('/api/ai/settings', async (req, res) => {
         const runtimePlan = evaluateRuntimePlan(data || {});
         const plan = runtimePlan.runtime_plan || data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'growth';
         const isTrialExpired = runtimePlan.has_trial_expired;
-        const tokenLimit = runtimePlan.runtime_tier === 'BASIC'
+        const aiMessageBalance = runtimePlan.runtime_tier === 'BASIC'
             ? 0
-            : Number(data?.token_limit ?? data?.ai_token_balance ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
+            : Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
+        const aiMessageUsed = Number(data?.ai_message_used ?? data?.token_used ?? 0);
 
         return res.status(200).json({
             success: true,
@@ -4184,8 +4188,10 @@ app.get('/api/ai/settings', async (req, res) => {
                 has_trial_expired: runtimePlan.has_trial_expired,
                 is_trial_expired: isTrialExpired,
                 aiEnabled: runtimePlan.runtime_tier !== 'BASIC' && data?.ai_enabled !== false,
-                tokenLimit,
-                tokenUsed: Number(data?.token_used || 0),
+                tokenLimit: aiMessageBalance,
+                tokenUsed: aiMessageUsed,
+                aiMessageBalance,
+                aiMessageUsed,
                 isAiPaused: Boolean(data?.is_ai_paused)
             }
         });

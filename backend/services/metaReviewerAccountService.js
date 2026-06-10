@@ -162,6 +162,7 @@ const ensureDoctorProfileRow = async (db, userId) => {
     subscription_paid: true,
     is_paid: true,
     lifetime_patients_limit: 2000,
+    ai_message_balance: 1000,
     ai_token_balance: 1000,
     has_trial_expired: false,
     trial_start_at: now,

@@ -31,7 +31,7 @@ import { readQuickReplies, sanitizeQuickReplyBody, sanitizeQuickReplyText } from
 import { useAuth } from '../context/AuthContext';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
-const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge your wallet balance under the billing view to activate YogiDesk AI features again.';
+const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge AI Assistant Messages to activate YogiDesk AI features again.';
 
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
@@ -1008,10 +1008,10 @@ const InboxContent = () => {
             <p className="mt-4 text-sm font-semibold leading-6 text-slate-600">{TRIAL_EXPIRED_NOTICE}</p>
             <button
               type="button"
-              onClick={() => navigate('/dashboard/wallet')}
+              onClick={() => navigate('/dashboard/ai-recharge')}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-widest text-white hover:bg-orange-700"
             >
-              Open Billing
+              Recharge AI Messages
             </button>
           </div>
         </div>
@@ -1322,10 +1322,10 @@ const InboxContent = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate('/dashboard/wallet')}
+                      onClick={() => navigate('/dashboard/ai-recharge')}
                       className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-xs font-black uppercase tracking-wide text-white shadow-sm hover:bg-orange-700"
                     >
-                      Open Billing
+                      Recharge AI Messages
                     </button>
                   </div>
                 ) : !canUseComposer && !isGhostMode ? (
