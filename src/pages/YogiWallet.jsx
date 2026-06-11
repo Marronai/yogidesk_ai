@@ -90,9 +90,9 @@ const YogiWallet = () => {
       setPaymentError('Unable to identify your account. Please login again.');
       return;
     }
-    if (!Number.isFinite(rechargeAmount) || rechargeAmount < 100) {
-      setPaymentError('Minimum recharge amount is Rs. 100.');
-      alert('Minimum recharge amount is Rs. 100.');
+    if (!Number.isFinite(rechargeAmount) || rechargeAmount < 10) {
+      setPaymentError('Minimum recharge amount is Rs. 10.');
+      alert('Minimum recharge amount is Rs. 10.');
       return;
     }
     if (!profile.email) {
@@ -138,7 +138,7 @@ const YogiWallet = () => {
         notes: {
           user_id: userId,
           purpose: 'wallet_recharge',
-          recharge_type: 'CUSTOM_WALLET',
+          recharge_type: 'RAW_WHATSAPP_CREDITS',
           amount: amountInput,
           doctor_name: profile.firstname,
           doctor_email: profile.email,
@@ -241,6 +241,7 @@ const YogiWallet = () => {
               onChange={(event) => setAmount(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-4 text-lg font-black text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
             />
+            <p className="mt-2 text-xs font-bold text-slate-500">Minimum ₹10. No platform fee is added for WhatsApp credits.</p>
             {paymentStatus && (
               <div className="mt-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
                 {paymentStatus}

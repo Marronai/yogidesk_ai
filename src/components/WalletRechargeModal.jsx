@@ -96,7 +96,7 @@ const WalletRechargeModal = ({ isOpen, onClose, onSuccess, userId }) => {
         notes: {
           wallet_recharge: true,
           purpose: 'wallet_recharge',
-          recharge_type: 'CUSTOM_WALLET',
+          recharge_type: 'RAW_WHATSAPP_CREDITS',
           amount: selectedAmount,
           doctor_name: localStorage.getItem('user_name') || 'Doctor',
           doctor_email: localStorage.getItem('user_email') || '',

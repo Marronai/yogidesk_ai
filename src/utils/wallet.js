@@ -86,8 +86,8 @@ export const calculateRechargeCashback = (amount, isFirstRecharge) => {
 
 export const rechargeWallet = (amount) => {
   const rechargeAmount = Number(amount);
-  if (!Number.isFinite(rechargeAmount) || rechargeAmount < 100) {
-    throw new Error('Minimum recharge amount is Rs. 100.');
+  if (!Number.isFinite(rechargeAmount) || rechargeAmount < 10) {
+    throw new Error('Minimum recharge amount is Rs. 10.');
   }
 
   const wallet = getWallet();

@@ -7,7 +7,6 @@ const { supabaseAdmin, supabase } = require('../config/supabase');
 const { createWalletOrder, verifyWalletPayment } = require('../controllers/walletController');
 const {
   buildFixedPlanLineItems,
-  buildWalletRechargeLineItems,
   calculateMetaFee: calculateSharedMetaFee,
   createRazorpayNativeInvoice,
   normalizeInvoiceContact: normalizeSharedInvoiceContact,
@@ -268,6 +267,11 @@ const getRazorpayErrorMessage = (error) => (
   'Razorpay initialization failed'
 );
 
+const isSchemaCacheError = (error) => {
+  const text = String(error?.message || error?.details || error || '').toLowerCase();
+  return error?.code === 'PGRST204' || error?.code === 'PGRST205' || text.includes('schema cache') || text.includes('could not find') || text.includes('column');
+};
+
 const buildDoctorBillingFallback = (doctor = {}, body = {}) => {
   const metadata = doctor.user_metadata || {};
   return {
@@ -304,13 +308,11 @@ const resolveSubscriptionRechargeFromOrder = async ({ client, orderId, fallbackP
 const resolveWalletRechargeFromOrder = async ({ order }) => {
   const notes = order?.notes || {};
   const subtotal = Number(notes.subtotal || notes.amount || 0);
-  const metaFee = Number(notes.meta_fee || calculateSharedMetaFee(subtotal));
   return {
     order,
     userId: String(notes.user_id || notes.doctor_id || '').trim(),
     subtotal,
-    metaFee,
-    totalAmount: Number(notes.total_amount || (subtotal + metaFee)),
+    totalAmount: Number(notes.total_amount || subtotal),
     doctorName: notes.doctor_name || '',
     doctorEmail: notes.doctor_email || '',
     doctorPhone: notes.doctor_phone || '',
@@ -341,47 +343,47 @@ const createFixedPlanInvoice = async ({ client, userId, plan, razorpayOrderId, r
   })
 );
 
-const createWalletRechargeInvoice = async ({ client, userId, recharge, razorpayOrderId, razorpayPaymentId, fallbackDoctor = {} }) => (
-  createRazorpayNativeInvoice({
-    razorpay: client,
-    db,
-    supabaseAdmin,
-    userId,
-    rechargeType: 'CUSTOM_WALLET',
-    principalAmount: recharge.subtotal,
-    calculatedLineItems: buildWalletRechargeLineItems({ principalAmount: recharge.subtotal }),
-    customerFallback: fallbackDoctor,
-    notes: {
-      purpose: 'wallet_recharge',
-      razorpay_order_id: razorpayOrderId,
-      razorpay_payment_id: razorpayPaymentId,
-    },
-  })
-);
-
 const creditWalletRecharge = async ({ userId, amount }) => {
-  const { data: walletRow, error: walletError } = await db
+  let walletResult = await db
     .from('wallets')
-    .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
+    .select('balance,whatsapp_credit_balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
     .eq('user_id', userId)
     .maybeSingle();
 
-  if (walletError) throw walletError;
+  if (walletResult.error && isSchemaCacheError(walletResult.error)) {
+    walletResult = await db
+      .from('wallets')
+      .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
+      .eq('user_id', userId)
+      .maybeSingle();
+  }
 
+  if (walletResult.error) throw walletResult.error;
+
+  const walletRow = walletResult.data;
   const currentBalance = Number(walletRow?.balance || 0);
+  const currentWhatsappBalance = Number(walletRow?.whatsapp_credit_balance ?? currentBalance);
   const nextBalance = Number((currentBalance + amount).toFixed(2));
-  const { error: upsertError } = await db.from('wallets').upsert({
+  const nextWhatsappCreditBalance = Number((currentWhatsappBalance + amount).toFixed(2));
+  const payload = {
     user_id: userId,
     balance: nextBalance,
+    whatsapp_credit_balance: nextWhatsappCreditBalance,
     is_first_recharge: false,
     welcome_gift_active: walletRow?.welcome_gift_active ?? false,
     current_plan: walletRow?.current_plan || 'starter',
     plan_tier: walletRow?.plan_tier || 'starter',
     lifetime_contacts_count: Number(walletRow?.lifetime_contacts_count || 0),
-  }, { onConflict: 'user_id' });
+  };
 
+  let { error: upsertError } = await db.from('wallets').upsert(payload, { onConflict: 'user_id' });
+  if (upsertError && isSchemaCacheError(upsertError)) {
+    const { whatsapp_credit_balance: _removed, ...fallbackPayload } = payload;
+    const fallbackResult = await db.from('wallets').upsert(fallbackPayload, { onConflict: 'user_id' });
+    upsertError = fallbackResult.error;
+  }
   if (upsertError) throw upsertError;
-  return { currentBalance, nextBalance };
+  return { currentBalance, nextBalance, currentWhatsappBalance, nextWhatsappCreditBalance };
 };
 
 router.post('/create-order', async (req, res) => {
@@ -975,11 +977,11 @@ router.post('/razorpay-webhook', async (req, res) => {
       return res.status(200).json({ success: true });
     }
 
-    if (capturedPurpose === 'wallet_recharge' || capturedRechargeType === 'CUSTOM_WALLET') {
-      const recharge = resolveWalletRechargeFromOrder({ order: capturedOrder });
+    if (capturedPurpose === 'wallet_recharge' || capturedRechargeType === 'RAW_WHATSAPP_CREDITS') {
+      const recharge = await resolveWalletRechargeFromOrder({ order: capturedOrder });
       const userId = recharge.userId || String(payment?.notes?.user_id || payment?.notes?.doctor_id || '').trim();
       const amount = Number(recharge.subtotal || 0);
-      if (!userId || !Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT) {
+      if (!userId || !Number.isFinite(amount) || amount < 10) {
         return res.status(400).json({ success: false, message: 'Invalid wallet recharge webhook payload.' });
       }
 
@@ -993,20 +995,7 @@ router.post('/razorpay-webhook', async (req, res) => {
       if (existingTransactionError) console.error('Wallet webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
       if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
 
-      const { currentBalance, nextBalance } = await creditWalletRecharge({ userId, amount });
-      const invoice = await createWalletRechargeInvoice({
-        client,
-        userId,
-        recharge,
-        razorpayOrderId: orderId,
-        razorpayPaymentId: paymentId,
-        fallbackDoctor: {
-          name: recharge.doctorName || payment?.notes?.doctor_name,
-          email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
-          phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
-          clinic_name: recharge.clinicName || payment?.notes?.clinic_name,
-        },
-      });
+      const { currentBalance, nextBalance, currentWhatsappBalance, nextWhatsappCreditBalance } = await creditWalletRecharge({ userId, amount });
 
       await db.from('wallet_transactions').insert([{
         user_id: userId,
@@ -1016,17 +1005,16 @@ router.post('/razorpay-webhook', async (req, res) => {
         metadata: {
           provider: 'razorpay',
           purpose: 'wallet_recharge',
-          recharge_type: 'CUSTOM_WALLET',
+          recharge_type: 'RAW_WHATSAPP_CREDITS',
           subtotal: recharge.subtotal,
-          meta_fee: recharge.metaFee,
           total_amount: recharge.totalAmount,
           razorpay_order_id: orderId,
           razorpay_payment_id: paymentId,
-          razorpay_invoice_id: invoice?.id || null,
-          razorpay_invoice_short_url: invoice?.short_url || null,
           webhook_event: event.event,
           previous_balance: currentBalance,
           next_balance: nextBalance,
+          previous_whatsapp_credit_balance: currentWhatsappBalance,
+          next_whatsapp_credit_balance: nextWhatsappCreditBalance,
         },
         created_at: new Date().toISOString(),
       }]);

@@ -1,16 +1,9 @@
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const { supabaseAdmin, supabase } = require('../config/supabase');
-const {
-  buildWalletRechargeLineItems,
-  calculateMetaFee,
-  createRazorpayNativeInvoice,
-  normalizeInvoiceContact,
-  toPaise,
-} = require('../services/razorpayInvoiceService');
 
 const db = supabaseAdmin || supabase;
-const WALLET_MIN_RECHARGE_AMOUNT = 100;
+const WALLET_MIN_RECHARGE_AMOUNT = 10;
 
 const getRazorpayCredentials = () => ({
   keyId: String(process.env.RAZORPAY_KEY_ID || '').trim(),
@@ -41,22 +34,76 @@ const parseWalletAmount = (value) => {
   return Number.isFinite(amount) ? amount : null;
 };
 
+const isSchemaCacheError = (error) => {
+  const text = String(error?.message || error?.details || error || '').toLowerCase();
+  return error?.code === 'PGRST204' || error?.code === 'PGRST205' || text.includes('schema cache') || text.includes('could not find') || text.includes('column');
+};
+
+const normalizeInvoiceContact = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+};
+
 const resolveWalletRechargeFromOrder = async ({ client, orderId, fallbackAmount = 0 }) => {
   const order = await client.orders.fetch(orderId);
   const notes = order?.notes || {};
   const subtotal = Number(notes.subtotal || notes.amount || fallbackAmount || 0);
-  const metaFee = Number(notes.meta_fee || calculateMetaFee(subtotal));
   return {
     order,
     userId: String(notes.user_id || notes.doctor_id || '').trim(),
     subtotal,
-    metaFee,
-    totalAmount: Number(notes.total_amount || (subtotal + metaFee)),
+    totalAmount: Number(notes.total_amount || subtotal),
     doctorName: notes.doctor_name || '',
     doctorEmail: notes.doctor_email || '',
     doctorPhone: notes.doctor_phone || '',
     clinicName: notes.clinic_name || '',
   };
+};
+
+const fetchWalletRow = async (userId) => {
+  const fullResult = await db
+    .from('wallets')
+    .select('balance,whatsapp_credit_balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!fullResult.error) return fullResult;
+  if (!isSchemaCacheError(fullResult.error)) return fullResult;
+
+  return db
+    .from('wallets')
+    .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
+    .eq('user_id', userId)
+    .maybeSingle();
+};
+
+const upsertWalletCreditBalance = async ({ userId, walletRow, amount }) => {
+  const currentBalance = Number(walletRow?.balance || 0);
+  const currentWhatsappBalance = Number(walletRow?.whatsapp_credit_balance ?? currentBalance);
+  const newBalance = Number((currentBalance + amount).toFixed(2));
+  const newWhatsappCreditBalance = Number((currentWhatsappBalance + amount).toFixed(2));
+  const payload = {
+    user_id: userId,
+    balance: newBalance,
+    whatsapp_credit_balance: newWhatsappCreditBalance,
+    is_first_recharge: false,
+    welcome_gift_active: walletRow?.welcome_gift_active ?? false,
+    current_plan: walletRow?.current_plan || 'starter',
+    plan_tier: walletRow?.plan_tier || 'starter',
+    lifetime_contacts_count: Number(walletRow?.lifetime_contacts_count || 0),
+  };
+
+  let { error } = await db.from('wallets').upsert(payload, { onConflict: 'user_id' });
+  if (error && isSchemaCacheError(error)) {
+    const { whatsapp_credit_balance: _removed, ...fallbackPayload } = payload;
+    const fallbackResult = await db.from('wallets').upsert(fallbackPayload, { onConflict: 'user_id' });
+    error = fallbackResult.error;
+  }
+
+  if (error) throw error;
+  return { currentBalance, newBalance, currentWhatsappBalance, newWhatsappCreditBalance };
 };
 
 const maskTokenText = (value) => String(value || '').replace(/\bTokens?\b/gi, 'Messages');
@@ -77,8 +124,8 @@ const sanitizePassbookRowForUi = (row = {}) => ({
     razorpay_order_id: row.metadata?.razorpay_order_id,
     razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
     razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
-    meta_fee: row.metadata?.meta_fee,
     total_amount: row.metadata?.total_amount,
+    recharge_type: row.metadata?.recharge_type,
   },
   created_at: row.created_at,
 });
@@ -149,13 +196,11 @@ const createWalletOrder = async (req, res) => {
     if (!Number.isFinite(amount) || amount < WALLET_MIN_RECHARGE_AMOUNT) {
       return res.status(400).json({
         success: false,
-        message: 'Minimum wallet recharge amount is Rs. 100.',
+        message: 'Minimum wallet recharge amount is Rs. 10.',
       });
     }
 
     const { keyId, client } = getRazorpayClient();
-    const metaFee = calculateMetaFee(amount);
-    const totalAmount = Number((amount + metaFee).toFixed(2));
     const walletReceipt = createWalletReceipt();
     const doctorName = String(req.body?.doctorName || req.body?.name || req.body?.firstname || 'Doctor').trim();
     const doctorEmail = String(req.body?.doctorEmail || req.body?.email || '').trim();
@@ -163,17 +208,16 @@ const createWalletOrder = async (req, res) => {
     const clinicName = String(req.body?.clinic_name || req.body?.clinicName || '').trim();
 
     const order = await client.orders.create({
-      amount: toPaise(totalAmount),
+      amount: Math.round(amount * 100),
       currency: 'INR',
       receipt: walletReceipt,
       notes: {
         user_id: userId,
         purpose: 'wallet_recharge',
-        recharge_type: 'CUSTOM_WALLET',
+        recharge_type: 'RAW_WHATSAPP_CREDITS',
         amount: amount.toFixed(2),
         subtotal: amount.toFixed(2),
-        meta_fee: metaFee.toFixed(2),
-        total_amount: totalAmount.toFixed(2),
+        total_amount: amount.toFixed(2),
         clinic_name: clinicName,
         doctor_name: doctorName,
         doctor_email: doctorEmail,
@@ -189,8 +233,7 @@ const createWalletOrder = async (req, res) => {
       key_id: keyId,
       receipt: walletReceipt,
       subtotal: amount,
-      metaFee,
-      totalAmount,
+      totalAmount: amount,
     });
   } catch (error) {
     console.error('[YogiDesk Wallet] Razorpay order creation failed:', {
@@ -259,7 +302,7 @@ const verifyWalletPayment = async (req, res) => {
     if (!Number.isFinite(amount) || amount < WALLET_MIN_RECHARGE_AMOUNT) {
       return res.status(400).json({
         success: false,
-        message: 'Minimum wallet recharge amount is Rs. 100.',
+        message: 'Minimum wallet recharge amount is Rs. 10.',
       });
     }
     if (recharge.userId && recharge.userId !== userId) {
@@ -287,48 +330,11 @@ const verifyWalletPayment = async (req, res) => {
       });
     }
 
-    const { data: walletRow, error: walletError } = await db
-      .from('wallets')
-      .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const { data: walletRow, error: walletError } = await fetchWalletRow(userId);
 
     if (walletError) throw walletError;
 
-    const currentBalance = Number(walletRow?.balance || 0);
-    const newBalance = Number((currentBalance + amount).toFixed(2));
-
-    const { error: upsertError } = await db.from('wallets').upsert({
-      user_id: userId,
-      balance: newBalance,
-      is_first_recharge: false,
-      welcome_gift_active: walletRow?.welcome_gift_active ?? false,
-      current_plan: walletRow?.current_plan || 'starter',
-      plan_tier: walletRow?.plan_tier || 'starter',
-      lifetime_contacts_count: Number(walletRow?.lifetime_contacts_count || 0),
-    }, { onConflict: 'user_id' });
-
-    if (upsertError) throw upsertError;
-    const invoice = await createRazorpayNativeInvoice({
-      razorpay: client,
-      db,
-      supabaseAdmin,
-      userId,
-      rechargeType: 'CUSTOM_WALLET',
-      principalAmount: amount,
-      calculatedLineItems: buildWalletRechargeLineItems({ principalAmount: amount }),
-      customerFallback: {
-        name: recharge.doctorName || req.body?.doctorName || req.body?.name,
-        email: recharge.doctorEmail || req.body?.email,
-        phone: recharge.doctorPhone || req.body?.phone,
-        clinic_name: recharge.clinicName || req.body?.clinic_name || req.body?.clinicName,
-      },
-      notes: {
-        purpose: 'wallet_recharge',
-        razorpay_order_id: razorpayOrderId,
-        razorpay_payment_id: razorpayPaymentId,
-      },
-    });
+    const { currentBalance, newBalance, currentWhatsappBalance, newWhatsappCreditBalance } = await upsertWalletCreditBalance({ userId, walletRow, amount });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
@@ -338,15 +344,14 @@ const verifyWalletPayment = async (req, res) => {
       metadata: {
         provider: 'razorpay',
         purpose: 'wallet_recharge',
-        recharge_type: 'CUSTOM_WALLET',
+        recharge_type: 'RAW_WHATSAPP_CREDITS',
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
-        razorpay_invoice_id: invoice?.id || null,
-        razorpay_invoice_short_url: invoice?.short_url || null,
-        meta_fee: recharge.metaFee,
         total_amount: recharge.totalAmount,
         previous_balance: currentBalance,
         next_balance: newBalance,
+        previous_whatsapp_credit_balance: currentWhatsappBalance,
+        next_whatsapp_credit_balance: newWhatsappCreditBalance,
       },
       created_at: new Date().toISOString(),
     }]).then(({ error }) => {
@@ -358,7 +363,6 @@ const verifyWalletPayment = async (req, res) => {
       message: 'Payment verified and wallet credited successfully.',
       newBalance,
       amount,
-      metaFee: recharge.metaFee,
       totalAmount: recharge.totalAmount,
     });
   } catch (error) {
@@ -429,7 +433,6 @@ const getWalletTransactions = async (req, res) => {
             razorpay_order_id: row.metadata?.razorpay_order_id,
             razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
             razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
-            meta_fee: row.metadata?.meta_fee,
             total_amount: row.metadata?.total_amount,
           },
         }));

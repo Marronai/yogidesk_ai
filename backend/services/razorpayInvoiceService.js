@@ -82,17 +82,6 @@ const buildFixedPlanLineItems = ({ packageName, principalAmount }) => [
   createMetaFeeLineItem(principalAmount),
 ];
 
-const buildWalletRechargeLineItems = ({ principalAmount }) => [
-  {
-    name: 'Yogi Wallet Credit Addition - Custom AI Message Allocation',
-    description: 'YogiDesk wallet principal credit addition',
-    amount: toPaise(principalAmount),
-    currency: 'INR',
-    quantity: 1,
-  },
-  createMetaFeeLineItem(principalAmount),
-];
-
 const createRazorpayNativeInvoice = async ({
   razorpay,
   db,
@@ -151,7 +140,6 @@ const createRazorpayNativeInvoice = async ({
 module.exports = {
   META_FEE_RATE,
   buildFixedPlanLineItems,
-  buildWalletRechargeLineItems,
   calculateMetaFee,
   createMetaFeeLineItem,
   createRazorpayNativeInvoice,
