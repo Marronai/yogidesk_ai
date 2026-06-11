@@ -21,28 +21,64 @@ const FIXED_PACKAGE_BY_PRICE = AI_PACKAGES.reduce((lookup, item) => ({
   [item.price]: item,
 }), {});
 
-const AI_TERMS_POINTS = [
-  {
-    title: 'Infrastructure Dependency',
-    text: 'YogiDesk integrates compute infrastructures from global AI research leaders including Google AI, OpenAI, and NVIDIA. If these infrastructure entities scale their pricing structures, YogiDesk credit tariffs may adjust proportionally.',
+const AI_TERMS_COPY = {
+  EN: {
+    toggleLabel: 'English',
+    badge: 'Secure Consent Required',
+    footer: 'Doctor Transparency Note: At YogiDesk, we maintain absolute pricing transparency so that our respected doctors know exactly how their automation capital is utilized to scale their medical practice efficiently.',
+    checkbox: 'I have read and agree to YogiDesk AI Service Terms & Conditions',
+    points: [
+      {
+        title: 'Infrastructure Dependency',
+        text: 'YogiDesk integrates compute infrastructures from global AI research leaders including Google AI, OpenAI, and NVIDIA. If these infrastructure entities scale their pricing structures, YogiDesk credit tariffs may adjust proportionally.',
+      },
+      {
+        title: 'Model Obsolescence & Upgrades',
+        text: 'If an active AI model version is retired by the parent company or higher baseline model updates are required to retain clinic performance, package adjustments may occur.',
+      },
+      {
+        title: '7-Day Advanced Notice Grace Window',
+        text: 'We pledge complete operational transparency. Respected doctors will receive an explicit SMS or dashboard notification alert exactly 7 days prior to any official pricing revision before any modifications hit active wallets.',
+      },
+      {
+        title: 'Service SLA & System Fail-safes',
+        text: 'YogiDesk functions as an autonomous digital clinic receptionist. In rare anomalies of cloud network drops, API system freezes, or upstream server downtime, YogiDesk assumes no liability. Our engineering layer will notify you immediately via mail/SMS for temporary manual inbox monitoring.',
+      },
+      {
+        title: 'Computational Bracket Mapping',
+        text: 'To enforce fair usage billing, message deductions calculate programmatically via computation brackets. Short inquiries consume single base units, while long, multi-turn medical history scheduling blocks tap across higher fractional usage.',
+      },
+    ],
   },
-  {
-    title: 'Model Obsolescence & Upgrades',
-    text: 'If an active AI model version is retired by the parent company or higher baseline model updates are required to retain clinic performance, package adjustments may occur.',
+  HI: {
+    toggleLabel: 'Hinglish',
+    badge: 'Secure Consent Zaroori Hai',
+    footer: 'Doctor Transparency Note: YogiDesk mein hum clear pricing transparency maintain karte hain, taaki respected doctors ko exactly pata rahe ki unka automation capital clinic growth ke liye kaise utilize ho raha hai.',
+    checkbox: 'Maine YogiDesk AI Service Terms & Conditions padh liye hain aur main inhe accept karta/karti hoon',
+    points: [
+      {
+        title: 'Infrastructure Dependency',
+        text: 'YogiDesk AI ka system Google AI, OpenAI, aur NVIDIA ke live servers se juda hua hai. Agar in tech giants ki taraf se computational pricing badhti hai, toh YogiDesk ke message credit rates badle ja sakte hain.',
+      },
+      {
+        title: 'Model Obsolescence & Upgrades',
+        text: 'Agar parent company kisi active AI model version ko retire karti hai, ya clinic performance maintain karne ke liye higher baseline model upgrade zaroori hota hai, toh package structure mein adjustment ho sakta hai.',
+      },
+      {
+        title: '7-Day Advanced Notice Grace Window',
+        text: 'Hum complete operational transparency ka promise karte hain. Kisi bhi official pricing revision se exactly 7 din pehle respected doctors ko SMS ya dashboard notification ke through clear alert diya jayega.',
+      },
+      {
+        title: 'Service SLA & System Fail-safes',
+        text: 'YogiDesk AI aapke clinic ke liye ek 24/7 autonomous receptionist ki tarah kaam karta hai. Par kisi rare case mein global server down ya Meta API maintenance ke wajah se agar koi message skip hota hai, toh uski legal jimmedari hamari nahi hogi. Aise hone par aapko SMS/Email se alert bhej diya jayega taaki aap manual oversight kar sakein.',
+      },
+      {
+        title: 'Computational Bracket Mapping',
+        text: 'Deduction Calculation Metric Rule: Fair usage billing ke liye message credit deduction patient ke sawal ki lambai aur context depth (tokens) ke brackets par calculated hota hai. Chote sawalon par kam credit aur lambi chat session par us hisab se 2 se 6 credits tak deduct ho sakte hain.',
+      },
+    ],
   },
-  {
-    title: '7-Day Advanced Notice Grace Window',
-    text: 'We pledge complete operational transparency. Respected doctors will receive an explicit SMS or dashboard notification alert exactly 7 days prior to any official pricing revision before any modifications hit active wallets.',
-  },
-  {
-    title: 'Service SLA & System Fail-safes',
-    text: 'YogiDesk functions as an autonomous digital clinic receptionist. In rare anomalies of cloud network drops, API system freezes, or upstream server downtime, YogiDesk assumes no liability. Our engineering layer will notify you immediately via mail/SMS for temporary manual inbox monitoring.',
-  },
-  {
-    title: 'Computational Bracket Mapping',
-    text: 'To enforce fair usage billing, message deductions calculate programmatically via computation brackets. Short inquiries consume single base units, while long, multi-turn medical history scheduling blocks tap across higher fractional usage.',
-  },
-];
+};
 
 const loadRazorpayScript = () => new Promise((resolve) => {
   if (window.Razorpay) {
@@ -82,8 +118,10 @@ const AIRecharge = () => {
   const [error, setError] = useState('');
   const [termsModalOpen, setTermsModalOpen] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
+  const [language, setLanguage] = useState('EN');
 
   const customMessages = useMemo(() => calculateCustomMessages(customAmount), [customAmount]);
+  const termsCopy = AI_TERMS_COPY[language] || AI_TERMS_COPY.EN;
   const checkoutDetails = mode === 'custom'
     ? { packageId: 'custom', name: resolveCustomPackageName(customAmount), price: Number(customAmount), messages: customMessages }
     : selectedPackage;
@@ -393,13 +431,13 @@ const AIRecharge = () => {
 
         {termsModalOpen && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/75 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-6" role="dialog" aria-modal="true" aria-labelledby="ai-terms-title">
-            <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-[#FFD701]/30 bg-white shadow-2xl">
-              <div className="bg-[#501638] px-5 py-5 text-white sm:px-7">
+            <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-2xl">
+              <div className="shrink-0 bg-[#501638] px-5 py-5 text-white sm:px-7">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-[#FFD701]/15 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#FFD701]">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-orange-100">
                       <ShieldCheck size={14} />
-                      Secure Consent Required
+                      {termsCopy.badge}
                     </div>
                     <h2 id="ai-terms-title" className="mt-3 text-2xl font-black leading-tight sm:text-3xl">YogiDesk AI Assistant — Terms & Conditions</h2>
                   </div>
@@ -417,26 +455,49 @@ const AIRecharge = () => {
                 </div>
               </div>
 
-              <div className="max-h-[calc(92vh-210px)] overflow-y-auto px-5 py-5 sm:px-7">
+              <div className="min-h-0 flex-1 px-5 py-5 sm:px-7">
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-3">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-700">Language</p>
+                  <div className="inline-flex rounded-full border border-orange-200 bg-white p-1 shadow-sm">
+                    {[
+                      ['EN', 'English'],
+                      ['HI', 'Hinglish'],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setLanguage(value)}
+                        className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-widest transition ${
+                          language === value ? 'bg-[#FF6B00] text-white shadow-sm' : 'text-slate-600 hover:bg-orange-50'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="max-h-[calc(90vh-116px)] overflow-y-auto pr-2 pb-24">
                 <div className="space-y-3">
-                  {AI_TERMS_POINTS.map((point, index) => (
-                    <div key={point.title} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  {termsCopy.points.map((point, index) => (
+                    <div key={point.title} className="rounded-xl border border-orange-100 bg-[#fffaf3] p-4">
                       <p className="text-xs font-black uppercase tracking-widest text-orange-600">Point {index + 1}</p>
-                      <h3 className="mt-1 text-sm font-black text-[#501638]">{point.title}</h3>
-                      <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">{point.text}</p>
+                      <h3 className="mt-1 text-sm font-black text-slate-950">{point.title}</h3>
+                      <p className="mt-2 text-sm font-semibold leading-6 text-slate-800">{point.text}</p>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-4 rounded-xl border border-[#FFD701]/70 bg-[#FFD701]/15 p-4">
-                  <p className="text-sm font-black leading-6 text-[#501638]">
-                    Doctor Transparency Note: At YogiDesk, we maintain absolute pricing transparency so that our respected doctors know exactly how their automation capital is utilized to scale their medical practice efficiently.
+                <div className="mt-4 rounded-xl border border-orange-100 bg-white p-4 shadow-sm">
+                  <p className="text-sm font-black leading-6 text-slate-950">
+                    {termsCopy.footer}
                   </p>
+                </div>
                 </div>
               </div>
 
-              <div className="border-t border-slate-200 bg-white px-5 py-4 sm:px-7">
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-orange-300">
+              <div className="absolute inset-x-0 bottom-0 border-t border-orange-100 bg-white px-5 py-4 shadow-[0_-16px_32px_rgba(15,23,42,0.12)] sm:px-7">
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-orange-100 bg-orange-50/70 p-3 transition hover:border-orange-300">
                   <input
                     type="checkbox"
                     checked={termsAccepted}
@@ -444,17 +505,17 @@ const AIRecharge = () => {
                     className="mt-1 h-5 w-5 rounded border-slate-300 text-orange-600 accent-orange-600"
                   />
                   <span className="text-sm font-black leading-6 text-slate-800">
-                    I have read and agree to YogiDesk AI Service Terms & Conditions
+                    {termsCopy.checkbox}
                   </span>
                 </label>
                 <button
                   type="button"
                   disabled={!termsAccepted || loading}
                   onClick={startCheckout}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#FF6B00] px-5 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-[#e65f00] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
                 >
                   <CreditCard size={18} />
-                  {loading ? 'Opening Checkout...' : 'Accept & Proceed to Payment'}
+                  {loading ? 'Opening Checkout...' : 'PROCEED TO PAY'}
                 </button>
               </div>
             </div>

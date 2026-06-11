@@ -55,6 +55,125 @@ const calculateAiMessagesForAmount = (amount) => {
 };
 
 const calculateMetaFee = (amount) => Number((Number(amount || 0) * META_FEE_RATE).toFixed(2));
+const toPaise = (amount) => Math.round(Number(amount || 0) * 100);
+
+const normalizeInvoiceContact = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `91${digits}`;
+  return digits;
+};
+
+const resolveDoctorBillingProfile = async (userId, fallback = {}) => {
+  const base = {
+    name: fallback.name || fallback.doctor_name || fallback.full_name || 'Doctor',
+    email: fallback.email || fallback.doctor_email || '',
+    contact: normalizeInvoiceContact(fallback.contact || fallback.phone || fallback.doctor_phone || ''),
+  };
+
+  if (!userId || !db?.from) return base;
+
+  for (const table of ['doctor_profiles', 'profiles']) {
+    try {
+      const { data, error } = await db
+        .from(table)
+        .select('id,name,email,phone,phone_number,mobile,clinic_name')
+        .eq('id', userId)
+        .maybeSingle();
+      if (!error && data?.id) {
+        return {
+          name: data.name || data.clinic_name || base.name,
+          email: data.email || base.email,
+          contact: normalizeInvoiceContact(data.phone_number || data.phone || data.mobile || base.contact),
+        };
+      }
+    } catch (error) {
+      console.warn(`Razorpay invoice billing profile lookup skipped in ${table}:`, error.message || error);
+    }
+  }
+
+  try {
+    if (supabaseAdmin?.auth?.admin?.getUserById) {
+      const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+      const authUser = data?.user;
+      if (!error && authUser?.id) {
+        return {
+          name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || base.name,
+          email: authUser.email || base.email,
+          contact: normalizeInvoiceContact(authUser.user_metadata?.phone || base.contact),
+        };
+      }
+    }
+  } catch (error) {
+    console.warn('Razorpay invoice auth profile lookup skipped:', error.message || error);
+  }
+
+  return base;
+};
+
+const createRazorpayAiInvoice = async ({ client, userId, recharge, razorpayOrderId, razorpayPaymentId, fallbackDoctor = {} }) => {
+  try {
+    if (!client?.invoices?.create) return null;
+    const billing = await resolveDoctorBillingProfile(userId, fallbackDoctor);
+    const packageName = recharge.packageLabel || 'AI Assistant Messages';
+    const messages = Number(recharge.aiMessages || 0);
+    const subtotal = Number(recharge.subtotal || 0);
+    const metaFee = Number(recharge.metaFee || calculateMetaFee(subtotal));
+    const lineItems = [
+      {
+        name: `${packageName} - ${messages.toLocaleString('en-IN')} Messages Package`,
+        description: 'YogiDesk AI Assistant message credits',
+        amount: toPaise(subtotal),
+        currency: 'INR',
+        quantity: 1,
+      },
+    ];
+
+    if (metaFee > 0) {
+      lineItems.push({
+        name: 'Infrastructure Platform Processing Fee',
+        description: 'Dynamic 2.36% compute and payment processing fee',
+        amount: toPaise(metaFee),
+        currency: 'INR',
+        quantity: 1,
+      });
+    }
+    const customer = {
+      name: billing.name,
+      ...(billing.email ? { email: billing.email } : {}),
+      ...(billing.contact ? { contact: billing.contact } : {}),
+    };
+
+    return await client.invoices.create({
+      type: 'invoice',
+      description: `YogiDesk AI Assistant credits invoice for ${packageName}`,
+      customer,
+      line_items: lineItems,
+      sms_notify: 1,
+      email_notify: 1,
+      currency: 'INR',
+      receipt: createShortReceipt(),
+      notes: {
+        doctor_id: userId,
+        purpose: 'ai_message_recharge',
+        package_id: recharge.packageId,
+        subtotal: subtotal.toFixed(2),
+        meta_fee: metaFee.toFixed(2),
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+      },
+    });
+  } catch (error) {
+    console.error('[YogiDesk Secure Payments] Razorpay invoice creation failed', {
+      userId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      message: error?.message || 'Unknown invoice error',
+      providerError: error?.error || error?.response?.data || null,
+    });
+    return null;
+  }
+};
 
 const timingSafeEqualHex = (left, right) => {
   const safeLeft = Buffer.from(String(left || ''), 'utf8');
@@ -296,6 +415,10 @@ router.post('/create-ai-order', async (req, res) => {
     const totalAmount = Number((amount + metaFee).toFixed(2));
     const amountPaise = Math.round(totalAmount * 100);
     const receipt = createAiReceipt();
+    const doctorMetadata = doctor.user_metadata || {};
+    const doctorName = doctorMetadata.full_name || doctorMetadata.name || req.body?.doctorName || req.body?.name || 'Doctor';
+    const doctorEmail = doctor.email || req.body?.email || '';
+    const doctorPhone = normalizeInvoiceContact(doctorMetadata.phone || req.body?.phone || req.body?.contact || '');
 
     const order = await client.orders.create({
       amount: amountPaise,
@@ -311,6 +434,9 @@ router.post('/create-ai-order', async (req, res) => {
         subtotal: amount.toFixed(2),
         meta_fee: metaFee.toFixed(2),
         total_amount: totalAmount.toFixed(2),
+        doctor_name: doctorName,
+        doctor_email: doctorEmail,
+        doctor_phone: doctorPhone,
       },
     });
 
@@ -344,6 +470,7 @@ const insertAiPassbookCredit = async ({
   razorpayPaymentId,
   previousBalance,
   nextBalance,
+  invoice = null,
   source = 'razorpay'
 }) => {
   if (!db?.from || !userId) return;
@@ -361,6 +488,8 @@ const insertAiPassbookCredit = async ({
       ai_messages: Number(messages || 0),
       razorpay_order_id: razorpayOrderId,
       razorpay_payment_id: razorpayPaymentId,
+      razorpay_invoice_id: invoice?.id || null,
+      razorpay_invoice_short_url: invoice?.short_url || null,
       previous_ai_message_balance: previousBalance,
       next_ai_message_balance: nextBalance,
     },
@@ -390,6 +519,9 @@ const resolveAiRechargeFromOrder = async ({ client, orderId, fallbackPackageId =
     metaFee,
     totalAmount,
     aiMessages,
+    doctorName: notes.doctor_name || '',
+    doctorEmail: notes.doctor_email || '',
+    doctorPhone: notes.doctor_phone || '',
   };
 };
 
@@ -505,6 +637,18 @@ router.post('/verify-ai-payment', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay', package_id: packageId, charged_at: new Date().toISOString() }
     });
+    const invoice = await createRazorpayAiInvoice({
+      client,
+      userId,
+      recharge,
+      razorpayOrderId,
+      razorpayPaymentId,
+      fallbackDoctor: {
+        name: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
+        email: recharge.doctorEmail || doctor?.email,
+        phone: recharge.doctorPhone || doctor?.user_metadata?.phone,
+      },
+    });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
@@ -520,6 +664,8 @@ router.post('/verify-ai-payment', async (req, res) => {
         total_amount: recharge.totalAmount,
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
+        razorpay_invoice_id: invoice?.id || null,
+        razorpay_invoice_short_url: invoice?.short_url || null,
         previous_ai_message_balance: currentBalance,
         next_ai_message_balance: nextBalance,
       },
@@ -537,6 +683,7 @@ router.post('/verify-ai-payment', async (req, res) => {
       razorpayPaymentId,
       previousBalance: currentBalance,
       nextBalance,
+      invoice,
     });
 
     return res.status(200).json({
@@ -607,6 +754,18 @@ router.post('/razorpay-webhook', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay_webhook', package_id: recharge.packageId, charged_at: new Date().toISOString() }
     });
+    const invoice = await createRazorpayAiInvoice({
+      client,
+      userId,
+      recharge,
+      razorpayOrderId: orderId,
+      razorpayPaymentId: paymentId,
+      fallbackDoctor: {
+        name: recharge.doctorName || payment?.notes?.doctor_name,
+        email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
+        phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
+      },
+    });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
@@ -622,6 +781,8 @@ router.post('/razorpay-webhook', async (req, res) => {
         total_amount: recharge.totalAmount,
         razorpay_order_id: orderId,
         razorpay_payment_id: paymentId,
+        razorpay_invoice_id: invoice?.id || null,
+        razorpay_invoice_short_url: invoice?.short_url || null,
         webhook_event: event.event,
         previous_ai_message_balance: currentBalance,
         next_ai_message_balance: nextBalance,
@@ -638,6 +799,7 @@ router.post('/razorpay-webhook', async (req, res) => {
       razorpayPaymentId: paymentId,
       previousBalance: currentBalance,
       nextBalance,
+      invoice,
       source: 'razorpay_webhook',
     });
 
