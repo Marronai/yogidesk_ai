@@ -43,7 +43,10 @@ const WalletRechargeModal = ({ isOpen, onClose, onSuccess, userId }) => {
       // Create Razorpay order
       const { data } = await api.post('/payments/wallet/create-order', {
         userId,
-        amount: selectedAmount
+        amount: selectedAmount,
+        name: localStorage.getItem('user_name') || 'Doctor',
+        email: localStorage.getItem('user_email') || '',
+        phone: localStorage.getItem('user_phone') || '',
       });
 
       if (!data.success || !data.order_id) {
@@ -86,12 +89,18 @@ const WalletRechargeModal = ({ isOpen, onClose, onSuccess, userId }) => {
           }
         },
         prefill: {
-          contact: '',
-          email: ''
+          name: localStorage.getItem('user_name') || 'Doctor',
+          contact: localStorage.getItem('user_phone') || '',
+          email: localStorage.getItem('user_email') || ''
         },
         notes: {
           wallet_recharge: true,
-          amount: selectedAmount
+          purpose: 'wallet_recharge',
+          recharge_type: 'CUSTOM_WALLET',
+          amount: selectedAmount,
+          doctor_name: localStorage.getItem('user_name') || 'Doctor',
+          doctor_email: localStorage.getItem('user_email') || '',
+          doctor_phone: localStorage.getItem('user_phone') || ''
         }
       };
 

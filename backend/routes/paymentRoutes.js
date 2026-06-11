@@ -5,6 +5,14 @@ const Razorpay = require('razorpay');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { supabaseAdmin, supabase } = require('../config/supabase');
 const { createWalletOrder, verifyWalletPayment } = require('../controllers/walletController');
+const {
+  buildFixedPlanLineItems,
+  buildWalletRechargeLineItems,
+  calculateMetaFee: calculateSharedMetaFee,
+  createRazorpayNativeInvoice,
+  normalizeInvoiceContact: normalizeSharedInvoiceContact,
+  toPaise: sharedToPaise,
+} = require('../services/razorpayInvoiceService');
 
 const router = express.Router();
 const db = supabaseAdmin || supabase;
@@ -131,7 +139,7 @@ const createRazorpayAiInvoice = async ({ client, userId, recharge, razorpayOrder
 
     if (metaFee > 0) {
       lineItems.push({
-        name: 'Infrastructure Platform Processing Fee',
+        name: 'Meta Fee (Infrastructure & Platform Charges)',
         description: 'Dynamic 2.36% compute and payment processing fee',
         amount: toPaise(metaFee),
         currency: 'INR',
@@ -260,6 +268,122 @@ const getRazorpayErrorMessage = (error) => (
   'Razorpay initialization failed'
 );
 
+const buildDoctorBillingFallback = (doctor = {}, body = {}) => {
+  const metadata = doctor.user_metadata || {};
+  return {
+    name: metadata.full_name || metadata.name || body.doctorName || body.name || 'Doctor',
+    email: doctor.email || body.email || '',
+    phone: normalizeSharedInvoiceContact(metadata.phone || body.phone || body.contact || ''),
+    clinic_name: metadata.clinic_name || metadata.clinicName || body.clinic_name || body.clinicName || '',
+  };
+};
+
+const resolveSubscriptionRechargeFromOrder = async ({ client, orderId, fallbackPlanId = '' }) => {
+  const order = await client.orders.fetch(orderId);
+  const notes = order?.notes || {};
+  const planId = String(notes.plan_id || fallbackPlanId || '').trim().toLowerCase();
+  const verifiedPlan = SECURE_PLAN_CATALOG[planId] || null;
+  const subtotal = Number(notes.subtotal || (verifiedPlan ? verifiedPlan.amountPaise / 100 : 0));
+  const metaFee = Number(notes.meta_fee || calculateSharedMetaFee(subtotal));
+  return {
+    order,
+    userId: String(notes.doctor_id || notes.userId || '').trim(),
+    planId: verifiedPlan?.planId || planId,
+    tier: notes.tier || verifiedPlan?.tier || '',
+    packageLabel: notes.package_label || notes.planName || verifiedPlan?.label || 'YogiDesk Fixed Plan',
+    subtotal,
+    metaFee,
+    totalAmount: Number(notes.total_amount || (subtotal + metaFee)),
+    doctorName: notes.doctor_name || '',
+    doctorEmail: notes.doctor_email || notes.email || '',
+    doctorPhone: notes.doctor_phone || '',
+    clinicName: notes.clinic_name || '',
+  };
+};
+
+const resolveWalletRechargeFromOrder = async ({ order }) => {
+  const notes = order?.notes || {};
+  const subtotal = Number(notes.subtotal || notes.amount || 0);
+  const metaFee = Number(notes.meta_fee || calculateSharedMetaFee(subtotal));
+  return {
+    order,
+    userId: String(notes.user_id || notes.doctor_id || '').trim(),
+    subtotal,
+    metaFee,
+    totalAmount: Number(notes.total_amount || (subtotal + metaFee)),
+    doctorName: notes.doctor_name || '',
+    doctorEmail: notes.doctor_email || '',
+    doctorPhone: notes.doctor_phone || '',
+    clinicName: notes.clinic_name || '',
+  };
+};
+
+const createFixedPlanInvoice = async ({ client, userId, plan, razorpayOrderId, razorpayPaymentId, fallbackDoctor = {} }) => (
+  createRazorpayNativeInvoice({
+    razorpay: client,
+    db,
+    supabaseAdmin,
+    userId,
+    rechargeType: 'FIXED_PLAN',
+    principalAmount: plan.subtotal,
+    calculatedLineItems: buildFixedPlanLineItems({
+      packageName: plan.packageLabel,
+      principalAmount: plan.subtotal,
+    }),
+    customerFallback: fallbackDoctor,
+    notes: {
+      purpose: 'subscription',
+      plan_id: plan.planId,
+      tier: plan.tier,
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+    },
+  })
+);
+
+const createWalletRechargeInvoice = async ({ client, userId, recharge, razorpayOrderId, razorpayPaymentId, fallbackDoctor = {} }) => (
+  createRazorpayNativeInvoice({
+    razorpay: client,
+    db,
+    supabaseAdmin,
+    userId,
+    rechargeType: 'CUSTOM_WALLET',
+    principalAmount: recharge.subtotal,
+    calculatedLineItems: buildWalletRechargeLineItems({ principalAmount: recharge.subtotal }),
+    customerFallback: fallbackDoctor,
+    notes: {
+      purpose: 'wallet_recharge',
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+    },
+  })
+);
+
+const creditWalletRecharge = async ({ userId, amount }) => {
+  const { data: walletRow, error: walletError } = await db
+    .from('wallets')
+    .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (walletError) throw walletError;
+
+  const currentBalance = Number(walletRow?.balance || 0);
+  const nextBalance = Number((currentBalance + amount).toFixed(2));
+  const { error: upsertError } = await db.from('wallets').upsert({
+    user_id: userId,
+    balance: nextBalance,
+    is_first_recharge: false,
+    welcome_gift_active: walletRow?.welcome_gift_active ?? false,
+    current_plan: walletRow?.current_plan || 'starter',
+    plan_tier: walletRow?.plan_tier || 'starter',
+    lifetime_contacts_count: Number(walletRow?.lifetime_contacts_count || 0),
+  }, { onConflict: 'user_id' });
+
+  if (upsertError) throw upsertError;
+  return { currentBalance, nextBalance };
+};
+
 router.post('/create-order', async (req, res) => {
   try {
     const doctor = await resolveAuthenticatedDoctor(req);
@@ -275,8 +399,12 @@ router.post('/create-order', async (req, res) => {
     }
 
     const { keyId, client } = getRazorpayClient();
+    const subtotal = Number((verifiedPlan.amountPaise / 100).toFixed(2));
+    const metaFee = calculateSharedMetaFee(subtotal);
+    const totalAmount = Number((subtotal + metaFee).toFixed(2));
+    const billingFallback = buildDoctorBillingFallback(doctor, req.body);
     const order = await client.orders.create({
-      amount: verifiedPlan.amountPaise,
+      amount: sharedToPaise(totalAmount),
       currency: 'INR',
       receipt: createShortReceipt(),
       notes: {
@@ -284,6 +412,15 @@ router.post('/create-order', async (req, res) => {
         plan_id: verifiedPlan.planId,
         tier: verifiedPlan.tier,
         purpose: 'subscription',
+        recharge_type: 'FIXED_PLAN',
+        package_label: verifiedPlan.label,
+        subtotal: subtotal.toFixed(2),
+        meta_fee: metaFee.toFixed(2),
+        total_amount: totalAmount.toFixed(2),
+        clinic_name: billingFallback.clinic_name,
+        doctor_name: billingFallback.name,
+        doctor_email: billingFallback.email,
+        doctor_phone: billingFallback.phone,
       },
     });
 
@@ -295,6 +432,9 @@ router.post('/create-order', async (req, res) => {
       key_id: keyId,
       planId: verifiedPlan.planId,
       planName: verifiedPlan.label,
+      subtotal,
+      metaFee,
+      totalAmount,
     });
   } catch (error) {
     logRazorpayOrderError(error, { planId: req.body?.planId || null });
@@ -315,17 +455,31 @@ router.post('/razorpay-subscription-session', async (req, res) => {
     }
 
     const { keyId, client } = getRazorpayClient();
+    const subtotal = Number((verifiedPlan.amountPaise / 100).toFixed(2));
+    const metaFee = calculateSharedMetaFee(subtotal);
+    const totalAmount = Number((subtotal + metaFee).toFixed(2));
+    const billingFallback = buildDoctorBillingFallback(doctor, req.body);
     const order = await client.orders.create({
-      amount: verifiedPlan.amountPaise,
+      amount: sharedToPaise(totalAmount),
       currency: 'INR',
       receipt: createShortReceipt(),
       notes: {
         userId: doctor.id,
+        doctor_id: doctor.id,
         plan_id: verifiedPlan.planId,
         tier: verifiedPlan.tier,
         planName: verifiedPlan.label,
-        email: doctor.email || '',
+        package_label: verifiedPlan.label,
+        email: billingFallback.email,
         purpose: 'subscription',
+        recharge_type: 'FIXED_PLAN',
+        subtotal: subtotal.toFixed(2),
+        meta_fee: metaFee.toFixed(2),
+        total_amount: totalAmount.toFixed(2),
+        clinic_name: billingFallback.clinic_name,
+        doctor_name: billingFallback.name,
+        doctor_email: billingFallback.email,
+        doctor_phone: billingFallback.phone,
       },
     });
 
@@ -360,18 +514,47 @@ router.post('/verify-razorpay-subscription', async (req, res) => {
       return res.status(400).json({ success: false, msg: 'Invalid Razorpay signature.' });
     }
 
+    const { client } = getRazorpayClient();
+    const plan = await resolveSubscriptionRechargeFromOrder({
+      client,
+      orderId: razorpayOrderId,
+      fallbackPlanId: req.body?.planId,
+    });
+    const invoiceUserId = plan.userId || userId;
     const paymentReference = `${razorpayOrderId}:${razorpayPaymentId}`;
     const profile = await activateSubscriptionTier({ db, userId, tier, paymentReference });
+    const invoice = await createFixedPlanInvoice({
+      client,
+      userId: invoiceUserId,
+      plan,
+      razorpayOrderId,
+      razorpayPaymentId,
+      fallbackDoctor: {
+        name: plan.doctorName || req.body?.doctorName || req.body?.name,
+        email: plan.doctorEmail || req.body?.email,
+        phone: plan.doctorPhone || req.body?.phone,
+        clinic_name: plan.clinicName || req.body?.clinic_name || req.body?.clinicName,
+      },
+    });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
-      amount: Number(req.body?.amount || 0),
+      amount: Number(plan.subtotal || req.body?.amount || 0),
       transaction_type: 'SUBSCRIPTION',
       description: `Razorpay subscription activation successful: ${razorpayPaymentId}`,
       metadata: {
         provider: 'razorpay',
+        purpose: 'subscription',
+        recharge_type: 'FIXED_PLAN',
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
+        razorpay_invoice_id: invoice?.id || null,
+        razorpay_invoice_short_url: invoice?.short_url || null,
+        plan_id: plan.planId,
+        plan_name: plan.packageLabel,
+        subtotal: plan.subtotal,
+        meta_fee: plan.metaFee,
+        total_amount: plan.totalAmount,
         tier,
       },
       created_at: new Date().toISOString(),
@@ -727,6 +910,130 @@ router.post('/razorpay-webhook', async (req, res) => {
     }
 
     const { client } = getRazorpayClient();
+    const capturedOrder = await client.orders.fetch(orderId);
+    const capturedNotes = capturedOrder?.notes || {};
+    const capturedPurpose = String(payment?.notes?.purpose || capturedNotes.purpose || '').trim();
+    const capturedRechargeType = String(payment?.notes?.recharge_type || capturedNotes.recharge_type || '').trim();
+
+    if (capturedPurpose === 'subscription' || capturedRechargeType === 'FIXED_PLAN') {
+      const plan = await resolveSubscriptionRechargeFromOrder({ client, orderId });
+      const userId = plan.userId || String(payment?.notes?.doctor_id || payment?.notes?.userId || payment?.notes?.user_id || '').trim();
+      if (!userId || !plan.planId || !Number.isFinite(Number(plan.subtotal)) || Number(plan.subtotal) <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid subscription webhook payload.' });
+      }
+
+      const { data: existingTransaction, error: existingTransactionError } = await db
+        .from('wallet_transactions')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('metadata->>razorpay_payment_id', paymentId)
+        .maybeSingle();
+
+      if (existingTransactionError) console.error('Subscription webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
+      if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
+      const paymentReference = `${orderId}:${paymentId}`;
+      await activateSubscriptionTier({ db, userId, tier: plan.tier || payment?.notes?.tier || 'GROWTH', paymentReference });
+      const invoice = await createFixedPlanInvoice({
+        client,
+        userId,
+        plan,
+        razorpayOrderId: orderId,
+        razorpayPaymentId: paymentId,
+        fallbackDoctor: {
+          name: plan.doctorName || payment?.notes?.doctor_name,
+          email: plan.doctorEmail || payment?.email || payment?.notes?.doctor_email,
+          phone: plan.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
+          clinic_name: plan.clinicName || payment?.notes?.clinic_name,
+        },
+      });
+
+      await db.from('wallet_transactions').insert([{
+        user_id: userId,
+        amount: Number(plan.subtotal || 0),
+        transaction_type: 'SUBSCRIPTION',
+        description: `Razorpay subscription activation successful: ${paymentId}`,
+        metadata: {
+          provider: 'razorpay',
+          purpose: 'subscription',
+          recharge_type: 'FIXED_PLAN',
+          plan_id: plan.planId,
+          plan_name: plan.packageLabel,
+          tier: plan.tier,
+          subtotal: plan.subtotal,
+          meta_fee: plan.metaFee,
+          total_amount: plan.totalAmount,
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_invoice_id: invoice?.id || null,
+          razorpay_invoice_short_url: invoice?.short_url || null,
+          webhook_event: event.event,
+        },
+        created_at: new Date().toISOString(),
+      }]);
+
+      return res.status(200).json({ success: true });
+    }
+
+    if (capturedPurpose === 'wallet_recharge' || capturedRechargeType === 'CUSTOM_WALLET') {
+      const recharge = resolveWalletRechargeFromOrder({ order: capturedOrder });
+      const userId = recharge.userId || String(payment?.notes?.user_id || payment?.notes?.doctor_id || '').trim();
+      const amount = Number(recharge.subtotal || 0);
+      if (!userId || !Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT) {
+        return res.status(400).json({ success: false, message: 'Invalid wallet recharge webhook payload.' });
+      }
+
+      const { data: existingTransaction, error: existingTransactionError } = await db
+        .from('wallet_transactions')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('metadata->>razorpay_payment_id', paymentId)
+        .maybeSingle();
+
+      if (existingTransactionError) console.error('Wallet webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
+      if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
+      const { currentBalance, nextBalance } = await creditWalletRecharge({ userId, amount });
+      const invoice = await createWalletRechargeInvoice({
+        client,
+        userId,
+        recharge,
+        razorpayOrderId: orderId,
+        razorpayPaymentId: paymentId,
+        fallbackDoctor: {
+          name: recharge.doctorName || payment?.notes?.doctor_name,
+          email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
+          phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
+          clinic_name: recharge.clinicName || payment?.notes?.clinic_name,
+        },
+      });
+
+      await db.from('wallet_transactions').insert([{
+        user_id: userId,
+        amount,
+        transaction_type: 'CREDIT',
+        description: `Razorpay wallet recharge successful: ${paymentId}`,
+        metadata: {
+          provider: 'razorpay',
+          purpose: 'wallet_recharge',
+          recharge_type: 'CUSTOM_WALLET',
+          subtotal: recharge.subtotal,
+          meta_fee: recharge.metaFee,
+          total_amount: recharge.totalAmount,
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          razorpay_invoice_id: invoice?.id || null,
+          razorpay_invoice_short_url: invoice?.short_url || null,
+          webhook_event: event.event,
+          previous_balance: currentBalance,
+          next_balance: nextBalance,
+        },
+        created_at: new Date().toISOString(),
+      }]);
+
+      return res.status(200).json({ success: true });
+    }
+
     const recharge = await resolveAiRechargeFromOrder({ client, orderId });
     if (payment?.notes?.purpose !== 'ai_message_recharge' && recharge.order?.notes?.purpose !== 'ai_message_recharge') {
       return res.status(200).json({ success: true, skipped: true });

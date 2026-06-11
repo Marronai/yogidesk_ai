@@ -1,8 +1,16 @@
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const { supabaseAdmin, supabase } = require('../config/supabase');
+const {
+  buildWalletRechargeLineItems,
+  calculateMetaFee,
+  createRazorpayNativeInvoice,
+  normalizeInvoiceContact,
+  toPaise,
+} = require('../services/razorpayInvoiceService');
 
 const db = supabaseAdmin || supabase;
+const WALLET_MIN_RECHARGE_AMOUNT = 100;
 
 const getRazorpayCredentials = () => ({
   keyId: String(process.env.RAZORPAY_KEY_ID || '').trim(),
@@ -33,6 +41,24 @@ const parseWalletAmount = (value) => {
   return Number.isFinite(amount) ? amount : null;
 };
 
+const resolveWalletRechargeFromOrder = async ({ client, orderId, fallbackAmount = 0 }) => {
+  const order = await client.orders.fetch(orderId);
+  const notes = order?.notes || {};
+  const subtotal = Number(notes.subtotal || notes.amount || fallbackAmount || 0);
+  const metaFee = Number(notes.meta_fee || calculateMetaFee(subtotal));
+  return {
+    order,
+    userId: String(notes.user_id || notes.doctor_id || '').trim(),
+    subtotal,
+    metaFee,
+    totalAmount: Number(notes.total_amount || (subtotal + metaFee)),
+    doctorName: notes.doctor_name || '',
+    doctorEmail: notes.doctor_email || '',
+    doctorPhone: notes.doctor_phone || '',
+    clinicName: notes.clinic_name || '',
+  };
+};
+
 const maskTokenText = (value) => String(value || '').replace(/\bTokens?\b/gi, 'Messages');
 
 const sanitizePassbookRowForUi = (row = {}) => ({
@@ -49,6 +75,8 @@ const sanitizePassbookRowForUi = (row = {}) => ({
     messages_delta: row.messages_delta,
     razorpay_payment_id: row.metadata?.razorpay_payment_id,
     razorpay_order_id: row.metadata?.razorpay_order_id,
+    razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
+    razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
     meta_fee: row.metadata?.meta_fee,
     total_amount: row.metadata?.total_amount,
   },
@@ -67,25 +95,38 @@ const createWalletOrder = async (req, res) => {
       });
     }
 
-    if (!Number.isFinite(amount) || amount < 10) {
+    if (!Number.isFinite(amount) || amount < WALLET_MIN_RECHARGE_AMOUNT) {
       return res.status(400).json({
         success: false,
-        message: 'Minimum wallet recharge amount is Rs. 10.',
+        message: 'Minimum wallet recharge amount is Rs. 100.',
       });
     }
 
     const { keyId, client } = getRazorpayClient();
-    const amountInPaise = Math.round(amount * 100);
+    const metaFee = calculateMetaFee(amount);
+    const totalAmount = Number((amount + metaFee).toFixed(2));
     const walletReceipt = createWalletReceipt();
+    const doctorName = String(req.body?.doctorName || req.body?.name || req.body?.firstname || 'Doctor').trim();
+    const doctorEmail = String(req.body?.doctorEmail || req.body?.email || '').trim();
+    const doctorPhone = normalizeInvoiceContact(req.body?.doctorPhone || req.body?.phone || req.body?.contact || '');
+    const clinicName = String(req.body?.clinic_name || req.body?.clinicName || '').trim();
 
     const order = await client.orders.create({
-      amount: amountInPaise,
+      amount: toPaise(totalAmount),
       currency: 'INR',
       receipt: walletReceipt,
       notes: {
         user_id: userId,
         purpose: 'wallet_recharge',
+        recharge_type: 'CUSTOM_WALLET',
         amount: amount.toFixed(2),
+        subtotal: amount.toFixed(2),
+        meta_fee: metaFee.toFixed(2),
+        total_amount: totalAmount.toFixed(2),
+        clinic_name: clinicName,
+        doctor_name: doctorName,
+        doctor_email: doctorEmail,
+        doctor_phone: doctorPhone,
       },
     });
 
@@ -96,6 +137,9 @@ const createWalletOrder = async (req, res) => {
       currency: order.currency,
       key_id: keyId,
       receipt: walletReceipt,
+      subtotal: amount,
+      metaFee,
+      totalAmount,
     });
   } catch (error) {
     console.error('[YogiDesk Wallet] Razorpay order creation failed:', {
@@ -124,7 +168,7 @@ const verifyWalletPayment = async (req, res) => {
     }
 
     const userId = String(req.body?.userId || '').trim();
-    const amount = parseWalletAmount(req.body?.amount);
+    const requestAmount = parseWalletAmount(req.body?.amount);
     const razorpayOrderId = String(req.body?.razorpay_order_id || '').trim();
     const razorpayPaymentId = String(req.body?.razorpay_payment_id || '').trim();
     const razorpaySignature = String(req.body?.razorpay_signature || '').trim();
@@ -133,13 +177,6 @@ const verifyWalletPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Missing payment verification fields.',
-      });
-    }
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid payment amount.',
       });
     }
 
@@ -157,6 +194,27 @@ const verifyWalletPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Invalid payment signature.',
+      });
+    }
+
+    const { client } = getRazorpayClient();
+    const recharge = await resolveWalletRechargeFromOrder({
+      client,
+      orderId: razorpayOrderId,
+      fallbackAmount: requestAmount,
+    });
+    const amount = Number(recharge.subtotal || 0);
+
+    if (!Number.isFinite(amount) || amount < WALLET_MIN_RECHARGE_AMOUNT) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimum wallet recharge amount is Rs. 100.',
+      });
+    }
+    if (recharge.userId && recharge.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Payment order does not belong to this user.',
       });
     }
 
@@ -200,6 +258,26 @@ const verifyWalletPayment = async (req, res) => {
     }, { onConflict: 'user_id' });
 
     if (upsertError) throw upsertError;
+    const invoice = await createRazorpayNativeInvoice({
+      razorpay: client,
+      db,
+      supabaseAdmin,
+      userId,
+      rechargeType: 'CUSTOM_WALLET',
+      principalAmount: amount,
+      calculatedLineItems: buildWalletRechargeLineItems({ principalAmount: amount }),
+      customerFallback: {
+        name: recharge.doctorName || req.body?.doctorName || req.body?.name,
+        email: recharge.doctorEmail || req.body?.email,
+        phone: recharge.doctorPhone || req.body?.phone,
+        clinic_name: recharge.clinicName || req.body?.clinic_name || req.body?.clinicName,
+      },
+      notes: {
+        purpose: 'wallet_recharge',
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+      },
+    });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
@@ -208,8 +286,14 @@ const verifyWalletPayment = async (req, res) => {
       description: `Razorpay wallet recharge successful: ${razorpayPaymentId}`,
       metadata: {
         provider: 'razorpay',
+        purpose: 'wallet_recharge',
+        recharge_type: 'CUSTOM_WALLET',
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
+        razorpay_invoice_id: invoice?.id || null,
+        razorpay_invoice_short_url: invoice?.short_url || null,
+        meta_fee: recharge.metaFee,
+        total_amount: recharge.totalAmount,
         previous_balance: currentBalance,
         next_balance: newBalance,
       },
@@ -223,6 +307,8 @@ const verifyWalletPayment = async (req, res) => {
       message: 'Payment verified and wallet credited successfully.',
       newBalance,
       amount,
+      metaFee: recharge.metaFee,
+      totalAmount: recharge.totalAmount,
     });
   } catch (error) {
     console.error('[YogiDesk Wallet] Payment verification error:', error.message || error);
@@ -282,6 +368,8 @@ const getWalletTransactions = async (req, res) => {
             ai_messages: row.metadata?.ai_messages,
             razorpay_payment_id: row.metadata?.razorpay_payment_id,
             razorpay_order_id: row.metadata?.razorpay_order_id,
+            razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
+            razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
             meta_fee: row.metadata?.meta_fee,
             total_amount: row.metadata?.total_amount,
           },

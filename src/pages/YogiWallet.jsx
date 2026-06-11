@@ -90,9 +90,9 @@ const YogiWallet = () => {
       setPaymentError('Unable to identify your account. Please login again.');
       return;
     }
-    if (!Number.isFinite(rechargeAmount) || rechargeAmount < 10) {
-      setPaymentError('Minimum recharge amount is Rs. 10.');
-      alert('Minimum recharge amount is Rs. 10.');
+    if (!Number.isFinite(rechargeAmount) || rechargeAmount < 100) {
+      setPaymentError('Minimum recharge amount is Rs. 100.');
+      alert('Minimum recharge amount is Rs. 100.');
       return;
     }
     if (!profile.email) {
@@ -111,6 +111,9 @@ const YogiWallet = () => {
       const { data } = await api.post('/api/wallet/create-order', {
         userId,
         amount: amountInput,
+        name: profile.firstname,
+        email: profile.email,
+        phone: profile.phone,
       });
 
       if (!data?.success || !data?.order_id) {
@@ -135,7 +138,11 @@ const YogiWallet = () => {
         notes: {
           user_id: userId,
           purpose: 'wallet_recharge',
+          recharge_type: 'CUSTOM_WALLET',
           amount: amountInput,
+          doctor_name: profile.firstname,
+          doctor_email: profile.email,
+          doctor_phone: profile.phone,
         },
         handler: async (response) => {
           try {
