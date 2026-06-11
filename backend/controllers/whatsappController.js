@@ -93,7 +93,7 @@ const GEMINI_429_RETRY_DELAY_MS = 10000;
 const geminiProcessingCache = new Map();
 const geminiResultCache = new Map();
 const geminiPatientDebounceQueue = new Map();
-const GEMINI_MODEL_NAME = 'gemini-2.5-flash';
+const GEMINI_MODEL_NAME = 'gemini-3.1-flash-lite';
 const GEMINI_REPORT_ESCALATION_REPLY = 'Main aapka appointment Dr. Sahab ke sath book kar deti hoon, wo live aapki reports check karke aapko sahi aur sateek salah denge. Kya main aapka slot confirm karoon?';
 const BASELINE_GEMINI_SYSTEM_INSTRUCTION = [
     'You are a polite, empathetic, professional female Clinic Desk Receptionist and Patient Care Assistant.',
@@ -101,21 +101,10 @@ const BASELINE_GEMINI_SYSTEM_INSTRUCTION = [
     'Handle patient inquiries, doctor availability, clinic details, and appointment coordination only.',
     'Never provide official prescriptions, independent diagnosis, lab-report conclusions, or treatment decisions.'
 ].join('\n');
-let currentKeyIndex = 0;
-
-const getGeminiKeysPool = () => {
-    const sequentialKeys = Array.from({ length: 7 }, (_, index) => (
-        String(process.env[`GEMINI_KEY_${index + 1}`] || '').trim()
-    )).filter(Boolean);
-    const legacyKey = String(process.env.GEMINI_API_KEY || '').trim();
-    return uniqueValues(sequentialKeys.length ? sequentialKeys : [legacyKey]);
-};
 
 const getNextGeminiModel = () => {
-    const keysPool = getGeminiKeysPool();
-    if (keysPool.length === 0) throw new Error('Gemini API key missing. Set GEMINI_KEY_1 through GEMINI_KEY_7.');
-    const apiKey = keysPool[currentKeyIndex % keysPool.length];
-    currentKeyIndex = (currentKeyIndex + 1) % keysPool.length;
+    const apiKey = String(process.env.GEMINI_3_1_FLASH_LITE_KEY || '').trim();
+    if (!apiKey) throw new Error('Gemini API key missing. Set GEMINI_3_1_FLASH_LITE_KEY.');
     const genAI = new GoogleGenerativeAI(apiKey);
     return genAI.getGenerativeModel({
         model: GEMINI_MODEL_NAME,
@@ -136,15 +125,9 @@ const generateGeminiContentWithRetry = async (prompt) => {
         return await getNextGeminiModel().generateContent(prompt);
     } catch (error) {
         if (!isGeminiRateLimitError(error)) throw error;
-        console.warn('[YogiDesk Secure AI] Gemini key rate-limited; retrying with next key.');
-        try {
-            return await getNextGeminiModel().generateContent(prompt);
-        } catch (retryError) {
-            if (!isGeminiRateLimitError(retryError)) throw retryError;
-            console.warn('[YogiDesk Secure AI] Gemini retry key rate-limited; queueing delayed retry.');
-            await wait(GEMINI_429_RETRY_DELAY_MS);
-            return getNextGeminiModel().generateContent(prompt);
-        }
+        console.warn('[YogiDesk Secure AI] Gemini model rate-limited; queueing delayed retry on the configured production key.');
+        await wait(GEMINI_429_RETRY_DELAY_MS);
+        return getNextGeminiModel().generateContent(prompt);
     }
 };
 
@@ -196,7 +179,8 @@ const buildGeminiSystemInstruction = (dbData = {}) => [
     `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
     '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
     '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When a patient explicitly confirms a preferred date and time slot for an appointment, you MUST automatically invoke the `bookPatientAppointment` function tool passing the patient\'s parsed credentials. If native tool calling is unavailable in this channel, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end so the booking hook can execute securely.',
-    '6. Appointment date rule: The absolute date for the appointment. You MUST dynamically compute this relative to today\'s date (Current Date: 2026-06-10) and output it strictly in \'YYYY-MM-DD\' format. Never pass relative text strings like \'tomorrow\', \'parso\', or \'The day after tomorrow\'.'
+    '6. Appointment date rule: The absolute date for the appointment. You MUST dynamically compute this relative to today\'s date (Current Date: 2026-06-10) and output it strictly in \'YYYY-MM-DD\' format. Never pass relative text strings like \'tomorrow\', \'parso\', or \'The day after tomorrow\'.',
+    '7. Appointment time rule: The exact scheduled time slot for the appointment. You MUST dynamically parse relative spoken time expressions from the patient (e.g., \'2 PM\', \'3 baje dopehar ko\', \'4:30 pm\') and transform them strictly into 24-hour HH:MM format (e.g., \'14:00\', \'15:00\', \'16:30\'). Never pass \'PM\', \'AM\', or unformatted strings raw to the handler.'
 ].join('\n');
 
 const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
@@ -613,7 +597,52 @@ const parseRelativeAppointmentDate = (value) => {
 };
 
 const normalizeAppointmentDateValue = (value) => parseRelativeAppointmentDate(value);
-const normalizeAppointmentTimeValue = (value) => sanitizeGeminiContextValue(value, '', 40);
+const toTimeString = (hours, minutes = 0) => {
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return '';
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return '';
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+};
+
+const normalizeAppointmentTimeValue = (value) => {
+    const rawValue = sanitizeGeminiContextValue(value, '', 40);
+    if (!rawValue) return '';
+
+    const strictMatch = rawValue.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+    if (strictMatch) return toTimeString(Number(strictMatch[1]), Number(strictMatch[2]));
+
+    let rawTime = rawValue.trim().toUpperCase();
+    rawTime = rawTime
+        .replace(/\bDOPEHAR\b/g, 'PM')
+        .replace(/\bDOPAHAR\b/g, 'PM')
+        .replace(/\bSHAAM\b/g, 'PM')
+        .replace(/\bSHAM\b/g, 'PM')
+        .replace(/\bSUBAH\b/g, 'AM')
+        .replace(/\bSAVERE\b/g, 'AM')
+        .replace(/\bBAJE\b/g, '')
+        .replace(/\bO'?CLOCK\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const meridiemMatch = rawTime.match(/(\d{1,2})(?::(\d{1,2}))?\s*(AM|PM)\b/);
+    if (meridiemMatch) {
+        let hours = Number(meridiemMatch[1]);
+        const minutes = meridiemMatch[2] ? Number(meridiemMatch[2]) : 0;
+        const isPm = meridiemMatch[3] === 'PM';
+        if (isPm && hours < 12) hours += 12;
+        if (!isPm && hours === 12) hours = 0;
+        return toTimeString(hours, minutes);
+    }
+
+    const spokenMatch = rawTime.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+    if (spokenMatch) {
+        let hours = Number(spokenMatch[1]);
+        const minutes = spokenMatch[2] ? Number(spokenMatch[2]) : 0;
+        if (hours >= 1 && hours <= 9) hours += 12;
+        return toTimeString(hours, minutes);
+    }
+
+    return '';
+};
 const normalizeAppointmentNameValue = (value) => sanitizeGeminiContextValue(value, 'Patient', 120);
 
 const resolveDoctorNotificationPhone = (doctor = {}) => {
@@ -813,20 +842,45 @@ const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
         .catch((error) => console.error('Gemini appointment async save crashed:', error.message || error));
 };
 
-const incrementDoctorTokenUsage = async ({ doctorId, currentUsed = 0, table = 'doctors', incrementBy = 1 }) => {
-    const db = supabaseAdmin || supabase;
-    if (!db?.from || !doctorId) return;
-
-    const safeTable = ['doctors', 'doctor_profiles', 'profiles'].includes(table) ? table : 'doctors';
-    const nextUsed = Number(currentUsed || 0) + Math.max(1, Number(incrementBy || 1));
-    const update = await db
-        .from(safeTable)
-        .update({ token_used: nextUsed })
-        .eq('id', doctorId);
-    if (update.error) console.warn(`Gemini token usage increment failed in ${safeTable}:`, update.error.message || update.error);
+const calculateAiMessageCreditsFromTokens = (totalTokenCount) => {
+    const totalTokens = Math.max(1, Math.ceil(Number(totalTokenCount || 0)));
+    return Math.max(1, Math.ceil(totalTokens / 100));
 };
 
-const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, messageCost = 1 }) => {
+const insertWalletPassbookEntry = async ({
+    doctorId,
+    patientPhone,
+    entryType,
+    amount = 0,
+    messagesDelta = 0,
+    description,
+    metadata = {}
+}) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !doctorId) return { success: false, reason: 'database_unavailable' };
+
+    const safeDescription = String(description || '').replace(/\bTokens?\b/gi, 'Messages').trim();
+    const { error } = await db.from('wallet_passbook').insert([{
+        user_id: doctorId,
+        doctor_id: doctorId,
+        patient_number: patientPhone ? phoneDigitsOnly(patientPhone) : null,
+        entry_type: entryType,
+        amount: Number(amount || 0),
+        messages_delta: Number(messagesDelta || 0),
+        description: safeDescription,
+        metadata,
+        created_at: new Date().toISOString()
+    }]);
+
+    if (error) {
+        if (!isSchemaCacheError(error)) console.warn('Wallet passbook insert failed:', error.message || error);
+        return { success: false, reason: 'insert_failed', error };
+    }
+
+    return { success: true };
+};
+
+const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, patientPhone = '' }) => {
     const db = supabaseAdmin || supabase;
     const doctorId = doctor.id;
     if (!db?.from || !doctorId) return { success: false, reason: 'database_unavailable' };
@@ -840,12 +894,12 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, me
         0
     );
     const currentUsed = Number(doctor.ai_message_used ?? doctor.aiMessageUsed ?? doctor.token_used ?? 0);
-    const creditsToDeduct = Math.max(1, Number(messageCost || 1));
-    const nextBalance = Math.max(0, currentBalance - creditsToDeduct);
-    const nextUsed = currentUsed + creditsToDeduct;
     const inputTokens = Number(usageMetadata.promptTokenCount || usageMetadata.inputTokenCount || 0);
     const outputTokens = Number(usageMetadata.candidatesTokenCount || usageMetadata.outputTokenCount || 0);
     const totalTokens = Number(usageMetadata.totalTokenCount || inputTokens + outputTokens || 0);
+    const creditsToDeduct = calculateAiMessageCreditsFromTokens(totalTokens);
+    const nextBalance = Math.max(0, currentBalance - creditsToDeduct);
+    const nextUsed = currentUsed + creditsToDeduct;
     const lastAiUsage = {
         provider: 'gemini',
         model: GEMINI_MODEL_NAME,
@@ -855,6 +909,7 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, me
         credits_deducted: creditsToDeduct,
         charged_at: new Date().toISOString()
     };
+    const passbookDescription = `${phoneDigitsOnly(patientPhone) || 'Patient'} - AI Conversation Response Session: -${creditsToDeduct} Messages Deducted`;
 
     const payload = {
         ai_message_balance: nextBalance,
@@ -863,7 +918,19 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, me
         last_ai_usage: lastAiUsage
     };
 
-    let update = await db.from(safeTable).update(payload).eq('id', doctorId);
+    let update = { error: null, data: null };
+    if (db.rpc) {
+        update = await db.rpc('debit_ai_message_balance', {
+            p_user_id: doctorId,
+            p_messages: creditsToDeduct,
+            p_usage: lastAiUsage
+        });
+    }
+
+    if (update.error) {
+        console.warn('AI message RPC deduction unavailable, falling back to guarded profile update:', update.error.message || update.error);
+        update = await db.from(safeTable).update(payload).eq('id', doctorId).gt('ai_message_balance', 0);
+    }
     if (update.error && isSchemaCacheError(update.error)) {
         const fallbackPayload = {
             ai_message_balance: nextBalance,
@@ -884,10 +951,24 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, me
         return { success: false, reason: 'update_failed', error: update.error };
     }
 
+    await insertWalletPassbookEntry({
+        doctorId,
+        patientPhone,
+        entryType: 'AI_MESSAGE_DEBIT',
+        messagesDelta: -creditsToDeduct,
+        description: passbookDescription,
+        metadata: {
+            provider: 'gemini',
+            model: GEMINI_MODEL_NAME,
+            usage: lastAiUsage
+        }
+    });
+
     return {
         success: true,
         aiMessageBalance: nextBalance,
         aiMessageUsed: nextUsed,
+        messagesDeducted: creditsToDeduct,
         usage: lastAiUsage
     };
 };
@@ -1373,7 +1454,7 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                         const creditDebit = await deductDoctorAiMessageCredit({
                             doctor,
                             usageMetadata: geminiResult.usageMetadata || {},
-                            messageCost: 1
+                            patientPhone: inbound.fromPhone
                         });
                         result.metaReplies.push({ success: true, response: metaReply, inboxCommit, creditDebit });
                         console.log('[YogiDesk AI] Response successfully sent to patient.');

@@ -77,6 +77,10 @@ const isWhatsAppWebhookBodyRoute = (req = {}) => {
         originalUrl.startsWith('/api/whatsapp-webhook') ||
         originalUrl.startsWith('/api/webhook/meta');
 };
+const isRazorpayWebhookBodyRoute = (req = {}) => {
+    const originalUrl = String(req.originalUrl || req.url || '');
+    return originalUrl.startsWith('/api/payments/razorpay-webhook');
+};
 
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-YogiDesk-User-Email, X-Hub-Signature-256, X-Requested-With';
@@ -115,10 +119,11 @@ app.options('*', cors(corsOptions));
 app.use(express.json({
     type: (req) => (
         isWhatsAppWebhookBodyRoute(req) ||
+        isRazorpayWebhookBodyRoute(req) ||
         Boolean(req.is(['application/json', 'application/*+json']))
     ),
     verify: (req, res, buf, encoding) => {
-        if (isWhatsAppWebhookBodyRoute(req)) {
+        if (isWhatsAppWebhookBodyRoute(req) || isRazorpayWebhookBodyRoute(req)) {
             req.rawBody = buf.toString(encoding || 'utf8');
         }
     }

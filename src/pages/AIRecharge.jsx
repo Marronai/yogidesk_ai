@@ -6,12 +6,15 @@ import { supabase } from '../config/supabaseClient';
 import { exportFinancialStatementPdf } from '../utils/statementExport';
 
 const AI_PACKAGES = [
-  { id: 'starter_ai', name: 'Starter AI', price: 299, messages: 600, cost: '~Rs. 0.49 / message' },
-  { id: 'growth_ai', name: 'Growth AI', price: 599, messages: 1500, cost: '~Rs. 0.39 / message', featured: true },
-  { id: 'professional_ai', name: 'Professional AI', price: 999, messages: 3000, cost: '~Rs. 0.33 / message' },
-  { id: 'clinic_pro_ai', name: 'Clinic Pro AI', price: 1999, messages: 7000, cost: '~Rs. 0.28 / message' },
+  { id: 'tier_1_ai', name: 'Tier 1', price: 299, messages: 5000, cost: '~16.72 messages / ₹1' },
+  { id: 'tier_2_ai', name: 'Tier 2', price: 599, messages: 13000, cost: '~21.70 messages / ₹1', featured: true },
+  { id: 'tier_3_ai', name: 'Tier 3', price: 999, messages: 32000, cost: '~32.03 messages / ₹1' },
+  { id: 'tier_4_ai', name: 'Tier 4', price: 1999, messages: 60000, cost: '~30.02 messages / ₹1' },
 ];
 const ITEMS_PER_PAGE = 10;
+const CUSTOM_MIN_AMOUNT = 100;
+const CUSTOM_MESSAGE_FACTOR = 5000 / 299;
+const META_FEE_RATE = 0.0236;
 
 const loadRazorpayScript = () => new Promise((resolve) => {
   if (window.Razorpay) {
@@ -28,9 +31,11 @@ const loadRazorpayScript = () => new Promise((resolve) => {
 
 const calculateCustomMessages = (price) => {
   const value = Number(price);
-  if (!Number.isFinite(value) || value < 100) return 0;
-  return Math.floor(value * (value < 500 ? 2.0 : 2.5));
+  if (!Number.isFinite(value) || value < CUSTOM_MIN_AMOUNT) return 0;
+  return Math.floor(value * CUSTOM_MESSAGE_FACTOR);
 };
+
+const money = (value) => `₹${Number(value || 0).toFixed(2)}`;
 
 const AIRecharge = () => {
   const navigate = useNavigate();
@@ -48,6 +53,9 @@ const AIRecharge = () => {
   const checkoutDetails = mode === 'custom'
     ? { packageId: 'custom', name: 'Custom AI Messages', price: Number(customAmount), messages: customMessages }
     : selectedPackage;
+  const subtotal = Number(checkoutDetails.price || 0);
+  const metaFee = Number((subtotal * META_FEE_RATE).toFixed(2));
+  const totalToPay = Number((subtotal + metaFee).toFixed(2));
   const sortedAiLedger = useMemo(() => (
     [...aiLedger].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
   ), [aiLedger]);
@@ -98,7 +106,7 @@ const AIRecharge = () => {
         return {
           date: new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
           activity: metadata.package_id || 'AI Message Credits',
-          value: `+${Number(metadata.ai_messages || 0).toLocaleString()} AI Messages / Rs. ${Number(row.amount || 0).toFixed(2)}`,
+          value: `${Number(metadata.messages_delta ?? metadata.ai_messages ?? 0).toLocaleString()} Messages / ₹${Number(row.amount || 0).toFixed(2)}`,
           status: 'Success',
         };
       }),
@@ -108,8 +116,8 @@ const AIRecharge = () => {
   const startCheckout = async () => {
     setError('');
     setStatus('');
-    if (!checkoutDetails || !Number.isFinite(checkoutDetails.price) || checkoutDetails.price < 100 || checkoutDetails.messages <= 0) {
-      setError('Minimum custom recharge amount is Rs. 100.');
+    if (!checkoutDetails || !Number.isFinite(checkoutDetails.price) || checkoutDetails.price < CUSTOM_MIN_AMOUNT || checkoutDetails.messages <= 0) {
+      setError('Minimum custom recharge amount is ₹100.');
       return;
     }
 
@@ -256,13 +264,13 @@ const AIRecharge = () => {
               </div>
               <div>
                 <h2 className="text-lg font-black text-slate-950">Custom Amount</h2>
-                <p className="text-xs font-bold text-slate-500">Minimum Rs. 100. Higher recharges unlock better message value.</p>
+              <p className="text-xs font-bold text-slate-500">Minimum ₹100. Custom recharges use Tier 1 conversion value.</p>
               </div>
             </div>
             <div className="mt-6 grid gap-5 md:grid-cols-[1fr_180px] md:items-center">
               <input
                 type="range"
-                min={100}
+                min={CUSTOM_MIN_AMOUNT}
                 max={5000}
                 step={50}
                 value={customAmount}
@@ -274,7 +282,7 @@ const AIRecharge = () => {
               />
               <input
                 type="number"
-                min={100}
+                min={CUSTOM_MIN_AMOUNT}
                 value={customAmount}
                 onChange={(event) => {
                   setMode('custom');
@@ -285,22 +293,37 @@ const AIRecharge = () => {
             </div>
             <div className={`mt-5 rounded-2xl border p-4 ${mode === 'custom' ? 'border-orange-200 bg-orange-50' : 'border-slate-200 bg-slate-50'}`}>
               <p className="text-sm font-black text-slate-950">
-                You will get {customMessages.toLocaleString()} AI Messages for Rs. {Number(customAmount || 0).toLocaleString()}
+                You will get {customMessages.toLocaleString()} AI Messages for ₹{Number(customAmount || 0).toLocaleString()}
               </p>
-              <p className="mt-1 text-xs font-bold text-slate-500">Every plan is customized to optimize patient care automation. Higher tiers unlock higher bonus assistant capabilities dynamically.</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">A ₹100 custom load allocates 1,672 messages.</p>
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
             <div className="flex items-center gap-3 text-orange-300">
               <Sparkles size={20} />
-              <p className="text-xs font-black uppercase tracking-widest">Checkout Summary</p>
+              <p className="text-xs font-black uppercase tracking-widest">Order Summary</p>
             </div>
             <h2 className="mt-4 text-2xl font-black">{checkoutDetails.name}</h2>
-            <p className="mt-3 text-4xl font-black">Rs. {Number(checkoutDetails.price || 0).toLocaleString()}</p>
             <p className="mt-2 text-sm font-bold text-slate-300">
               {Number(checkoutDetails.messages || 0).toLocaleString()} AI Messages (Send/Receive)
             </p>
+            <div className="mt-5 space-y-3 rounded-xl border border-white/10 bg-white/5 p-4 text-sm font-bold">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-300">Plan / Recharge Amount</span>
+                <span className="shrink-0 text-white">{money(subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-300">Meta Fee</span>
+                <span className="shrink-0 text-white">{money(metaFee)}</span>
+              </div>
+              <div className="border-t border-white/10 pt-3">
+                <div className="flex items-center justify-between gap-4 text-base">
+                  <span>Total To Pay</span>
+                  <span className="shrink-0 text-orange-200">{money(totalToPay)}</span>
+                </div>
+              </div>
+            </div>
             {status && <div className="mt-4 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-100">{status}</div>}
             {error && <div className="mt-4 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm font-bold text-red-100">{error}</div>}
             <button
@@ -342,7 +365,7 @@ const AIRecharge = () => {
               <thead className="border-b border-slate-100 bg-slate-50">
                 <tr>
                   <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Date</th>
-                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Package</th>
+                  <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Activity</th>
                   <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Messages</th>
                   <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Amount</th>
                   <th className="p-4 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Payment</th>
@@ -362,14 +385,16 @@ const AIRecharge = () => {
                 ) : (
                   visibleAiLedger.map((row) => {
                     const metadata = row.metadata || {};
+                    const messageDelta = Number(metadata.messages_delta ?? metadata.ai_messages ?? 0);
+                    const signedMessages = `${messageDelta < 0 ? '-' : '+'}${Math.abs(messageDelta).toLocaleString()} Messages`;
                     return (
                       <tr key={row.id} className="transition hover:bg-slate-50/70">
                         <td className="p-4 text-sm font-semibold text-slate-600">
                           {new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                         </td>
-                        <td className="p-4 text-sm font-black text-slate-900">{metadata.package_id || 'AI Message Credits'}</td>
-                        <td className="p-4 text-sm font-black text-orange-700">+{Number(metadata.ai_messages || 0).toLocaleString()} AI Messages</td>
-                        <td className="p-4 text-sm font-black text-slate-900">Rs. {Number(row.amount || 0).toFixed(2)}</td>
+                        <td className="p-4 text-sm font-black text-slate-900">{row.description || metadata.package_id || 'AI Message Credits'}</td>
+                        <td className={`p-4 text-sm font-black ${messageDelta < 0 ? 'text-red-600' : 'text-orange-700'}`}>{signedMessages}</td>
+                        <td className="p-4 text-sm font-black text-slate-900">₹{Number(row.amount || 0).toFixed(2)}</td>
                         <td className="p-4 text-xs font-bold text-slate-500">{metadata.razorpay_payment_id || 'Verified payment'}</td>
                       </tr>
                     );

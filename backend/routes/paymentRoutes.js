@@ -30,16 +30,27 @@ const SECURE_PLAN_CATALOG = Object.freeze({
 });
 
 const AI_MESSAGE_SLABS = Object.freeze({
-  starter_ai: { packageId: 'starter_ai', label: 'Starter AI', amount: 299, messages: 600 },
-  growth_ai: { packageId: 'growth_ai', label: 'Growth AI', amount: 599, messages: 1500 },
-  professional_ai: { packageId: 'professional_ai', label: 'Professional AI', amount: 999, messages: 3000 },
-  clinic_pro_ai: { packageId: 'clinic_pro_ai', label: 'Clinic Pro AI', amount: 1999, messages: 7000 },
+  tier_1_ai: { packageId: 'tier_1_ai', label: 'Tier 1 AI', amount: 299, messages: 5000 },
+  tier_2_ai: { packageId: 'tier_2_ai', label: 'Tier 2 AI', amount: 599, messages: 13000 },
+  tier_3_ai: { packageId: 'tier_3_ai', label: 'Tier 3 AI', amount: 999, messages: 32000 },
+  tier_4_ai: { packageId: 'tier_4_ai', label: 'Tier 4 AI', amount: 1999, messages: 60000 },
 });
+const AI_CUSTOM_MIN_AMOUNT = 100;
+const AI_CUSTOM_MESSAGE_FACTOR = 5000 / 299;
+const META_FEE_RATE = 0.0236;
 
 const calculateAiMessagesForAmount = (amount) => {
   const value = Number(amount);
-  if (!Number.isFinite(value) || value < 100) return 0;
-  return Math.floor(value * (value < 500 ? 2.0 : 2.5));
+  if (!Number.isFinite(value) || value < AI_CUSTOM_MIN_AMOUNT) return 0;
+  return Math.floor(value * AI_CUSTOM_MESSAGE_FACTOR);
+};
+
+const calculateMetaFee = (amount) => Number((Number(amount || 0) * META_FEE_RATE).toFixed(2));
+
+const timingSafeEqualHex = (left, right) => {
+  const safeLeft = Buffer.from(String(left || ''), 'utf8');
+  const safeRight = Buffer.from(String(right || ''), 'utf8');
+  return safeLeft.length === safeRight.length && crypto.timingSafeEqual(safeLeft, safeRight);
 };
 
 const createAiReceipt = () => `ai_${Date.now()}_${Math.floor(Math.random() * 100)}`.slice(0, 39);
@@ -261,12 +272,14 @@ router.post('/create-ai-order', async (req, res) => {
     const messages = selectedPackage ? selectedPackage.messages : calculateAiMessagesForAmount(amount);
     const label = selectedPackage ? selectedPackage.label : 'Custom AI Messages';
 
-    if (!Number.isFinite(amount) || amount < 100 || messages <= 0) {
-      return res.status(400).json({ success: false, message: 'Minimum AI message recharge amount is Rs. 100.' });
+    if (!Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT || messages <= 0) {
+      return res.status(400).json({ success: false, message: 'Minimum custom recharge amount is ₹100.' });
     }
 
     const { keyId, client } = getRazorpayClient();
-    const amountPaise = Math.round(amount * 100);
+    const metaFee = calculateMetaFee(amount);
+    const totalAmount = Number((amount + metaFee).toFixed(2));
+    const amountPaise = Math.round(totalAmount * 100);
     const receipt = createAiReceipt();
 
     const order = await client.orders.create({
@@ -280,6 +293,9 @@ router.post('/create-ai-order', async (req, res) => {
         package_label: label,
         messages: String(messages),
         amount: amount.toFixed(2),
+        subtotal: amount.toFixed(2),
+        meta_fee: metaFee.toFixed(2),
+        total_amount: totalAmount.toFixed(2),
       },
     });
 
@@ -294,6 +310,9 @@ router.post('/create-ai-order', async (req, res) => {
       packageName: label,
       aiMessages: messages,
       rupeeAmount: amount,
+      subtotal: amount,
+      metaFee,
+      totalAmount,
     });
   } catch (error) {
     logRazorpayOrderError(error, { purpose: 'ai_message_recharge', packageId: req.body?.packageId || null });
@@ -301,25 +320,128 @@ router.post('/create-ai-order', async (req, res) => {
   }
 });
 
+const insertAiPassbookCredit = async ({
+  userId,
+  amount,
+  messages,
+  packageId,
+  razorpayOrderId,
+  razorpayPaymentId,
+  previousBalance,
+  nextBalance,
+  source = 'razorpay'
+}) => {
+  if (!db?.from || !userId) return;
+  await db.from('wallet_passbook').insert([{
+    user_id: userId,
+    doctor_id: userId,
+    entry_type: 'AI_MESSAGE_CREDIT',
+    amount: Number(amount || 0),
+    messages_delta: Number(messages || 0),
+    description: `AI Assistant Recharge: +${Number(messages || 0).toLocaleString('en-IN')} Messages Added`,
+    metadata: {
+      provider: source,
+      purpose: 'ai_message_recharge',
+      package_id: packageId,
+      ai_messages: Number(messages || 0),
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+      previous_ai_message_balance: previousBalance,
+      next_ai_message_balance: nextBalance,
+    },
+    created_at: new Date().toISOString(),
+  }]).then(({ error }) => {
+    if (error && !String(error.message || '').toLowerCase().includes('schema cache')) {
+      console.error('AI message passbook credit log failed:', error.message || error);
+    }
+  });
+};
+
+const resolveAiRechargeFromOrder = async ({ client, orderId, fallbackPackageId = 'custom', fallbackAmount = 0 }) => {
+  const order = await client.orders.fetch(orderId);
+  const notes = order?.notes || {};
+  const packageId = String(notes.package_id || fallbackPackageId || 'custom').trim().toLowerCase();
+  const selectedPackage = AI_MESSAGE_SLABS[packageId] || null;
+  const subtotal = selectedPackage ? selectedPackage.amount : Number(notes.subtotal || notes.amount || fallbackAmount || 0);
+  const aiMessages = selectedPackage ? selectedPackage.messages : calculateAiMessagesForAmount(subtotal);
+  const metaFee = Number(notes.meta_fee || calculateMetaFee(subtotal));
+  const totalAmount = Number(notes.total_amount || (subtotal + metaFee));
+  return {
+    order,
+    userId: String(notes.doctor_id || notes.user_id || '').trim(),
+    packageId: selectedPackage?.packageId || 'custom',
+    packageLabel: notes.package_label || selectedPackage?.label || 'Custom AI Messages',
+    subtotal,
+    metaFee,
+    totalAmount,
+    aiMessages,
+  };
+};
+
+const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) => {
+  let profileTable = 'doctor_profiles';
+  let { data: profileRow, error: profileError } = await db
+    .from('doctor_profiles')
+    .select('id,ai_message_balance,ai_token_balance,token_limit')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profileError) throw profileError;
+  if (!profileRow?.id) {
+    const fallbackProfile = await db
+      .from('profiles')
+      .select('id,ai_message_balance,ai_token_balance,token_limit')
+      .eq('id', userId)
+      .maybeSingle();
+    if (!fallbackProfile.error && fallbackProfile.data?.id) {
+      profileTable = 'profiles';
+      profileRow = fallbackProfile.data;
+    }
+  }
+
+  const currentBalance = Number(profileRow?.ai_message_balance ?? profileRow?.ai_token_balance ?? profileRow?.token_limit ?? 0);
+  const nextBalance = currentBalance + aiMessages;
+  let update = { error: null, data: null };
+  if (db.rpc) {
+    update = await db.rpc('credit_ai_message_balance', {
+      p_user_id: userId,
+      p_messages: aiMessages,
+      p_usage: usage
+    });
+  }
+
+  if (update.error) {
+    console.warn('AI message RPC credit unavailable, falling back to profile update:', update.error.message || update.error);
+    update = await db
+      .from(profileTable)
+      .update({ ai_message_balance: nextBalance })
+      .eq('id', userId);
+  }
+
+  if (update.error && String(update.error.message || '').toLowerCase().includes('column')) {
+    update = await db
+      .from(profileTable)
+      .update({ ai_token_balance: nextBalance, token_limit: nextBalance })
+      .eq('id', userId);
+  }
+
+  if (update.error) throw update.error;
+  return { currentBalance, nextBalance };
+};
+
 router.post('/verify-ai-payment', async (req, res) => {
   try {
     const { keySecret } = getRazorpayCredentials();
     if (!keySecret) return res.status(500).json({ success: false, message: 'Razorpay secret is not configured.' });
 
     const doctor = await resolveAuthenticatedDoctor(req);
-    const userId = String(req.body?.userId || doctor?.id || '').trim();
-    const amount = Number(req.body?.amount || 0);
-    const aiMessages = Number(req.body?.aiMessages || 0);
-    const packageId = String(req.body?.packageId || 'custom').trim();
+    const { client } = getRazorpayClient();
     const razorpayOrderId = String(req.body?.razorpay_order_id || '').trim();
     const razorpayPaymentId = String(req.body?.razorpay_payment_id || '').trim();
     const razorpaySignature = String(req.body?.razorpay_signature || '').trim();
 
-    if (!userId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       return res.status(400).json({ success: false, message: 'Missing Razorpay verification fields.' });
-    }
-    if (!Number.isFinite(amount) || amount < 100 || !Number.isFinite(aiMessages) || aiMessages <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid AI message recharge details.' });
     }
 
     const expectedSignature = crypto
@@ -327,8 +449,26 @@ router.post('/verify-ai-payment', async (req, res) => {
       .update(`${razorpayOrderId}|${razorpayPaymentId}`)
       .digest('hex');
 
-    if (expectedSignature !== razorpaySignature) {
+    if (!timingSafeEqualHex(expectedSignature, razorpaySignature)) {
       return res.status(400).json({ success: false, message: 'Invalid Razorpay signature.' });
+    }
+
+    const recharge = await resolveAiRechargeFromOrder({
+      client,
+      orderId: razorpayOrderId,
+      fallbackPackageId: req.body?.packageId,
+      fallbackAmount: req.body?.amount,
+    });
+    const userId = recharge.userId || String(doctor?.id || req.body?.userId || '').trim();
+    const amount = Number(recharge.subtotal || 0);
+    const aiMessages = Number(recharge.aiMessages || 0);
+    const packageId = recharge.packageId;
+
+    if (!userId || !Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT || !Number.isFinite(aiMessages) || aiMessages <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid AI message recharge details.' });
+    }
+    if (doctor?.id && doctor.id !== userId) {
+      return res.status(403).json({ success: false, message: 'Payment order does not belong to this doctor session.' });
     }
 
     const { data: existingTransaction, error: existingTransactionError } = await db
@@ -345,41 +485,11 @@ router.post('/verify-ai-payment', async (req, res) => {
       return res.status(200).json({ success: true, message: 'Payment already processed.' });
     }
 
-    let profileTable = 'doctor_profiles';
-    let { data: profileRow, error: profileError } = await db
-      .from('doctor_profiles')
-      .select('id,ai_message_balance,ai_token_balance,token_limit')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (profileError) throw profileError;
-    if (!profileRow?.id) {
-      const fallbackProfile = await db
-        .from('profiles')
-        .select('id,ai_message_balance,ai_token_balance,token_limit')
-        .eq('id', userId)
-        .maybeSingle();
-      if (!fallbackProfile.error && fallbackProfile.data?.id) {
-        profileTable = 'profiles';
-        profileRow = fallbackProfile.data;
-      }
-    }
-
-    const currentBalance = Number(profileRow?.ai_message_balance ?? profileRow?.ai_token_balance ?? profileRow?.token_limit ?? 0);
-    const nextBalance = currentBalance + aiMessages;
-    let update = await db
-      .from(profileTable)
-      .update({ ai_message_balance: nextBalance })
-      .eq('id', userId);
-
-    if (update.error && String(update.error.message || '').toLowerCase().includes('column')) {
-      update = await db
-        .from(profileTable)
-        .update({ ai_token_balance: nextBalance, token_limit: nextBalance })
-        .eq('id', userId);
-    }
-
-    if (update.error) throw update.error;
+    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+      userId,
+      aiMessages,
+      usage: { provider: 'razorpay', package_id: packageId, charged_at: new Date().toISOString() }
+    });
 
     await db.from('wallet_transactions').insert([{
       user_id: userId,
@@ -391,6 +501,8 @@ router.post('/verify-ai-payment', async (req, res) => {
         purpose: 'ai_message_recharge',
         package_id: packageId,
         ai_messages: aiMessages,
+        meta_fee: recharge.metaFee,
+        total_amount: recharge.totalAmount,
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
         previous_ai_message_balance: currentBalance,
@@ -399,6 +511,17 @@ router.post('/verify-ai-payment', async (req, res) => {
       created_at: new Date().toISOString(),
     }]).then(({ error }) => {
       if (error) console.error('AI message transaction log failed:', error.message || error);
+    });
+
+    await insertAiPassbookCredit({
+      userId,
+      amount,
+      messages: aiMessages,
+      packageId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      previousBalance: currentBalance,
+      nextBalance,
     });
 
     return res.status(200).json({
@@ -410,6 +533,103 @@ router.post('/verify-ai-payment', async (req, res) => {
   } catch (error) {
     console.error('Razorpay AI message verification failed:', error.message || error);
     return res.status(500).json({ success: false, message: 'Unable to verify AI message payment.' });
+  }
+});
+
+router.post('/razorpay-webhook', async (req, res) => {
+  try {
+    const webhookSecret = String(process.env.RAZORPAY_WEBHOOK_SECRET || '').trim();
+    const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
+    const incomingSignature = String(req.get('x-razorpay-signature') || '').trim();
+
+    if (!webhookSecret || !incomingSignature || !rawBody) {
+      return res.status(400).json({ success: false, message: 'Razorpay webhook signature configuration missing.' });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBody)
+      .digest('hex');
+
+    if (!timingSafeEqualHex(expectedSignature, incomingSignature)) {
+      return res.status(400).json({ success: false, message: 'Invalid Razorpay webhook signature.' });
+    }
+
+    const event = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const payment = event?.payload?.payment?.entity;
+    const orderId = String(payment?.order_id || '').trim();
+    const paymentId = String(payment?.id || '').trim();
+
+    if (event?.event !== 'payment.captured' || !orderId || !paymentId) {
+      return res.status(200).json({ success: true, skipped: true });
+    }
+
+    const { client } = getRazorpayClient();
+    const recharge = await resolveAiRechargeFromOrder({ client, orderId });
+    if (payment?.notes?.purpose !== 'ai_message_recharge' && recharge.order?.notes?.purpose !== 'ai_message_recharge') {
+      return res.status(200).json({ success: true, skipped: true });
+    }
+
+    const userId = recharge.userId || String(payment?.notes?.doctor_id || payment?.notes?.user_id || '').trim();
+    const amount = Number(recharge.subtotal || 0);
+    const aiMessages = Number(recharge.aiMessages || 0);
+    if (!userId || !Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT || aiMessages <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid AI recharge webhook payload.' });
+    }
+
+    const { data: existingTransaction, error: existingTransactionError } = await db
+      .from('wallet_transactions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('metadata->>razorpay_payment_id', paymentId)
+      .maybeSingle();
+
+    if (existingTransactionError) console.error('AI webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
+    if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
+    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+      userId,
+      aiMessages,
+      usage: { provider: 'razorpay_webhook', package_id: recharge.packageId, charged_at: new Date().toISOString() }
+    });
+
+    await db.from('wallet_transactions').insert([{
+      user_id: userId,
+      amount,
+      transaction_type: 'AI_MESSAGE_CREDIT',
+      description: `Razorpay AI message credits topup successful: ${paymentId}`,
+      metadata: {
+        provider: 'razorpay',
+        purpose: 'ai_message_recharge',
+        package_id: recharge.packageId,
+        ai_messages: aiMessages,
+        meta_fee: recharge.metaFee,
+        total_amount: recharge.totalAmount,
+        razorpay_order_id: orderId,
+        razorpay_payment_id: paymentId,
+        webhook_event: event.event,
+        previous_ai_message_balance: currentBalance,
+        next_ai_message_balance: nextBalance,
+      },
+      created_at: new Date().toISOString(),
+    }]);
+
+    await insertAiPassbookCredit({
+      userId,
+      amount,
+      messages: aiMessages,
+      packageId: recharge.packageId,
+      razorpayOrderId: orderId,
+      razorpayPaymentId: paymentId,
+      previousBalance: currentBalance,
+      nextBalance,
+      source: 'razorpay_webhook',
+    });
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Razorpay webhook processing failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to process Razorpay webhook.' });
   }
 });
 
