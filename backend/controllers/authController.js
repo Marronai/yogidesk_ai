@@ -558,8 +558,8 @@ exports.register = async (req, res) => {
         current_plan: 'growth',
         plan_tier: 'growth',
         lifetime_patients_limit: 2000,
-        ai_message_balance: 1000,
-        ai_token_balance: 1000,
+        ai_message_balance: 500,
+        ai_token_balance: 500,
         plan_limits: { patient_limit: 2000, staff_limit: 2, template_limit: 50 },
         updated_at: new Date().toISOString()
       }

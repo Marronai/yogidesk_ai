@@ -113,6 +113,8 @@ const AIRecharge = () => {
   const [loading, setLoading] = useState(false);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [aiLedger, setAiLedger] = useState([]);
+  const [usageLedgerLoading, setUsageLedgerLoading] = useState(true);
+  const [aiUsageLedger, setAiUsageLedger] = useState([]);
   const [ledgerPage, setLedgerPage] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -133,6 +135,9 @@ const AIRecharge = () => {
   ), [aiLedger]);
   const totalLedgerPages = Math.max(1, Math.ceil(sortedAiLedger.length / ITEMS_PER_PAGE));
   const visibleAiLedger = sortedAiLedger.slice(ledgerPage * ITEMS_PER_PAGE, (ledgerPage + 1) * ITEMS_PER_PAGE);
+  const sortedAiUsageLedger = useMemo(() => (
+    [...aiUsageLedger].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+  ), [aiUsageLedger]);
 
   useEffect(() => {
     if (ledgerPage > totalLedgerPages - 1) setLedgerPage(Math.max(0, totalLedgerPages - 1));
@@ -165,8 +170,48 @@ const AIRecharge = () => {
     }
   };
 
+  const fetchAiUsageLedger = async () => {
+    try {
+      setUsageLedgerLoading(true);
+      const { data: userResult } = await supabase.auth.getUser();
+      const userId = userResult?.user?.id || localStorage.getItem('user_id');
+      if (!userId) {
+        setAiUsageLedger([]);
+        return;
+      }
+
+      const { data } = await api.get('/api/wallet/transactions', {
+        params: {
+          userId,
+          purpose: 'ai_usage_passbook',
+        },
+      });
+
+      if (!data?.success) throw new Error(data?.message || 'Unable to load AI usage passbook.');
+      setAiUsageLedger(data.transactions || []);
+    } catch (usageError) {
+      console.warn('AI usage passbook unavailable:', usageError?.message || usageError);
+      setAiUsageLedger([]);
+    } finally {
+      setUsageLedgerLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchAiLedger();
+    fetchAiUsageLedger();
+  }, []);
+
+  useEffect(() => {
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') fetchAiUsageLedger();
+    };
+    window.addEventListener('focus', fetchAiUsageLedger);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.removeEventListener('focus', fetchAiUsageLedger);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
   }, []);
 
   const exportAiStatement = async () => {
@@ -346,7 +391,7 @@ const AIRecharge = () => {
           })}
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[0.9fr_0.6fr]">
+        <div id="ai-checkout" className="grid scroll-mt-24 gap-6 lg:grid-cols-[0.9fr_0.6fr]">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
@@ -426,6 +471,57 @@ const AIRecharge = () => {
               <CreditCard size={18} />
               {loading ? 'Opening Checkout...' : 'Proceed to Buy Credits'}
             </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                <MessageSquare size={20} />
+              </div>
+              <div>
+                <h2 className="text-xl font-black text-slate-950">AI Usage Passbook</h2>
+                <p className="text-xs font-bold text-slate-500">Live debit ledger for completed AI conversation sessions.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={fetchAiUsageLedger}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {usageLedgerLoading ? (
+              [1, 2, 3].map((item) => (
+                <div key={item} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <div className="h-4 w-40 animate-pulse rounded bg-slate-200" />
+                  <div className="mt-3 h-4 w-full animate-pulse rounded bg-slate-200" />
+                </div>
+              ))
+            ) : (
+              sortedAiUsageLedger.map((row) => {
+                const dateText = new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+                const patientText = row.patient_number || 'Patient';
+                const credits = Math.abs(Number(row.credits_deducted ?? row.messages_delta ?? 0));
+                return (
+                  <div key={row.id} className="grid gap-2 rounded-2xl border border-orange-100 bg-[#fffaf3] p-4 text-sm sm:grid-cols-[180px_1fr] sm:items-center">
+                    <div className="font-black text-slate-950">{dateText}</div>
+                    <div className="font-semibold leading-6 text-slate-800">
+                      Patient: {patientText} | AI Conversation Session Completed: -{credits.toLocaleString('en-IN')} Credits Deducted
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            {!usageLedgerLoading && sortedAiUsageLedger.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-xs font-bold uppercase tracking-widest text-slate-400">
+                No AI conversation usage found
+              </div>
+            )}
           </div>
         </div>
 

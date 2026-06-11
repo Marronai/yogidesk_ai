@@ -844,7 +844,34 @@ const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
 
 const calculateAiMessageCreditsFromTokens = (totalTokenCount) => {
     const totalTokens = Math.max(1, Math.ceil(Number(totalTokenCount || 0)));
+    if (totalTokens <= 100) return 1;
+    if (totalTokens <= 200) return 2;
+    if (totalTokens <= 300) return 3;
+    if (totalTokens <= 400) return 4;
+    if (totalTokens <= 500) return 5;
+    if (totalTokens <= 600) return 6;
     return Math.max(1, Math.ceil(totalTokens / 100));
+};
+
+const normalizeGeminiUsageMetadata = (usageMetadata = {}) => {
+    const promptTokens = Number(
+        usageMetadata.prompt_token_count ??
+        usageMetadata.promptTokenCount ??
+        usageMetadata.inputTokenCount ??
+        0
+    );
+    const candidateTokens = Number(
+        usageMetadata.candidates_token_count ??
+        usageMetadata.candidatesTokenCount ??
+        usageMetadata.outputTokenCount ??
+        0
+    );
+    const totalSessionTokens = Math.max(1, Math.ceil((Number.isFinite(promptTokens) ? promptTokens : 0) + (Number.isFinite(candidateTokens) ? candidateTokens : 0)));
+    return {
+        promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+        candidateTokens: Number.isFinite(candidateTokens) ? candidateTokens : 0,
+        totalSessionTokens
+    };
 };
 
 const insertWalletPassbookEntry = async ({
@@ -894,9 +921,11 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, pa
         0
     );
     const currentUsed = Number(doctor.ai_message_used ?? doctor.aiMessageUsed ?? doctor.token_used ?? 0);
-    const inputTokens = Number(usageMetadata.promptTokenCount || usageMetadata.inputTokenCount || 0);
-    const outputTokens = Number(usageMetadata.candidatesTokenCount || usageMetadata.outputTokenCount || 0);
-    const totalTokens = Number(usageMetadata.totalTokenCount || inputTokens + outputTokens || 0);
+    const {
+        promptTokens: inputTokens,
+        candidateTokens: outputTokens,
+        totalSessionTokens: totalTokens
+    } = normalizeGeminiUsageMetadata(usageMetadata);
     const creditsToDeduct = calculateAiMessageCreditsFromTokens(totalTokens);
     const nextBalance = Math.max(0, currentBalance - creditsToDeduct);
     const nextUsed = currentUsed + creditsToDeduct;
@@ -909,7 +938,11 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, pa
         credits_deducted: creditsToDeduct,
         charged_at: new Date().toISOString()
     };
-    const passbookDescription = `${phoneDigitsOnly(patientPhone) || 'Patient'} - AI Conversation Response Session: -${creditsToDeduct} Messages Deducted`;
+    const normalizedPatientPhone = phoneDigitsOnly(patientPhone);
+    const formattedPatientPhone = normalizedPatientPhone
+        ? `+${normalizedPatientPhone.length === 10 ? `91${normalizedPatientPhone}` : normalizedPatientPhone}`
+        : 'Patient';
+    const passbookDescription = `Patient: ${formattedPatientPhone} | AI Conversation Session Completed: -${creditsToDeduct} Credits Deducted`;
 
     const payload = {
         ai_message_balance: nextBalance,
@@ -1008,13 +1041,14 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
     }
 
     const replyText = String(response?.response?.text?.() || '').trim();
-    const usageMetadata = response?.response?.usageMetadata || {};
+    const usageMetadata = response?.response?.usageMetadata || response?.response?.usage_metadata || response?.usage_metadata || {};
+    const normalizedUsage = normalizeGeminiUsageMetadata(usageMetadata);
     return {
         success: true,
         model: GEMINI_MODEL_NAME,
         replyText,
         usageMetadata,
-        tokenIncrement: Number(usageMetadata.totalTokenCount || usageMetadata.candidatesTokenCount || 1) || 1
+        tokenIncrement: normalizedUsage.totalSessionTokens
     };
 };
 

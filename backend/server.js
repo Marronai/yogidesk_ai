@@ -3317,8 +3317,8 @@ app.post('/api/profile/onboarding', async (req, res) => {
             current_plan: 'growth',
             plan_tier: 'growth',
             lifetime_patients_limit: 2000,
-            ai_message_balance: 1000,
-            ai_token_balance: 1000,
+            ai_message_balance: 500,
+            ai_token_balance: 500,
             plan_limits: getPlanLimits('GROWTH'),
             whatsapp_phone_number_id: phoneNumberId,
             meta_phone_number_id: phoneNumberId,
@@ -4336,7 +4336,7 @@ app.get('/api/ai/settings', async (req, res) => {
         const isTrialExpired = runtimePlan.has_trial_expired;
         const aiMessageBalance = runtimePlan.runtime_tier === 'BASIC'
             ? 0
-            : Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 1000 : 0));
+            : Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
         const aiMessageUsed = Number(data?.ai_message_used ?? data?.token_used ?? 0);
 
         return res.status(200).json({
@@ -4350,6 +4350,7 @@ app.get('/api/ai/settings', async (req, res) => {
                 aiEnabled: runtimePlan.runtime_tier !== 'BASIC' && data?.ai_enabled !== false,
                 tokenLimit: aiMessageBalance,
                 tokenUsed: aiMessageUsed,
+                message_credit_balance: aiMessageBalance,
                 aiMessageBalance,
                 aiMessageUsed,
                 isAiPaused: Boolean(data?.is_ai_paused)

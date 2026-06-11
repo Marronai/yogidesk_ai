@@ -83,6 +83,57 @@ const sanitizePassbookRowForUi = (row = {}) => ({
   created_at: row.created_at,
 });
 
+const sanitizeAiUsagePassbookRow = (row = {}) => {
+  const metadata = row.metadata || {};
+  const patientDigits = String(row.patient_number || metadata.patient_phone || metadata.patient || '').replace(/\D/g, '');
+  const formattedPatient = patientDigits
+    ? `+${patientDigits.length === 10 ? `91${patientDigits}` : patientDigits}`
+    : 'Patient';
+  const creditsDeducted = Math.abs(Number(row.messages_delta ?? metadata.credits_deducted ?? metadata.messages_deducted ?? 0));
+  const description = `Patient: ${formattedPatient} | AI Conversation Session Completed: -${creditsDeducted} Credits Deducted`;
+
+  return {
+    id: row.id,
+    user_id: row.user_id || row.doctor_id,
+    doctor_id: row.doctor_id || row.user_id,
+    patient_number: formattedPatient,
+    entry_type: row.entry_type || row.transaction_type || 'AI_MESSAGE_DEBIT',
+    messages_delta: -creditsDeducted,
+    credits_deducted: creditsDeducted,
+    description: maskTokenText(description),
+    created_at: row.created_at,
+    metadata: {
+      provider: metadata.provider,
+      model: metadata.model,
+      purpose: 'ai_usage_passbook',
+    },
+  };
+};
+
+const fetchAiUsagePassbookRows = async (userId) => {
+  const selectColumns = 'id,user_id,doctor_id,patient_number,entry_type,amount,messages_delta,description,metadata,created_at';
+  const logsResult = await db
+    .from('wallet_passbook_logs')
+    .select(selectColumns)
+    .eq('user_id', userId)
+    .lt('messages_delta', 0)
+    .order('created_at', { ascending: false });
+
+  const logsErrorText = String(logsResult.error?.message || logsResult.error?.details || '').toLowerCase();
+  const logsMissing = logsResult.error?.code === 'PGRST205' || logsResult.error?.code === 'PGRST204' || logsErrorText.includes('schema cache') || logsErrorText.includes('could not find');
+  if (!logsResult.error) return logsResult.data || [];
+  if (!logsMissing) throw logsResult.error;
+
+  const fallbackResult = await db
+    .from('wallet_passbook')
+    .select(selectColumns)
+    .eq('user_id', userId)
+    .lt('messages_delta', 0)
+    .order('created_at', { ascending: false });
+  if (fallbackResult.error) throw fallbackResult.error;
+  return fallbackResult.data || [];
+};
+
 const createWalletOrder = async (req, res) => {
   try {
     const userId = String(req.body?.userId || '').trim();
@@ -331,6 +382,14 @@ const getWalletTransactions = async (req, res) => {
       });
     }
 
+    if (purpose === 'ai_usage_passbook') {
+      const usageRows = await fetchAiUsagePassbookRows(userId);
+      return res.status(200).json({
+        success: true,
+        transactions: usageRows.map(sanitizeAiUsagePassbookRow),
+      });
+    }
+
     if (purpose === 'ai_message_recharge') {
       const [transactionResult, passbookResult] = await Promise.all([
         db
@@ -343,7 +402,7 @@ const getWalletTransactions = async (req, res) => {
           .from('wallet_passbook')
           .select('id,user_id,doctor_id,patient_number,entry_type,amount,messages_delta,description,metadata,created_at')
           .eq('user_id', userId)
-          .like('entry_type', 'AI_MESSAGE%')
+          .eq('entry_type', 'AI_MESSAGE_CREDIT')
           .order('created_at', { ascending: false }),
       ]);
 

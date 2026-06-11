@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, Outlet, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import ErrorBoundary from '../components/ErrorBoundary';
 import api from '../utils/api';
@@ -9,6 +9,7 @@ import { blockLiveSupportWidgetsForMetaReview } from '../utils/metaReviewSession
 
 const MainLayout = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isMetaReviewSession } = useAuth();
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
@@ -41,6 +42,8 @@ const MainLayout = () => {
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [trialAlert, setTrialAlert] = useState(null);
+  const [lowBalanceAlert, setLowBalanceAlert] = useState(null);
+  const [lowBalanceDismissed, setLowBalanceDismissed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +75,37 @@ const MainLayout = () => {
   useEffect(() => {
     if (isMetaReviewSession) blockLiveSupportWidgetsForMetaReview();
   }, [isMetaReviewSession]);
+
+  useEffect(() => {
+    setLowBalanceDismissed(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAiBalance = async () => {
+      try {
+        const response = await api.get('/ai/settings');
+        if (!active) return;
+        const settings = response.data?.settings || {};
+        const balance = Number(settings.message_credit_balance ?? settings.aiMessageBalance ?? settings.tokenLimit ?? 0);
+        if (Number.isFinite(balance) && balance <= 50) {
+          setLowBalanceAlert({ balance });
+        } else {
+          setLowBalanceAlert(null);
+        }
+      } catch (error) {
+        console.warn('AI balance monitor unavailable:', error?.message || error);
+      }
+    };
+
+    loadAiBalance();
+    const intervalId = window.setInterval(loadAiBalance, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [location.pathname]);
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 font-sans md:flex-row">
@@ -159,6 +193,44 @@ const MainLayout = () => {
             >
               Upgrade Now
             </button>
+          </div>
+        </div>
+      )}
+
+      {lowBalanceAlert && !lowBalanceDismissed && (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+          <div className="w-full max-w-2xl overflow-hidden rounded-t-[2rem] border border-orange-100 bg-white shadow-2xl sm:rounded-[2rem]">
+            <div className="bg-[#501638] px-6 py-5 text-white sm:px-8">
+              <p className="text-xs font-black uppercase tracking-[0.2em] text-orange-100">AI Receptionist Fuel Alert</p>
+              <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Respected Doctor, Your Virtual Clinic Receptionist Needs a Quick Recharge! ⚠️</h2>
+            </div>
+            <div className="space-y-4 bg-white px-6 py-5 sm:px-8">
+              <div className="rounded-2xl border border-orange-100 bg-[#fffaf3] p-4 text-sm font-semibold leading-6 text-slate-800">
+                While you are busy saving lives and conducting operations, your YogiDesk AI Receptionist is working 24/7 without a single break. Right now, it is instantly answering patient queries, sharing prescription details, and automatically booking slots so that your clinic never loses a single patient to competitors.
+              </div>
+              <div className="rounded-2xl border border-orange-100 bg-white p-4 text-sm font-semibold leading-6 text-slate-800 shadow-sm">
+                Currently, your active fuel balance has dropped below 50 messages. If it hits 0, the automated receptionist will have to shut down, meaning emergency consultation bookings might be missed, and patients will face long delays waiting for manual responses.
+              </div>
+              <div className="rounded-2xl bg-orange-50 px-4 py-3 text-sm font-black text-orange-700">
+                Active AI balance: {Number(lowBalanceAlert.balance || 0).toLocaleString('en-IN')} credits
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                <button
+                  type="button"
+                  onClick={() => navigate('/dashboard/ai-recharge#ai-checkout')}
+                  className="inline-flex w-full animate-pulse items-center justify-center rounded-2xl bg-[#FF6B00] px-5 py-4 text-center text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-600"
+                >
+                  KEEP MY AI ASSISTANT ALIVE (RECHARGE NOW)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLowBalanceDismissed(true)}
+                  className="rounded-2xl border border-slate-200 px-5 py-4 text-xs font-black uppercase tracking-widest text-slate-500 transition hover:bg-slate-50"
+                >
+                  Acknowledge
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
