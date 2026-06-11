@@ -1,20 +1,48 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Clock, CreditCard, Download, Gauge, IndianRupee, MessageSquare, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { Bot, CheckCircle2, Clock, CreditCard, Download, Gauge, IndianRupee, MessageSquare, ShieldCheck, SlidersHorizontal, Sparkles, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
 import { exportFinancialStatementPdf } from '../utils/statementExport';
 
 const AI_PACKAGES = [
-  { id: 'tier_1_ai', name: 'Tier 1', price: 299, messages: 5000, cost: '~16.72 messages / ₹1' },
-  { id: 'tier_2_ai', name: 'Tier 2', price: 599, messages: 13000, cost: '~21.70 messages / ₹1', featured: true },
-  { id: 'tier_3_ai', name: 'Tier 3', price: 999, messages: 32000, cost: '~32.03 messages / ₹1' },
-  { id: 'tier_4_ai', name: 'Tier 4', price: 1999, messages: 60000, cost: '~30.02 messages / ₹1' },
+  { id: 'tier_1_ai', name: 'Starter Clinic AI', price: 299, messages: 5000, cost: '~16.72 messages / ₹1' },
+  { id: 'tier_2_ai', name: 'Growth Clinic AI', price: 599, messages: 13000, cost: '~21.70 messages / ₹1', featured: true },
+  { id: 'tier_3_ai', name: 'Premium Care AI', price: 999, messages: 32000, cost: '~32.03 messages / ₹1' },
+  { id: 'tier_4_ai', name: 'Medical Pro Enterprise AI', price: 1999, messages: 60000, cost: '~30.02 messages / ₹1' },
 ];
 const ITEMS_PER_PAGE = 10;
 const CUSTOM_MIN_AMOUNT = 100;
+const CUSTOM_MAX_AMOUNT = 1999;
 const CUSTOM_MESSAGE_FACTOR = 5000 / 299;
 const META_FEE_RATE = 0.0236;
+const FIXED_PACKAGE_BY_PRICE = AI_PACKAGES.reduce((lookup, item) => ({
+  ...lookup,
+  [item.price]: item,
+}), {});
+
+const AI_TERMS_POINTS = [
+  {
+    title: 'Infrastructure Dependency',
+    text: 'YogiDesk integrates compute infrastructures from global AI research leaders including Google AI, OpenAI, and NVIDIA. If these infrastructure entities scale their pricing structures, YogiDesk credit tariffs may adjust proportionally.',
+  },
+  {
+    title: 'Model Obsolescence & Upgrades',
+    text: 'If an active AI model version is retired by the parent company or higher baseline model updates are required to retain clinic performance, package adjustments may occur.',
+  },
+  {
+    title: '7-Day Advanced Notice Grace Window',
+    text: 'We pledge complete operational transparency. Respected doctors will receive an explicit SMS or dashboard notification alert exactly 7 days prior to any official pricing revision before any modifications hit active wallets.',
+  },
+  {
+    title: 'Service SLA & System Fail-safes',
+    text: 'YogiDesk functions as an autonomous digital clinic receptionist. In rare anomalies of cloud network drops, API system freezes, or upstream server downtime, YogiDesk assumes no liability. Our engineering layer will notify you immediately via mail/SMS for temporary manual inbox monitoring.',
+  },
+  {
+    title: 'Computational Bracket Mapping',
+    text: 'To enforce fair usage billing, message deductions calculate programmatically via computation brackets. Short inquiries consume single base units, while long, multi-turn medical history scheduling blocks tap across higher fractional usage.',
+  },
+];
 
 const loadRazorpayScript = () => new Promise((resolve) => {
   if (window.Razorpay) {
@@ -32,8 +60,12 @@ const loadRazorpayScript = () => new Promise((resolve) => {
 const calculateCustomMessages = (price) => {
   const value = Number(price);
   if (!Number.isFinite(value) || value < CUSTOM_MIN_AMOUNT) return 0;
+  const fixedPackage = FIXED_PACKAGE_BY_PRICE[value];
+  if (fixedPackage) return fixedPackage.messages;
   return Math.floor(value * CUSTOM_MESSAGE_FACTOR);
 };
+
+const resolveCustomPackageName = (amount) => FIXED_PACKAGE_BY_PRICE[Number(amount)]?.name || 'Custom AI Messages';
 
 const money = (value) => `₹${Number(value || 0).toFixed(2)}`;
 
@@ -48,10 +80,12 @@ const AIRecharge = () => {
   const [ledgerPage, setLedgerPage] = useState(0);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [termsModalOpen, setTermsModalOpen] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const customMessages = useMemo(() => calculateCustomMessages(customAmount), [customAmount]);
   const checkoutDetails = mode === 'custom'
-    ? { packageId: 'custom', name: 'Custom AI Messages', price: Number(customAmount), messages: customMessages }
+    ? { packageId: 'custom', name: resolveCustomPackageName(customAmount), price: Number(customAmount), messages: customMessages }
     : selectedPackage;
   const subtotal = Number(checkoutDetails.price || 0);
   const metaFee = Number((subtotal * META_FEE_RATE).toFixed(2));
@@ -113,13 +147,31 @@ const AIRecharge = () => {
     });
   };
 
-  const startCheckout = async () => {
+  const validateCheckoutDetails = () => {
     setError('');
     setStatus('');
-    if (!checkoutDetails || !Number.isFinite(checkoutDetails.price) || checkoutDetails.price < CUSTOM_MIN_AMOUNT || checkoutDetails.messages <= 0) {
-      setError('Minimum custom recharge amount is ₹100.');
-      return;
+    if (
+      !checkoutDetails
+      || !Number.isFinite(checkoutDetails.price)
+      || checkoutDetails.price < CUSTOM_MIN_AMOUNT
+      || (mode === 'custom' && checkoutDetails.price > CUSTOM_MAX_AMOUNT)
+      || checkoutDetails.messages <= 0
+    ) {
+      setError('Custom recharge amount must be between ₹100 and ₹1,999.');
+      return false;
     }
+    return true;
+  };
+
+  const handleProceedClick = () => {
+    if (!validateCheckoutDetails()) return;
+    setTermsAccepted(false);
+    setTermsModalOpen(true);
+  };
+
+  const startCheckout = async () => {
+    if (!termsAccepted || !validateCheckoutDetails()) return;
+    setTermsModalOpen(false);
 
     try {
       setLoading(true);
@@ -264,15 +316,15 @@ const AIRecharge = () => {
               </div>
               <div>
                 <h2 className="text-lg font-black text-slate-950">Custom Amount</h2>
-              <p className="text-xs font-bold text-slate-500">Minimum ₹100. Custom recharges use Tier 1 conversion value.</p>
+              <p className="text-xs font-bold text-slate-500">Minimum ₹100. Exact package amounts use the fixed allocation.</p>
               </div>
             </div>
             <div className="mt-6 grid gap-5 md:grid-cols-[1fr_180px] md:items-center">
               <input
                 type="range"
                 min={CUSTOM_MIN_AMOUNT}
-                max={5000}
-                step={50}
+                max={CUSTOM_MAX_AMOUNT}
+                step={1}
                 value={customAmount}
                 onChange={(event) => {
                   setMode('custom');
@@ -283,6 +335,7 @@ const AIRecharge = () => {
               <input
                 type="number"
                 min={CUSTOM_MIN_AMOUNT}
+                max={CUSTOM_MAX_AMOUNT}
                 value={customAmount}
                 onChange={(event) => {
                   setMode('custom');
@@ -295,7 +348,7 @@ const AIRecharge = () => {
               <p className="text-sm font-black text-slate-950">
                 You will get {customMessages.toLocaleString()} AI Messages for ₹{Number(customAmount || 0).toLocaleString()}
               </p>
-              <p className="mt-1 text-xs font-bold text-slate-500">A ₹100 custom load allocates 1,672 messages.</p>
+              <p className="mt-1 text-xs font-bold text-slate-500">A ₹100 custom load allocates 1,672 messages. ₹299, ₹599, ₹999, and ₹1,999 use fixed package credits.</p>
             </div>
           </div>
 
@@ -329,7 +382,7 @@ const AIRecharge = () => {
             <button
               type="button"
               disabled={loading}
-              onClick={startCheckout}
+              onClick={handleProceedClick}
               className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CreditCard size={18} />
@@ -337,6 +390,76 @@ const AIRecharge = () => {
             </button>
           </div>
         </div>
+
+        {termsModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/75 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-6" role="dialog" aria-modal="true" aria-labelledby="ai-terms-title">
+            <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-[#FFD701]/30 bg-white shadow-2xl">
+              <div className="bg-[#501638] px-5 py-5 text-white sm:px-7">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-[#FFD701]/15 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-[#FFD701]">
+                      <ShieldCheck size={14} />
+                      Secure Consent Required
+                    </div>
+                    <h2 id="ai-terms-title" className="mt-3 text-2xl font-black leading-tight sm:text-3xl">YogiDesk AI Assistant — Terms & Conditions</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!loading) setTermsModalOpen(false);
+                    }}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={loading}
+                    aria-label="Close terms modal"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-[calc(92vh-210px)] overflow-y-auto px-5 py-5 sm:px-7">
+                <div className="space-y-3">
+                  {AI_TERMS_POINTS.map((point, index) => (
+                    <div key={point.title} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-black uppercase tracking-widest text-orange-600">Point {index + 1}</p>
+                      <h3 className="mt-1 text-sm font-black text-[#501638]">{point.title}</h3>
+                      <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">{point.text}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 rounded-xl border border-[#FFD701]/70 bg-[#FFD701]/15 p-4">
+                  <p className="text-sm font-black leading-6 text-[#501638]">
+                    Doctor Transparency Note: At YogiDesk, we maintain absolute pricing transparency so that our respected doctors know exactly how their automation capital is utilized to scale their medical practice efficiently.
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 bg-white px-5 py-4 sm:px-7">
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-orange-300">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(event) => setTermsAccepted(event.target.checked)}
+                    className="mt-1 h-5 w-5 rounded border-slate-300 text-orange-600 accent-orange-600"
+                  />
+                  <span className="text-sm font-black leading-6 text-slate-800">
+                    I have read and agree to YogiDesk AI Service Terms & Conditions
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  disabled={!termsAccepted || loading}
+                  onClick={startCheckout}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-4 text-sm font-black uppercase tracking-widest text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  <CreditCard size={18} />
+                  {loading ? 'Opening Checkout...' : 'Accept & Proceed to Payment'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

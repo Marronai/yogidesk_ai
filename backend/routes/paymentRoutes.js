@@ -30,18 +30,27 @@ const SECURE_PLAN_CATALOG = Object.freeze({
 });
 
 const AI_MESSAGE_SLABS = Object.freeze({
-  tier_1_ai: { packageId: 'tier_1_ai', label: 'Tier 1 AI', amount: 299, messages: 5000 },
-  tier_2_ai: { packageId: 'tier_2_ai', label: 'Tier 2 AI', amount: 599, messages: 13000 },
-  tier_3_ai: { packageId: 'tier_3_ai', label: 'Tier 3 AI', amount: 999, messages: 32000 },
-  tier_4_ai: { packageId: 'tier_4_ai', label: 'Tier 4 AI', amount: 1999, messages: 60000 },
+  tier_1_ai: { packageId: 'tier_1_ai', label: 'Starter Clinic AI', amount: 299, messages: 5000 },
+  tier_2_ai: { packageId: 'tier_2_ai', label: 'Growth Clinic AI', amount: 599, messages: 13000 },
+  tier_3_ai: { packageId: 'tier_3_ai', label: 'Premium Care AI', amount: 999, messages: 32000 },
+  tier_4_ai: { packageId: 'tier_4_ai', label: 'Medical Pro Enterprise AI', amount: 1999, messages: 60000 },
 });
 const AI_CUSTOM_MIN_AMOUNT = 100;
+const AI_CUSTOM_MAX_AMOUNT = 1999;
 const AI_CUSTOM_MESSAGE_FACTOR = 5000 / 299;
 const META_FEE_RATE = 0.0236;
+const AI_FIXED_SLAB_BY_AMOUNT = Object.freeze(
+  Object.values(AI_MESSAGE_SLABS).reduce((lookup, slab) => ({
+    ...lookup,
+    [slab.amount]: slab,
+  }), {})
+);
 
 const calculateAiMessagesForAmount = (amount) => {
   const value = Number(amount);
   if (!Number.isFinite(value) || value < AI_CUSTOM_MIN_AMOUNT) return 0;
+  const fixedSlab = AI_FIXED_SLAB_BY_AMOUNT[value];
+  if (fixedSlab) return fixedSlab.messages;
   return Math.floor(value * AI_CUSTOM_MESSAGE_FACTOR);
 };
 
@@ -267,13 +276,19 @@ router.post('/create-ai-order', async (req, res) => {
 
     const packageId = String(req.body?.packageId || '').trim().toLowerCase();
     const customAmount = Number(req.body?.amount || 0);
-    const selectedPackage = AI_MESSAGE_SLABS[packageId] || null;
+    const exactAmountPackage = packageId === 'custom' ? AI_FIXED_SLAB_BY_AMOUNT[customAmount] || null : null;
+    const selectedPackage = AI_MESSAGE_SLABS[packageId] || exactAmountPackage;
     const amount = selectedPackage ? selectedPackage.amount : customAmount;
     const messages = selectedPackage ? selectedPackage.messages : calculateAiMessagesForAmount(amount);
     const label = selectedPackage ? selectedPackage.label : 'Custom AI Messages';
 
-    if (!Number.isFinite(amount) || amount < AI_CUSTOM_MIN_AMOUNT || messages <= 0) {
-      return res.status(400).json({ success: false, message: 'Minimum custom recharge amount is ₹100.' });
+    if (
+      !Number.isFinite(amount)
+      || amount < AI_CUSTOM_MIN_AMOUNT
+      || (!selectedPackage && amount > AI_CUSTOM_MAX_AMOUNT)
+      || messages <= 0
+    ) {
+      return res.status(400).json({ success: false, message: 'Custom recharge amount must be between ₹100 and ₹1,999.' });
     }
 
     const { keyId, client } = getRazorpayClient();
