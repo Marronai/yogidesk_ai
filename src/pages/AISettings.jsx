@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import AIUsagePassbook from '../components/AIUsagePassbook';
 
 const defaultSettings = {
   plan: '',
@@ -24,6 +25,8 @@ const AISettings = () => {
   const { userProfile } = useAuth();
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
+  const [usageLedgerLoading, setUsageLedgerLoading] = useState(true);
+  const [aiUsageLedger, setAiUsageLedger] = useState([]);
   const [error, setError] = useState('');
   const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
 
@@ -37,12 +40,20 @@ const AISettings = () => {
     return Math.min(100, Math.round((used / total) * 100));
   }, [settings]);
 
+  const sortedAiUsageLedger = useMemo(() => (
+    [...aiUsageLedger].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+  ), [aiUsageLedger]);
+
+  const resolveDashboardUserId = async () => {
+    const { data: userResult } = await supabase.auth.getUser();
+    return userResult?.user?.id || localStorage.getItem('user_id');
+  };
+
   const loadSettings = async () => {
     try {
       setLoading(true);
       setError('');
-      const { data: userResult } = await supabase.auth.getUser();
-      const userId = userResult?.user?.id || localStorage.getItem('user_id');
+      const userId = await resolveDashboardUserId();
       const [settingsResult, profileResult] = await Promise.all([
         api.get('/api/ai/settings', { params: { userId } }),
         api.get('/profile/context', { params: { userId } }).catch(() => ({ data: null })),
@@ -66,8 +77,53 @@ const AISettings = () => {
     }
   };
 
+  const fetchAiUsageLedger = async () => {
+    try {
+      setUsageLedgerLoading(true);
+      const userId = await resolveDashboardUserId();
+      if (!userId) {
+        setAiUsageLedger([]);
+        return;
+      }
+
+      const { data } = await api.get('/api/wallet/transactions', {
+        params: {
+          userId,
+          purpose: 'ai_usage_passbook',
+        },
+      });
+
+      if (!data?.success) throw new Error(data?.message || 'Unable to load AI usage passbook.');
+      setAiUsageLedger(data.transactions || []);
+    } catch (usageError) {
+      console.warn('AI usage passbook unavailable:', usageError?.message || usageError);
+      setAiUsageLedger([]);
+    } finally {
+      setUsageLedgerLoading(false);
+    }
+  };
+
+  const refreshAssistantDashboard = async () => {
+    await Promise.all([
+      loadSettings(),
+      fetchAiUsageLedger(),
+    ]);
+  };
+
   useEffect(() => {
-    loadSettings();
+    refreshAssistantDashboard();
+  }, []);
+
+  useEffect(() => {
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') fetchAiUsageLedger();
+    };
+    window.addEventListener('focus', fetchAiUsageLedger);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.removeEventListener('focus', fetchAiUsageLedger);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
   }, []);
 
   const planLabel = String(settings.runtime_plan || settings.plan_tier || settings.plan || 'growth').replace(/_/g, ' ');
@@ -131,10 +187,10 @@ const AISettings = () => {
         </div>
         <button
           type="button"
-          onClick={loadSettings}
+          onClick={refreshAssistantDashboard}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50"
         >
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+          <RefreshCw size={15} className={loading || usageLedgerLoading ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>
@@ -187,6 +243,13 @@ const AISettings = () => {
             Recharge AI Messages
           </button>
         </div>
+
+        <AIUsagePassbook
+          rows={sortedAiUsageLedger}
+          loading={usageLedgerLoading}
+          onRefresh={fetchAiUsageLedger}
+          className="lg:col-span-2 lg:col-start-2"
+        />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
