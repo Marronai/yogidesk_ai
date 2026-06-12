@@ -263,7 +263,7 @@ const AIUsagePassbook = ({
                 <div className="text-xs font-bold leading-5 text-slate-500">
                   Input {usage.inputTokens.toLocaleString('en-IN')} | Output {usage.outputTokens.toLocaleString('en-IN')} | Total {usage.totalTokens.toLocaleString('en-IN')}
                 </div>
-                <div className="font-black text-orange-700">-{usage.creditsDeducted.toLocaleString('en-IN')} Credits</div>
+                <div className="font-bold text-red-600">-{usage.creditsDeducted.toLocaleString('en-IN')} Credits</div>
               </div>
             );
           })

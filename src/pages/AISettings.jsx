@@ -61,6 +61,7 @@ const AISettings = () => {
       ]);
       if (settingsResult.data?.success) {
         const liveProfile = profileResult.data?.profile || userProfile || {};
+        const liveSettings = settingsResult.data.settings || {};
         setProfileMeta({
           clinicName: liveProfile.clinic_name || liveProfile.business_name || liveProfile.clinicName || localStorage.getItem('clinic_name') || 'Clinic Workspace',
           clinicPhoneNumber: liveProfile.clinic_phone || liveProfile.phone || liveProfile.mobile || liveProfile.whatsapp_number || liveProfile.whatsapp_phone || localStorage.getItem('user_phone') || '',
@@ -69,7 +70,9 @@ const AISettings = () => {
         const expired = Boolean(liveProfile.has_trial_expired || liveProfile.is_trial_expired || settingsResult.data.settings?.has_trial_expired || settingsResult.data.settings?.is_trial_expired);
         setSettings({
           ...defaultSettings,
-          ...(settingsResult.data.settings || {}),
+          ...liveSettings,
+          aiMessageBalance: Number(liveSettings.ai_message_balance ?? liveSettings.aiMessageBalance ?? liveSettings.message_credit_balance ?? liveSettings.tokenLimit ?? 0),
+          aiMessageUsed: Number(liveSettings.ai_messages_used ?? liveSettings.ai_message_used ?? liveSettings.aiMessageUsed ?? liveSettings.tokenUsed ?? 0),
           ...(livePlan && { plan: livePlan, plan_tier: livePlan, runtime_plan: livePlan }),
           has_trial_expired: expired,
           is_trial_expired: expired,

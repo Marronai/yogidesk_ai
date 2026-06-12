@@ -1670,7 +1670,7 @@ const markAiBillingDebited = async ({ db, table, row, update, totalTokens, credi
 };
 
 const debitMatchedAiUsageOnce = async ({ db, rows = [], table, update }) => {
-    if (!['SENT', 'DELIVERED', 'READ'].includes(String(update.status || '').toUpperCase())) return null;
+    if (String(update.status || '').toUpperCase() !== 'SENT') return null;
 
     for (const row of rows || []) {
         const billing = extractAiBillingFromMatchedRow(row);
