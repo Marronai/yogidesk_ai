@@ -1046,13 +1046,14 @@ const deductDoctorAiMessageCredit = async ({ doctor = {}, usageMetadata = {}, pa
         token_used: nextUsed,
         last_ai_usage: lastAiUsage
     };
+    const totalTokensInteger = Math.max(1, parseInt(lastAiUsage.total_tokens, 10) || 1);
 
     let update = { error: null, data: null };
     if (db.rpc) {
         update = await db.rpc('debit_ai_message_balance', {
             p_user_id: doctorId,
             p_messages: creditsToDeduct,
-            p_usage: lastAiUsage
+            p_usage: totalTokensInteger
         });
     }
 
