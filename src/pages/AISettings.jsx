@@ -33,18 +33,15 @@ const AISettings = () => {
   const [error, setError] = useState('');
   const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
 
-  const usagePercent = useMemo(() => {
-    const locked = settings.has_trial_expired || settings.is_trial_expired || String(settings.runtime_plan || settings.plan_tier || settings.plan || '').toLowerCase() === 'basic';
-    if (locked) return 0;
-    const balance = Number(settings.aiMessageBalance ?? settings.tokenLimit ?? 0);
-    const used = Number(settings.aiMessageUsed ?? settings.tokenUsed ?? 0);
-    const total = balance + used;
-    if (!total) return 0;
-    return Math.min(100, Math.round((used / total) * 100));
-  }, [settings]);
-
   const sortedAiUsageLedger = useMemo(() => (
     [...aiUsageLedger].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
+  ), [aiUsageLedger]);
+
+  const ledgerDebitedCredits = useMemo(() => (
+    aiUsageLedger.reduce((total, row) => {
+      const credits = Math.abs(Number(row.credits_deducted ?? row.messages_delta ?? row.metadata?.credits_deducted ?? row.metadata?.usage?.credits_deducted ?? 0));
+      return total + (Number.isFinite(credits) ? credits : 0);
+    }, 0)
   ), [aiUsageLedger]);
 
   const resolveDashboardUserId = async () => {
@@ -141,8 +138,16 @@ const AISettings = () => {
   const planLabel = String(settings.runtime_plan || settings.plan_tier || settings.plan || 'growth').replace(/_/g, ' ');
   const isLocked = settings.has_trial_expired || settings.is_trial_expired || planLabel.toLowerCase() === 'basic';
   const assistantEnabled = settings.aiEnabled && !settings.isAiPaused && !isLocked;
-  const displayMessageBalance = isLocked ? 0 : Number(settings.aiMessageBalance ?? settings.tokenLimit ?? 0);
-  const displayMessageUsed = isLocked ? 0 : Number(settings.aiMessageUsed ?? settings.tokenUsed ?? 0);
+  const storedMessageBalance = Number(settings.aiMessageBalance ?? settings.tokenLimit ?? INITIAL_AI_MESSAGE_CREDITS);
+  const storedMessageUsed = Number(settings.aiMessageUsed ?? settings.tokenUsed ?? 0);
+  const displayMessageUsed = isLocked ? 0 : Math.max(storedMessageUsed, ledgerDebitedCredits);
+  const unsyncedLedgerDebits = Math.max(0, displayMessageUsed - storedMessageUsed);
+  const displayMessageBalance = isLocked ? 0 : Math.max(0, storedMessageBalance - unsyncedLedgerDebits);
+  const usagePercent = (() => {
+    const total = displayMessageBalance + displayMessageUsed;
+    if (!total) return 0;
+    return Math.min(100, Math.round((displayMessageUsed / total) * 100));
+  })();
   const displayPlanLabel = planLabel
     .split(' ')
     .filter(Boolean)

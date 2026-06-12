@@ -1576,6 +1576,7 @@ const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inpu
         if (!error) {
             await syncClinicAiMessageBalanceDeduction({
                 db,
+                userId,
                 trueClinicId,
                 credits
             });
@@ -1597,53 +1598,71 @@ const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inpu
     return { success: false, reason: 'empty_payload_after_schema_prune' };
 };
 
-const syncClinicAiMessageBalanceDeduction = async ({ db, trueClinicId, credits }) => {
-    const safeClinicId = String(trueClinicId || '').trim();
+const syncAiBalanceRowDeduction = async ({ db, table, column, value, credits }) => {
     const safeCredits = Math.max(0, Math.ceil(Number(credits || 0)));
-    if (!db?.from || !safeClinicId || safeCredits <= 0) return { success: false, skipped: true };
+    if (!db?.from || !table || !column || !value || safeCredits <= 0) return { success: false, skipped: true };
 
-    try {
-        const { data: clinic, error: selectError } = await db
-            .from('clinics')
-            .select('*')
-            .eq('id', safeClinicId)
-            .maybeSingle();
+    const { data: row, error: selectError } = await db
+        .from(table)
+        .select('*')
+        .eq(column, value)
+        .maybeSingle();
 
-        if (selectError || !clinic?.id) {
-            if (selectError && !isSchemaCacheError(selectError)) {
-                console.warn('Clinic AI balance lookup failed:', selectError.message || selectError);
-            }
-            return { success: false, reason: 'clinic_not_found', error: selectError };
+    if (selectError || !row) return { success: false, reason: 'row_not_found', error: selectError };
+
+    const currentBalance = Number(row.ai_message_balance ?? row.ai_token_balance ?? row.token_limit ?? 0);
+    const currentUsed = Number(row.ai_messages_used ?? row.ai_message_used ?? row.token_used ?? 0);
+    let payload = removeUndefinedValues({
+        ai_message_balance: Math.max(0, currentBalance - safeCredits),
+        ai_messages_used: currentUsed + safeCredits,
+        ai_message_used: currentUsed + safeCredits,
+        token_used: currentUsed + safeCredits
+    });
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        const { error } = await db
+            .from(table)
+            .update(payload)
+            .eq(column, value);
+
+        if (!error) return { success: true };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
         }
 
-        const currentBalance = Number(clinic.ai_message_balance ?? clinic.ai_token_balance ?? clinic.token_limit ?? 0);
-        const currentUsed = Number(clinic.ai_messages_used ?? clinic.ai_message_used ?? clinic.token_used ?? 0);
-        let payload = removeUndefinedValues({
-            ai_message_balance: Math.max(0, currentBalance - safeCredits),
-            ai_messages_used: currentUsed + safeCredits,
-            ai_message_used: currentUsed + safeCredits,
-            token_used: currentUsed + safeCredits
-        });
-        const removedColumns = new Set();
+        return { success: false, error };
+    }
 
-        while (Object.keys(payload).length > 0) {
-            const { error } = await db
-                .from('clinics')
-                .update(payload)
-                .eq('id', safeClinicId);
+    return { success: false, reason: 'empty_payload_after_schema_prune' };
+};
 
-            if (!error) return { success: true };
+const syncClinicAiMessageBalanceDeduction = async ({ db, userId, trueClinicId, credits }) => {
+    const safeClinicId = String(trueClinicId || '').trim();
+    const safeUserId = String(userId || '').trim();
+    const safeCredits = Math.max(0, Math.ceil(Number(credits || 0)));
+    if (!db?.from || safeCredits <= 0) return { success: false, skipped: true };
 
-            const missingColumn = getMissingSchemaColumn(error);
-            if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
-                removedColumns.add(missingColumn);
-                const { [missingColumn]: _removed, ...nextPayload } = payload;
-                payload = nextPayload;
-                continue;
-            }
+    try {
+        const results = [];
+        if (safeUserId) {
+            results.push(await syncAiBalanceRowDeduction({ db, table: 'doctor_profiles', column: 'id', value: safeUserId, credits: safeCredits }));
+        }
+        if (safeClinicId) {
+            results.push(await syncAiBalanceRowDeduction({ db, table: 'clinics', column: 'id', value: safeClinicId, credits: safeCredits }));
+        }
 
-            console.error('Clinic AI balance deduction sync failed:', error.message || error);
-            return { success: false, error };
+        if (results.some((result) => result?.success)) return { success: true };
+
+        const hardError = results.find((result) => result?.error && !isSchemaCacheError(result.error));
+        if (hardError?.error) {
+            console.error('Clinic AI balance deduction sync failed:', hardError.error.message || hardError.error);
+            return hardError;
         }
     } catch (error) {
         console.error('Clinic AI balance deduction sync crashed:', error.message || error);
@@ -1651,6 +1670,34 @@ const syncClinicAiMessageBalanceDeduction = async ({ db, trueClinicId, credits }
     }
 
     return { success: false, reason: 'empty_payload_after_schema_prune' };
+};
+
+const sumAiUsageLedgerDebits = async (db, userId) => {
+    const safeUserId = String(userId || '').trim();
+    if (!db?.from || !safeUserId) return 0;
+
+    const readDebitRows = async (table) => {
+        try {
+            return await db
+                .from(table)
+                .select('messages_delta,credits_deducted,metadata')
+                .eq('user_id', safeUserId)
+                .lt('messages_delta', 0);
+        } catch (error) {
+            return { data: [], error };
+        }
+    };
+
+    const sumRows = (rows = []) => rows.reduce((total, row) => {
+        const credits = Math.abs(Number(row.messages_delta ?? row.credits_deducted ?? row.metadata?.credits_deducted ?? row.metadata?.usage?.credits_deducted ?? 0));
+        return total + (Number.isFinite(credits) ? credits : 0);
+    }, 0);
+
+    const logsResult = await readDebitRows('wallet_passbook_logs');
+    const passbookResult = await readDebitRows('wallet_passbook');
+    const logsTotal = logsResult.error ? 0 : sumRows(logsResult.data || []);
+    const passbookTotal = passbookResult.error ? 0 : sumRows(passbookResult.data || []);
+    return Math.max(logsTotal, passbookTotal);
 };
 
 const markAiBillingDebited = async ({ db, table, row, update, totalTokens, credits }) => {
@@ -4651,17 +4698,19 @@ app.get('/api/ai/settings', async (req, res) => {
         const runtimePlan = evaluateRuntimePlan(data || {});
         const plan = runtimePlan.runtime_plan || data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'growth';
         const isTrialExpired = runtimePlan.has_trial_expired;
+        const profileBalance = Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
+        const clinicBalance = clinicMetrics.id ? Number(clinicMetrics.ai_message_balance ?? clinicMetrics.ai_token_balance ?? clinicMetrics.token_limit ?? profileBalance) : NaN;
+        const storedBalance = Number.isFinite(clinicBalance) ? Math.min(profileBalance, clinicBalance) : profileBalance;
+        const storedUsed = Math.max(
+            Number(clinicMetrics.ai_messages_used ?? clinicMetrics.ai_message_used ?? clinicMetrics.token_used ?? 0),
+            Number(data?.ai_messages_used ?? data?.ai_message_used ?? data?.token_used ?? 0)
+        );
+        const ledgerDebits = await sumAiUsageLedgerDebits(db, userId);
+        const aiMessageUsed = runtimePlan.runtime_tier === 'BASIC' ? 0 : Math.max(storedUsed, ledgerDebits);
+        const unsyncedLedgerDebits = Math.max(0, aiMessageUsed - storedUsed);
         const aiMessageBalance = runtimePlan.runtime_tier === 'BASIC'
             ? 0
-            : Number(clinicMetrics.ai_message_balance ?? data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
-        const aiMessageUsed = Number(
-            clinicMetrics.ai_messages_used ??
-            clinicMetrics.ai_message_used ??
-            data?.ai_messages_used ??
-            data?.ai_message_used ??
-            data?.token_used ??
-            Math.max(0, 500 - aiMessageBalance)
-        );
+            : Math.max(0, storedBalance - unsyncedLedgerDebits);
 
         return res.status(200).json({
             success: true,
