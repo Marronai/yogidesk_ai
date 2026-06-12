@@ -96,6 +96,8 @@ const getDeliveryStatusRank = (status) => ({
   FAILED: 4
 }[String(status || '').trim().toUpperCase()] || 0);
 
+const isNonBillingDeliveryStatus = (status) => ['DELIVERED', 'READ'].includes(String(status || '').trim().toUpperCase());
+
 const getTemplateUpdates = (payload = {}) => {
   if (payload.object !== 'whatsapp_business_account' || !Array.isArray(payload.entry)) return [];
 
@@ -227,6 +229,7 @@ const syncInboxDeliveryStatus = async (db, update) => {
   }
 
   if (!Array.isArray(messages) || messages.length === 0) {
+    if (isNonBillingDeliveryStatus(update.deliveryStatus)) return;
     console.warn('Webhook inbox delivery status matched no rows:', {
       messageId: update.messageId,
       status: update.deliveryStatus

@@ -65,6 +65,7 @@ const AISettings = () => {
         const liveProfile = profileResult.data?.profile || userProfile || {};
         const liveSettings = settingsResult.data.settings || {};
         const currentAiMessageBalance = Number(liveSettings.ai_message_balance ?? liveSettings.aiMessageBalance ?? liveSettings.message_credit_balance ?? liveSettings.tokenLimit ?? 0);
+        const currentAiMessagesUsed = Number(liveSettings.ai_messages_used ?? liveSettings.aiMessageUsed ?? liveSettings.tokenUsed ?? Math.max(0, INITIAL_AI_MESSAGE_CREDITS - currentAiMessageBalance));
         setProfileMeta({
           clinicName: liveProfile.clinic_name || liveProfile.business_name || liveProfile.clinicName || localStorage.getItem('clinic_name') || 'Clinic Workspace',
           clinicPhoneNumber: liveProfile.clinic_phone || liveProfile.phone || liveProfile.mobile || liveProfile.whatsapp_number || liveProfile.whatsapp_phone || localStorage.getItem('user_phone') || '',
@@ -75,7 +76,7 @@ const AISettings = () => {
           ...defaultSettings,
           ...liveSettings,
           aiMessageBalance: currentAiMessageBalance,
-          aiMessageUsed: Math.max(0, INITIAL_AI_MESSAGE_CREDITS - currentAiMessageBalance),
+          aiMessageUsed: currentAiMessagesUsed,
           ...(livePlan && { plan: livePlan, plan_tier: livePlan, runtime_plan: livePlan }),
           has_trial_expired: expired,
           is_trial_expired: expired,

@@ -1370,6 +1370,8 @@ const getDeliveryStatusRank = (status) => ({
     FAILED: 4
 }[String(status || '').trim().toUpperCase()] || 0);
 
+const isNonBillingDeliveryStatus = (status) => ['DELIVERED', 'READ'].includes(String(status || '').trim().toUpperCase());
+
 const extractMessageStatusUpdates = (payload = {}) => {
     try {
         const updates = [];
@@ -1442,10 +1444,12 @@ const updateInboxMessagesByWamid = async (db, update) => {
         lastResult = result;
     }
 
-    console.warn('Inbox delivery status update matched no WAMID rows after all lookup strategies:', {
-        incomingWamid,
-        status: update.status
-    });
+    if (!isNonBillingDeliveryStatus(update.status)) {
+        console.warn('Inbox delivery status update matched no WAMID rows after all lookup strategies:', {
+            incomingWamid,
+            status: update.status
+        });
+    }
     return lastResult;
 };
 
@@ -1613,9 +1617,10 @@ const syncClinicAiMessageBalanceDeduction = async ({ db, trueClinicId, credits }
         }
 
         const currentBalance = Number(clinic.ai_message_balance ?? clinic.ai_token_balance ?? clinic.token_limit ?? 0);
-        const currentUsed = Number(clinic.ai_message_used ?? clinic.token_used ?? 0);
+        const currentUsed = Number(clinic.ai_messages_used ?? clinic.ai_message_used ?? clinic.token_used ?? 0);
         let payload = removeUndefinedValues({
             ai_message_balance: Math.max(0, currentBalance - safeCredits),
+            ai_messages_used: currentUsed + safeCredits,
             ai_message_used: currentUsed + safeCredits,
             token_used: currentUsed + safeCredits
         });
@@ -1860,6 +1865,10 @@ const applyInboxDeliveryStatusUpdate = async (update = {}) => {
                     matchedRows: transactionMessages.length,
                     billingDebit
                 });
+                return;
+            }
+
+            if (isNonBillingDeliveryStatus(update.status)) {
                 return;
             }
 
@@ -4632,13 +4641,27 @@ app.get('/api/ai/settings', async (req, res) => {
         error = profileResult.error;
 
         if (error) throw error;
+        const clinicResult = await readSingleRowSafely({
+            table: 'clinics',
+            select: '*',
+            column: 'user_id',
+            value: userId
+        });
+        const clinicMetrics = clinicResult.data || {};
         const runtimePlan = evaluateRuntimePlan(data || {});
         const plan = runtimePlan.runtime_plan || data?.plan || data?.current_plan || data?.plan_tier || data?.subscription_tier || 'growth';
         const isTrialExpired = runtimePlan.has_trial_expired;
         const aiMessageBalance = runtimePlan.runtime_tier === 'BASIC'
             ? 0
-            : Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
-        const aiMessageUsed = Number(data?.ai_message_used ?? data?.token_used ?? 0);
+            : Number(clinicMetrics.ai_message_balance ?? data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
+        const aiMessageUsed = Number(
+            clinicMetrics.ai_messages_used ??
+            clinicMetrics.ai_message_used ??
+            data?.ai_messages_used ??
+            data?.ai_message_used ??
+            data?.token_used ??
+            Math.max(0, 500 - aiMessageBalance)
+        );
 
         return res.status(200).json({
             success: true,
@@ -4652,6 +4675,8 @@ app.get('/api/ai/settings', async (req, res) => {
                 tokenLimit: aiMessageBalance,
                 tokenUsed: aiMessageUsed,
                 message_credit_balance: aiMessageBalance,
+                ai_message_balance: aiMessageBalance,
+                ai_messages_used: aiMessageUsed,
                 aiMessageBalance,
                 aiMessageUsed,
                 isAiPaused: Boolean(data?.is_ai_paused)
