@@ -35,7 +35,10 @@ export const exportFinancialStatementPdf = async ({ rows = [], filenamePrefix = 
       <td>${escapeHtml(row.date)}</td>
       <td>${escapeHtml(row.activity)}</td>
       <td>${escapeHtml(row.value)}</td>
-      <td>${escapeHtml(row.status || 'Success')}</td>
+      <td>
+        ${row.tracking ? `<span class="tracking-pill">${escapeHtml(row.tracking)}</span>` : ''}
+        <span class="status-pill">${escapeHtml(row.status || 'Success')}</span>
+      </td>
     </tr>
   `).join('');
 
@@ -45,18 +48,24 @@ export const exportFinancialStatementPdf = async ({ rows = [], filenamePrefix = 
       <head>
         <title>${escapeHtml(title)}</title>
         <style>
-          @page { margin: 22mm; }
+          @page { margin: 0 !important; }
           * { box-sizing: border-box; }
-          body { margin: 0; color: #0f172a; font-family: Arial, Helvetica, sans-serif; }
+          body { margin: 0; padding: 1.5cm !important; color: #0f172a; font-family: Arial, Helvetica, sans-serif; }
+          @media print {
+            @page { margin: 0 !important; }
+            body { padding: 1.5cm !important; }
+          }
           .header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #f97316; padding-bottom: 18px; margin-bottom: 18px; }
           .header img { height: 42px; width: auto; object-fit: contain; }
-          .brand { font-size: 20px; font-weight: 900; margin: 0; }
+          .brand { font-size: 20px; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; }
           .subtitle { margin: 4px 0 0; color: #64748b; font-size: 12px; font-weight: 700; }
           .meta { margin: 0 0 22px; padding: 14px 16px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 12px; font-size: 12px; line-height: 1.7; }
           table { width: 100%; border-collapse: collapse; font-size: 11px; }
           th { background: #f8fafc; color: #64748b; text-align: left; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }
           th, td { padding: 11px 10px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
           td:nth-child(3) { font-weight: 800; color: #0f172a; }
+          .tracking-pill { display: inline-block; margin-right: 6px; margin-bottom: 4px; padding: 5px 8px; border: 1px solid #bbf7d0; border-radius: 999px; background: #f0fdf4; color: #166534; font-weight: 900; }
+          .status-pill { display: inline-block; padding: 5px 8px; border-radius: 999px; background: #dcfce7; color: #15803d; font-weight: 900; text-transform: uppercase; }
           .empty { padding: 30px; text-align: center; color: #94a3b8; border: 1px dashed #cbd5e1; border-radius: 12px; }
           .footer { margin-top: 22px; color: #94a3b8; font-size: 10px; }
         </style>
@@ -65,8 +74,8 @@ export const exportFinancialStatementPdf = async ({ rows = [], filenamePrefix = 
         <div class="header">
           <img src="${window.location.origin}/logo.png" alt="YogiDesk AI Logo" />
           <div>
-            <p class="brand">Yogidesk.ai - Official Financial Statement</p>
-            <p class="subtitle">${escapeHtml(title)}</p>
+            <p class="brand">${escapeHtml(title)}</p>
+            <p class="subtitle">Official YogiDesk financial receipt generated from the active workspace</p>
           </div>
         </div>
         <div class="meta">

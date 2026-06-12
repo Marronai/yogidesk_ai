@@ -170,15 +170,17 @@ const AIRecharge = () => {
 
   const exportAiStatement = async () => {
     await exportFinancialStatementPdf({
-      title: 'AI Credits Statement',
+      title: 'YOGIDESK AUTOMATION BILLING RECEIPT',
       filenamePrefix: 'ai-credits-statement',
       rows: sortedAiLedger.map((row) => {
         const metadata = row.metadata || {};
+        const paymentId = metadata.razorpay_payment_id || '';
         return {
           date: new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }),
           activity: metadata.package_id || 'AI Message Credits',
           value: `${Number(metadata.messages_delta ?? metadata.ai_messages ?? 0).toLocaleString()} Messages / ₹${Number(row.amount || 0).toFixed(2)}`,
-          status: 'Success',
+          tracking: paymentId ? `Razorpay Transaction ID: ${paymentId}` : 'Razorpay Verified Payment',
+          status: 'STATUS: SUCCESSFUL (PAID VIA RAZORPAY)',
         };
       }),
     });
@@ -569,16 +571,26 @@ const AIRecharge = () => {
                   visibleAiLedger.map((row) => {
                     const metadata = row.metadata || {};
                     const messageDelta = Number(metadata.messages_delta ?? metadata.ai_messages ?? 0);
-                    const signedMessages = `${messageDelta < 0 ? '-' : '+'}${Math.abs(messageDelta).toLocaleString()} Messages`;
+                    const signedMessages = `${messageDelta < 0 ? '-' : '+'}${Math.abs(messageDelta).toLocaleString()} Credits`;
+                    const paymentId = metadata.razorpay_payment_id || '';
                     return (
                       <tr key={row.id} className="transition hover:bg-slate-50/70">
                         <td className="p-4 text-sm font-semibold text-slate-600">
                           {new Date(row.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
                         </td>
                         <td className="p-4 text-sm font-black text-slate-900">{row.description || metadata.package_id || 'AI Message Credits'}</td>
-                        <td className={`p-4 text-sm font-black ${messageDelta < 0 ? 'text-red-600' : 'text-orange-700'}`}>{signedMessages}</td>
+                        <td className={`p-4 text-sm font-bold ${messageDelta < 0 ? 'text-red-600' : 'text-green-600'}`}>{signedMessages}</td>
                         <td className="p-4 text-sm font-black text-slate-900">₹{Number(row.amount || 0).toFixed(2)}</td>
-                        <td className="p-4 text-xs font-bold text-slate-500">{metadata.razorpay_payment_id || 'Verified payment'}</td>
+                        <td className="p-4">
+                          <div className="flex flex-col gap-2">
+                            <span className="inline-flex w-fit rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700">
+                              {paymentId ? `Razorpay Transaction ID: ${paymentId}` : 'Razorpay Verified Payment'}
+                            </span>
+                            <span className="inline-flex w-fit rounded-full bg-green-600 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+                              Status: Successful (Paid via Razorpay)
+                            </span>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })

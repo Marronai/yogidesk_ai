@@ -232,6 +232,24 @@ const resolveAuthenticatedDoctor = async (req) => {
   return fallbackId ? { id: fallbackId, email: req.body?.email || null } : null;
 };
 
+const resolveTrueClinicForUser = async (userId) => {
+  const safeUserId = String(userId || '').trim();
+  if (!db?.from || !safeUserId) return null;
+
+  try {
+    const { data, error } = await db
+      .from('clinics')
+      .select('id,ai_message_balance,ai_token_balance,token_limit')
+      .eq('user_id', safeUserId)
+      .maybeSingle();
+
+    if (error) return null;
+    return data || null;
+  } catch {
+    return null;
+  }
+};
+
 const getRazorpayClient = () => {
   const { keyId, keySecret } = getRazorpayCredentials();
   if (!keyId || !keySecret) {
@@ -659,31 +677,37 @@ const insertAiPassbookCredit = async ({
   source = 'razorpay'
 }) => {
   if (!db?.from || !userId) return;
-  await db.from('wallet_passbook').insert([{
-    user_id: userId,
-    doctor_id: userId,
-    entry_type: 'AI_MESSAGE_CREDIT',
-    amount: Number(amount || 0),
-    messages_delta: Number(messages || 0),
-    description: `AI Assistant Recharge: +${Number(messages || 0).toLocaleString('en-IN')} Messages Added`,
-    metadata: {
-      provider: source,
-      purpose: 'ai_message_recharge',
-      package_id: packageId,
-      ai_messages: Number(messages || 0),
-      razorpay_order_id: razorpayOrderId,
-      razorpay_payment_id: razorpayPaymentId,
-      razorpay_invoice_id: invoice?.id || null,
-      razorpay_invoice_short_url: invoice?.short_url || null,
-      previous_ai_message_balance: previousBalance,
-      next_ai_message_balance: nextBalance,
-    },
-    created_at: new Date().toISOString(),
-  }]).then(({ error }) => {
+  try {
+    const { error } = await db.from('wallet_passbook').insert([{
+      user_id: userId,
+      doctor_id: userId,
+      patient_number: 'RECHARGE_CREDIT',
+      entry_type: 'AI_MESSAGE_CREDIT',
+      amount: Number(amount || 0),
+      messages_delta: Number(messages || 0),
+      description: `AI Assistant Recharge: +${Number(messages || 0).toLocaleString('en-IN')} Messages Added`,
+      metadata: {
+        provider: source,
+        purpose: 'ai_message_recharge',
+        activity_tag: 'RECHARGE_CREDIT',
+        package_id: packageId,
+        ai_messages: Number(messages || 0),
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+        razorpay_tracking_tag: `RAZORPAY:${razorpayPaymentId || 'VERIFIED'}`,
+        razorpay_invoice_id: invoice?.id || null,
+        razorpay_invoice_short_url: invoice?.short_url || null,
+        previous_ai_message_balance: previousBalance,
+        next_ai_message_balance: nextBalance,
+      },
+      created_at: new Date().toISOString(),
+    }]);
     if (error && !String(error.message || '').toLowerCase().includes('schema cache')) {
       console.error('AI message passbook credit log failed:', error.message || error);
     }
-  });
+  } catch (error) {
+    console.warn('AI message passbook credit log skipped:', error.message || error);
+  }
 };
 
 const resolveAiRechargeFromOrder = async ({ client, orderId, fallbackPackageId = 'custom', fallbackAmount = 0 }) => {
@@ -711,6 +735,8 @@ const resolveAiRechargeFromOrder = async ({ client, orderId, fallbackPackageId =
 };
 
 const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) => {
+  const clinicRow = await resolveTrueClinicForUser(userId);
+  const currentClinicBalance = Number(clinicRow?.ai_message_balance ?? clinicRow?.ai_token_balance ?? clinicRow?.token_limit ?? 0);
   let profileTable = 'doctor_profiles';
   let { data: profileRow, error: profileError } = await db
     .from('doctor_profiles')
@@ -732,13 +758,14 @@ const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) =>
   }
 
   const currentBalance = Number(profileRow?.ai_message_balance ?? profileRow?.ai_token_balance ?? profileRow?.token_limit ?? 0);
-  const nextBalance = currentBalance + aiMessages;
+  const balanceSource = clinicRow?.id ? currentClinicBalance : currentBalance;
+  const nextBalance = balanceSource + aiMessages;
   let update = { error: null, data: null };
   if (db.rpc) {
     update = await db.rpc('credit_ai_message_balance', {
-      p_user_id: userId,
       p_messages: aiMessages,
-      p_usage: usage
+      p_usage: 0,
+      p_user_id: userId
     });
   }
 
@@ -758,6 +785,19 @@ const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) =>
   }
 
   if (update.error) throw update.error;
+
+  if (clinicRow?.id) {
+    const clinicNextBalance = currentClinicBalance + aiMessages;
+    const { error: clinicUpdateError } = await db
+      .from('clinics')
+      .update({ ai_message_balance: clinicNextBalance })
+      .eq('id', clinicRow.id);
+    if (clinicUpdateError && !String(clinicUpdateError.message || '').toLowerCase().includes('schema cache')) {
+      console.error('AI message clinic recharge balance sync failed:', clinicUpdateError.message || clinicUpdateError);
+    }
+    return { currentBalance: currentClinicBalance, nextBalance: clinicNextBalance };
+  }
+
   return { currentBalance, nextBalance };
 };
 
