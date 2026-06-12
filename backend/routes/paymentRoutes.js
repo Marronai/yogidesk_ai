@@ -524,32 +524,44 @@ const insertAiPassbookCredit = async ({
   razorpayPaymentId,
   previousBalance,
   nextBalance,
+  clinicId = null,
   source = 'razorpay'
 }) => {
   if (!db?.from || !userId) return;
   try {
-    const { error } = await db.from('wallet_passbook').insert([{
+    const allocatedMessages = Number.parseInt(String(messages || 0), 10) || 0;
+    const rechargeAmount = Number.parseFloat(String(amount || 0)) || 0;
+    const passbookRechargePayload = {
       user_id: userId,
       doctor_id: userId,
+      clinic_id: clinicId || null,
       patient_number: 'RECHARGE_CREDIT',
+      activity_type: 'RECHARGE_TOPUP',
       entry_type: 'AI_MESSAGE_CREDIT',
-      amount: Number(amount || 0),
-      messages_delta: Number(messages || 0),
-      description: `AI Assistant Recharge: +${Number(messages || 0).toLocaleString('en-IN')} Messages Added`,
+      amount: rechargeAmount,
+      messages_delta: allocatedMessages,
+      credits_deducted: 0,
+      raw_tokens_audited: 0,
+      description: `Razorpay AI message credits topup successful: ${razorpayPaymentId}`,
       metadata: {
         provider: source,
         purpose: 'ai_message_recharge',
         activity_tag: 'RECHARGE_CREDIT',
         package_id: packageId,
-        ai_messages: Number(messages || 0),
+        ai_messages: allocatedMessages,
+        purchased_units: allocatedMessages,
         razorpay_order_id: razorpayOrderId,
         razorpay_payment_id: razorpayPaymentId,
         razorpay_tracking_tag: `RAZORPAY:${razorpayPaymentId || 'VERIFIED'}`,
+        credits_deducted: 0,
+        raw_tokens_audited: 0,
         previous_ai_message_balance: previousBalance,
         next_ai_message_balance: nextBalance,
       },
       created_at: new Date().toISOString(),
-    }]);
+    };
+
+    const { error } = await db.from('wallet_passbook').insert([passbookRechargePayload]);
     if (error && !String(error.message || '').toLowerCase().includes('schema cache')) {
       console.error('AI message passbook credit log failed:', error.message || error);
     }
@@ -644,10 +656,10 @@ const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) =>
     if (clinicUpdateError && !String(clinicUpdateError.message || '').toLowerCase().includes('schema cache')) {
       console.error('AI message clinic recharge balance sync failed:', clinicUpdateError.message || clinicUpdateError);
     }
-    return { currentBalance: currentClinicBalance, nextBalance: clinicNextBalance };
+    return { currentBalance: currentClinicBalance, nextBalance: clinicNextBalance, clinicId: clinicRow.id };
   }
 
-  return { currentBalance, nextBalance };
+  return { currentBalance, nextBalance, clinicId: null };
 };
 
 const isPaymentTestRechargeEnabled = () => (
@@ -755,7 +767,7 @@ router.get('/test-recharge', async (req, res) => {
       clinicName: target.clinicName,
     };
 
-    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+    const { currentBalance, nextBalance, clinicId } = await creditAiMessagesAtomically({
       userId: target.userId,
       aiMessages,
       usage: {
@@ -824,6 +836,7 @@ router.get('/test-recharge', async (req, res) => {
       razorpayPaymentId,
       previousBalance: currentBalance,
       nextBalance,
+      clinicId: clinicId || (target.source === 'clinics' ? target.sourceId : null),
       source: 'test_route_bypass',
     });
 
@@ -902,7 +915,7 @@ router.post('/verify-ai-payment', async (req, res) => {
       return res.status(200).json({ success: true, message: 'Payment already processed.' });
     }
 
-    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+    const { currentBalance, nextBalance, clinicId } = await creditAiMessagesAtomically({
       userId,
       aiMessages,
       usage: { provider: 'razorpay', package_id: packageId, charged_at: new Date().toISOString() }
@@ -961,6 +974,7 @@ router.post('/verify-ai-payment', async (req, res) => {
       razorpayPaymentId,
       previousBalance: currentBalance,
       nextBalance,
+      clinicId,
     });
 
     return res.status(200).json({
@@ -1121,7 +1135,7 @@ router.post('/razorpay-webhook', async (req, res) => {
     if (existingTransactionError) console.error('AI webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
     if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
 
-    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+    const { currentBalance, nextBalance, clinicId } = await creditAiMessagesAtomically({
       userId,
       aiMessages,
       usage: { provider: 'razorpay_webhook', package_id: recharge.packageId, charged_at: new Date().toISOString() }
@@ -1179,6 +1193,7 @@ router.post('/razorpay-webhook', async (req, res) => {
       razorpayPaymentId: paymentId,
       previousBalance: currentBalance,
       nextBalance,
+      clinicId,
       source: 'razorpay_webhook',
     });
 
