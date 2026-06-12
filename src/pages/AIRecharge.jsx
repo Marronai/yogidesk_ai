@@ -464,7 +464,7 @@ const AIRecharge = () => {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 px-5 py-5 sm:px-7">
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7">
                 <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-3">
                   <p className="text-xs font-black uppercase tracking-widest text-slate-700">Language</p>
                   <div className="inline-flex rounded-full border border-orange-200 bg-white p-1 shadow-sm">
@@ -486,7 +486,7 @@ const AIRecharge = () => {
                   </div>
                 </div>
 
-                <div className="max-h-[calc(90vh-116px)] overflow-y-auto pr-2 pb-24">
+                <div className="pr-2">
                 <div className="space-y-3">
                   {termsCopy.points.map((point, index) => (
                     <div key={point.title} className="rounded-xl border border-orange-100 bg-[#fffaf3] p-4">
@@ -505,7 +505,7 @@ const AIRecharge = () => {
                 </div>
               </div>
 
-              <div className="absolute inset-x-0 bottom-0 border-t border-orange-100 bg-white px-5 py-4 shadow-[0_-16px_32px_rgba(15,23,42,0.12)] sm:px-7">
+              <div className="shrink-0 border-t border-orange-100 bg-white px-5 py-4 shadow-[0_-16px_32px_rgba(15,23,42,0.12)] sm:px-7">
                 <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-orange-100 bg-orange-50/70 p-3 transition hover:border-orange-300">
                   <input
                     type="checkbox"

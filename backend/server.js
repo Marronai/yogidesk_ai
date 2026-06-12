@@ -1701,6 +1701,56 @@ const sumAiUsageLedgerDebits = async (db, userId) => {
     return Math.max(logsTotal, passbookTotal);
 };
 
+const sumAiRechargeLedgerCredits = async (db, userId) => {
+    const safeUserId = String(userId || '').trim();
+    if (!db?.from || !safeUserId) return 0;
+
+    const entriesByPayment = new Map();
+    const addEntry = (row = {}, fallbackPrefix = 'row') => {
+        const metadata = row.metadata || {};
+        const purpose = String(metadata.purpose || '').toLowerCase();
+        const entryType = String(row.entry_type || row.transaction_type || '').toUpperCase();
+        const isRecharge = purpose === 'ai_message_recharge' || entryType === 'AI_MESSAGE_CREDIT';
+        if (!isRecharge) return;
+
+        const credits = Number(
+            metadata.purchased_units ??
+            metadata.ai_messages ??
+            metadata.messages_delta ??
+            row.messages_delta ??
+            0
+        );
+        if (!Number.isFinite(credits) || credits <= 0) return;
+
+        const paymentId = String(metadata.razorpay_payment_id || row.id || `${fallbackPrefix}_${entriesByPayment.size}`).trim();
+        entriesByPayment.set(paymentId, Math.max(entriesByPayment.get(paymentId) || 0, credits));
+    };
+
+    try {
+        const { data, error } = await db
+            .from('wallet_passbook')
+            .select('id,entry_type,messages_delta,metadata')
+            .eq('user_id', safeUserId)
+            .gt('messages_delta', 0);
+        if (!error) (data || []).forEach((row) => addEntry(row, 'passbook'));
+    } catch {
+        // Passbook recovery is best-effort; live profile/clinic balances still drive the main response.
+    }
+
+    try {
+        const { data, error } = await db
+            .from('wallet_transactions')
+            .select('id,transaction_type,metadata')
+            .eq('user_id', safeUserId)
+            .eq('transaction_type', 'AI_MESSAGE_CREDIT');
+        if (!error) (data || []).forEach((row) => addEntry(row, 'transaction'));
+    } catch {
+        // Legacy transaction recovery is best-effort.
+    }
+
+    return [...entriesByPayment.values()].reduce((total, credits) => total + credits, 0);
+};
+
 const markAiBillingDebited = async ({ db, table, row, update, totalTokens, credits }) => {
     const metadata = {
         ...(row.metadata || {}),
@@ -4707,11 +4757,15 @@ app.get('/api/ai/settings', async (req, res) => {
             Number(data?.ai_messages_used ?? data?.ai_message_used ?? data?.token_used ?? 0)
         );
         const ledgerDebits = await sumAiUsageLedgerDebits(db, userId);
+        const ledgerRechargeCredits = await sumAiRechargeLedgerCredits(db, userId);
         const aiMessageUsed = runtimePlan.runtime_tier === 'BASIC' ? 0 : Math.max(storedUsed, ledgerDebits);
         const unsyncedLedgerDebits = Math.max(0, aiMessageUsed - storedUsed);
+        const ledgerRecoveredBalance = runtimePlan.runtime_tier === 'BASIC'
+            ? 0
+            : Math.max(0, 500 + ledgerRechargeCredits - aiMessageUsed);
         const aiMessageBalance = runtimePlan.runtime_tier === 'BASIC'
             ? 0
-            : Math.max(0, storedBalance - unsyncedLedgerDebits);
+            : Math.max(0, storedBalance - unsyncedLedgerDebits, ledgerRecoveredBalance);
 
         return res.status(200).json({
             success: true,
