@@ -27,7 +27,7 @@ const AISettings = () => {
   const [loading, setLoading] = useState(true);
   const [usageLedgerLoading, setUsageLedgerLoading] = useState(true);
   const [aiUsageLedger, setAiUsageLedger] = useState([]);
-  const [profileMeta, setProfileMeta] = useState({ clinicName: 'Clinic Workspace', doctorIdentityId: '' });
+  const [profileMeta, setProfileMeta] = useState({ clinicName: 'Clinic Workspace', clinicPhoneNumber: '' });
   const [error, setError] = useState('');
   const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
 
@@ -63,7 +63,7 @@ const AISettings = () => {
         const liveProfile = profileResult.data?.profile || userProfile || {};
         setProfileMeta({
           clinicName: liveProfile.clinic_name || liveProfile.business_name || liveProfile.clinicName || localStorage.getItem('clinic_name') || 'Clinic Workspace',
-          doctorIdentityId: liveProfile.id || liveProfile.user_id || liveProfile.doctor_id || userId || '',
+          clinicPhoneNumber: liveProfile.clinic_phone || liveProfile.phone || liveProfile.mobile || liveProfile.whatsapp_number || liveProfile.whatsapp_phone || localStorage.getItem('user_phone') || '',
         });
         const livePlan = liveProfile.runtime_plan || liveProfile.current_plan || liveProfile.plan_tier;
         const expired = Boolean(liveProfile.has_trial_expired || liveProfile.is_trial_expired || settingsResult.data.settings?.has_trial_expired || settingsResult.data.settings?.is_trial_expired);
@@ -276,7 +276,7 @@ const AISettings = () => {
         loading={usageLedgerLoading}
         onRefresh={fetchAiUsageLedger}
         clinicName={profileMeta.clinicName}
-        doctorIdentityId={profileMeta.doctorIdentityId}
+        clinicPhoneNumber={profileMeta.clinicPhoneNumber}
         className="w-full"
       />
     </div>

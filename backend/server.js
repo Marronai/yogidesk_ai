@@ -1569,7 +1569,14 @@ const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inpu
 
     while (Object.keys(payload).length > 0) {
         const { error } = await db.from('wallet_passbook').insert([payload]);
-        if (!error) return { success: true };
+        if (!error) {
+            await syncClinicAiMessageBalanceDeduction({
+                db,
+                trueClinicId,
+                credits
+            });
+            return { success: true };
+        }
 
         const missingColumn = getMissingSchemaColumn(error);
         if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
@@ -1580,6 +1587,61 @@ const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inpu
         }
 
         console.error('AI usage passbook webhook insert failed:', error.message || error);
+        return { success: false, error };
+    }
+
+    return { success: false, reason: 'empty_payload_after_schema_prune' };
+};
+
+const syncClinicAiMessageBalanceDeduction = async ({ db, trueClinicId, credits }) => {
+    const safeClinicId = String(trueClinicId || '').trim();
+    const safeCredits = Math.max(0, Math.ceil(Number(credits || 0)));
+    if (!db?.from || !safeClinicId || safeCredits <= 0) return { success: false, skipped: true };
+
+    try {
+        const { data: clinic, error: selectError } = await db
+            .from('clinics')
+            .select('*')
+            .eq('id', safeClinicId)
+            .maybeSingle();
+
+        if (selectError || !clinic?.id) {
+            if (selectError && !isSchemaCacheError(selectError)) {
+                console.warn('Clinic AI balance lookup failed:', selectError.message || selectError);
+            }
+            return { success: false, reason: 'clinic_not_found', error: selectError };
+        }
+
+        const currentBalance = Number(clinic.ai_message_balance ?? clinic.ai_token_balance ?? clinic.token_limit ?? 0);
+        const currentUsed = Number(clinic.ai_message_used ?? clinic.token_used ?? 0);
+        let payload = removeUndefinedValues({
+            ai_message_balance: Math.max(0, currentBalance - safeCredits),
+            ai_message_used: currentUsed + safeCredits,
+            token_used: currentUsed + safeCredits
+        });
+        const removedColumns = new Set();
+
+        while (Object.keys(payload).length > 0) {
+            const { error } = await db
+                .from('clinics')
+                .update(payload)
+                .eq('id', safeClinicId);
+
+            if (!error) return { success: true };
+
+            const missingColumn = getMissingSchemaColumn(error);
+            if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+                removedColumns.add(missingColumn);
+                const { [missingColumn]: _removed, ...nextPayload } = payload;
+                payload = nextPayload;
+                continue;
+            }
+
+            console.error('Clinic AI balance deduction sync failed:', error.message || error);
+            return { success: false, error };
+        }
+    } catch (error) {
+        console.error('Clinic AI balance deduction sync crashed:', error.message || error);
         return { success: false, error };
     }
 

@@ -46,9 +46,11 @@ const exportUsageStatementPdf = ({
   startDate,
   endDate,
   clinicName,
-  doctorIdentityId,
+  clinicPhoneNumber,
 }) => {
   const rangeText = `${startDate || 'All dates'} to ${endDate || 'Present'}`;
+  const phoneDigits = String(clinicPhoneNumber || '').replace(/\D/g, '');
+  const displayDocId = `YOGI-DOC-${phoneDigits || 'REGISTERED'}`;
   const tableRows = rows.map((row) => {
     const usage = getUsage(row);
     const patient = row.patient_number || 'Patient';
@@ -73,9 +75,13 @@ const exportUsageStatementPdf = ({
       <head>
         <title>YogiDesk Automation Statement</title>
         <style>
-          @page { margin: 18mm; }
+          @page { margin: 0 !important; }
           * { box-sizing: border-box; }
-          body { margin: 0; color: #111827; font-family: Arial, Helvetica, sans-serif; background: #ffffff; }
+          body { margin: 0; padding: 2cm !important; color: #111827; font-family: Arial, Helvetica, sans-serif; background: #ffffff; }
+          @media print {
+            @page { margin: 0 !important; }
+            body { padding: 2cm !important; }
+          }
           .header { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 18px; }
           .brand-wrap { display: flex; align-items: center; gap: 14px; }
           .logo { width: 46px; height: 46px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 10px; padding: 6px; }
@@ -103,7 +109,7 @@ const exportUsageStatementPdf = ({
         </div>
         <div class="meta">
           <div><strong>Clinic Name</strong>${escapeHtml(clinicName || 'Clinic Workspace')}</div>
-          <div><strong>Registered Doctor Identity ID</strong>${escapeHtml(doctorIdentityId || 'Active Workspace')}</div>
+          <div><strong>Registered Doctor Identity ID</strong>${escapeHtml(displayDocId)}</div>
           <div><strong>Accounting Range</strong>${escapeHtml(rangeText)}</div>
           <div><strong>Generated At</strong>${escapeHtml(new Date().toLocaleString('en-IN'))}</div>
         </div>
@@ -152,7 +158,7 @@ const AIUsagePassbook = ({
   loading = false,
   onRefresh,
   clinicName,
-  doctorIdentityId,
+  clinicPhoneNumber,
   className = '',
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -176,7 +182,7 @@ const AIUsagePassbook = ({
       startDate,
       endDate,
       clinicName,
-      doctorIdentityId,
+      clinicPhoneNumber,
     });
   };
 
