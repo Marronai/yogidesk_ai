@@ -1418,7 +1418,7 @@ const updateInboxMessagesByWamid = async (db, update) => {
         if (statusRank <= getDeliveryStatusRank('SENT')) query = query.not('status', 'in', '("DELIVERED","READ","FAILED")');
         if (statusRank === getDeliveryStatusRank('DELIVERED')) query = query.not('status', 'in', '("READ","FAILED")');
         if (statusRank === getDeliveryStatusRank('READ')) query = query.neq('status', 'FAILED');
-        return query.select('id, chat_id, metadata');
+        return query.select('id, chat_id, workspace_id, sender_id, receiver_phone, metadata');
     };
 
     const attempts = [
@@ -1447,6 +1447,184 @@ const updateInboxMessagesByWamid = async (db, update) => {
         status: update.status
     });
     return lastResult;
+};
+
+const updateTransactionMessagesByWamid = async (db, update) => {
+    const patch = { status: update.status };
+    const incomingWamid = String(update.messageId || '').trim();
+    const quotedWamid = quotePostgrestValue(incomingWamid);
+
+    const runStatusUpdate = async (buildQuery) => {
+        let query = buildQuery(db.from('messages').update(patch));
+        const statusRank = getDeliveryStatusRank(update.status);
+        if (statusRank <= getDeliveryStatusRank('SENT')) query = query.not('status', 'in', '("DELIVERED","READ","FAILED")');
+        if (statusRank === getDeliveryStatusRank('DELIVERED')) query = query.not('status', 'in', '("READ","FAILED")');
+        if (statusRank === getDeliveryStatusRank('READ')) query = query.neq('status', 'FAILED');
+        return query.select('id, metadata');
+    };
+
+    const attempts = [
+        () => runStatusUpdate((query) => query.or(`wamid.ilike.${quotedWamid},meta_message_id.ilike.${quotedWamid},message_id.ilike.${quotedWamid}`)),
+        () => runStatusUpdate((query) => query.filter('metadata->>wamid', 'eq', incomingWamid)),
+        () => runStatusUpdate((query) => query.filter('metadata->>meta_message_id', 'eq', incomingWamid)),
+        () => runStatusUpdate((query) => query.filter('metadata->>message_id', 'eq', incomingWamid))
+    ];
+
+    let lastResult = { data: [], error: null };
+    for (const attempt of attempts) {
+        const result = await attempt();
+        if (result.error) {
+            if (isMissingStatusMatchColumn(result.error)) continue;
+            return result;
+        }
+        if (Array.isArray(result.data) && result.data.length > 0) return result;
+        lastResult = result;
+    }
+
+    return lastResult;
+};
+
+const calculateAiCreditsFromTokens = (totalTokenCount) => {
+    const totalTokens = Math.max(1, Math.ceil(Number(totalTokenCount || 0)));
+    return Math.max(1, Math.ceil(totalTokens / 100));
+};
+
+const extractAiBillingFromMatchedRow = (row = {}) => {
+    const metadata = row.metadata || {};
+    const billing = metadata.ai_billing || metadata.billing || {};
+    const usage = metadata.usage || {};
+    const inputTokens = Number(billing.input_tokens ?? usage.input_tokens ?? metadata.input_tokens ?? 0);
+    const outputTokens = Number(billing.output_tokens ?? usage.output_tokens ?? metadata.output_tokens ?? 0);
+    const totalTokens = Math.max(0, Number(billing.total_tokens ?? usage.total_tokens ?? metadata.total_tokens ?? (inputTokens + outputTokens)));
+    const credits = Math.max(0, Number(billing.credits_deducted ?? usage.credits_deducted ?? metadata.credits_deducted ?? calculateAiCreditsFromTokens(totalTokens)));
+    const userId = row.workspace_id || row.sender_id || row.user_id || row.doctor_id || row.clinic_id || metadata.clinic_id || metadata.user_id || metadata.doctor_id || null;
+    const patientNumber = phoneDigitsOnly(row.receiver_phone || row.patient_number || row.patient_phone || row.phone || metadata.patient_number || metadata.patient_phone || '');
+
+    return {
+        billing,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        credits: credits || calculateAiCreditsFromTokens(totalTokens),
+        userId,
+        patientNumber,
+        alreadyDebited: Boolean(billing.debited || metadata.ai_usage_debited)
+    };
+};
+
+const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inputTokens = 0, outputTokens = 0, totalTokens, credits, update, row }) => {
+    let payload = removeUndefinedValues({
+        user_id: userId,
+        doctor_id: userId,
+        clinic_id: userId,
+        patient_number: patientNumber || null,
+        activity_type: 'AI_CONVERSATION_DEBIT',
+        entry_type: 'AI_MESSAGE_DEBIT',
+        amount: 0,
+        messages_delta: -Math.abs(Number(credits || 0)),
+        raw_tokens_audited: totalTokens,
+        credits_deducted: credits,
+        description: `Patient: ${patientNumber || 'Patient'} | AI Conversation Session Completed: -${credits} Credits Deducted`,
+        metadata: {
+            purpose: 'ai_usage_passbook',
+            source: 'meta_status_webhook',
+            wamid: update.messageId,
+            status: update.status,
+            raw_tokens_audited: totalTokens,
+            credits_deducted: credits,
+            matched_message_id: row.id || null,
+            usage: {
+                input_tokens: inputTokens,
+                output_tokens: outputTokens,
+                total_tokens: totalTokens,
+                credits_deducted: credits
+            }
+        },
+        created_at: new Date().toISOString()
+    });
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        const { error } = await db.from('wallet_passbook').insert([payload]);
+        if (!error) return { success: true };
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        console.error('AI usage passbook webhook insert failed:', error.message || error);
+        return { success: false, error };
+    }
+
+    return { success: false, reason: 'empty_payload_after_schema_prune' };
+};
+
+const markAiBillingDebited = async ({ db, table, row, update, totalTokens, credits }) => {
+    const metadata = {
+        ...(row.metadata || {}),
+        ai_usage_debited: true,
+        ai_usage_debited_at: new Date().toISOString(),
+        ai_billing: {
+            ...((row.metadata || {}).ai_billing || {}),
+            debited: true,
+            debited_at: new Date().toISOString(),
+            debit_status: update.status,
+            total_tokens: totalTokens,
+            credits_deducted: credits
+        }
+    };
+
+    const { error } = await db.from(table).update({ metadata }).eq('id', row.id);
+    if (error && !isMissingStatusMatchColumn(error)) {
+        console.error(`AI billing metadata marker failed on ${table}:`, error.message || error);
+    }
+};
+
+const debitMatchedAiUsageOnce = async ({ db, rows = [], table, update }) => {
+    if (!['SENT', 'DELIVERED', 'READ'].includes(String(update.status || '').toUpperCase())) return null;
+
+    for (const row of rows || []) {
+        const billing = extractAiBillingFromMatchedRow(row);
+        if (billing.alreadyDebited || !billing.userId || billing.totalTokens <= 0) continue;
+
+        const credits = calculateAiCreditsFromTokens(billing.totalTokens);
+        const { error } = await db.rpc('debit_ai_message_balance', {
+            p_messages: credits,
+            p_usage: parseInt(billing.totalTokens, 10),
+            p_user_id: billing.userId
+        });
+
+        if (error) {
+            console.error('AI usage webhook debit RPC failed:', error.message || error);
+            continue;
+        }
+
+        await insertWalletPassbookAuditSafely({
+            db,
+            userId: billing.userId,
+            patientNumber: billing.patientNumber,
+            inputTokens: billing.inputTokens,
+            outputTokens: billing.outputTokens,
+            totalTokens: billing.totalTokens,
+            credits,
+            update,
+            row
+        });
+        await markAiBillingDebited({ db, table, row, update, totalTokens: billing.totalTokens, credits });
+
+        return {
+            success: true,
+            userId: billing.userId,
+            totalTokens: billing.totalTokens,
+            credits
+        };
+    }
+
+    return null;
 };
 
 const logWhatsAppWebhookStatusEvent = async (db, update, messages = [], processingError = null) => {
@@ -1569,7 +1747,38 @@ const applyInboxDeliveryStatusUpdate = async (update = {}) => {
         });
 
         if (!Array.isArray(messages) || messages.length === 0) {
-            console.warn('Inbox delivery status WAMID update matched no rows:', {
+            const transactionResult = await updateTransactionMessagesByWamid(db, update);
+            const transactionMessages = transactionResult.data || [];
+            await logWhatsAppWebhookStatusEvent(db, update, transactionMessages, transactionResult.error || null);
+
+            if (transactionResult.error) {
+                console.error('❌ Messages transaction delivery status WAMID update failed:', {
+                    messageId: update.messageId,
+                    status: update.status,
+                    retryAttempt: update.retryAttempt || 0,
+                    error: transactionResult.error.message || transactionResult.error
+                });
+                return;
+            }
+
+            if (Array.isArray(transactionMessages) && transactionMessages.length > 0) {
+                const billingDebit = await debitMatchedAiUsageOnce({
+                    db,
+                    rows: transactionMessages,
+                    table: 'messages',
+                    update
+                });
+                console.log('✅ Messages transaction delivery status updated:', {
+                    messageId: update.messageId,
+                    status: update.status,
+                    retryAttempt: update.retryAttempt || 0,
+                    matchedRows: transactionMessages.length,
+                    billingDebit
+                });
+                return;
+            }
+
+            console.warn('Inbox/messages delivery status WAMID update matched no rows:', {
                 messageId: update.messageId,
                 status: update.status,
                 retryAttempt: update.retryAttempt || 0
@@ -1639,6 +1848,13 @@ const applyInboxDeliveryStatusUpdate = async (update = {}) => {
                     .eq('id', message.chat_id);
             }
         }
+
+        await debitMatchedAiUsageOnce({
+            db,
+            rows: messages || [],
+            table: 'inbox_messages',
+            update
+        });
     } catch (error) {
         await logWhatsAppWebhookStatusEvent(db, update, [], error);
         console.error('Inbox delivery status sync failed:', error.message || error);

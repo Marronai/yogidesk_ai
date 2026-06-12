@@ -317,6 +317,100 @@ const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } 
     }
 };
 
+const forceWriteOutboundWamidToMessages = async ({
+    outboundWamid,
+    targetClinicId,
+    targetPatientNumber,
+    generatedAiTextResponse,
+    usageMetadata = {},
+    inbound = {},
+    phoneNumberId,
+    businessAccountId
+}) => {
+    const db = supabaseAdmin || supabase;
+    const safeWamid = String(outboundWamid || '').trim();
+    const safeText = String(generatedAiTextResponse || '').trim();
+    const safePatientNumber = phoneDigitsOnly(targetPatientNumber || inbound.fromPhone || '');
+    const safeClinicId = String(targetClinicId || '').trim();
+    if (!db?.from || !safeWamid || !safeText || !safePatientNumber) {
+        return { success: false, reason: 'missing_required_wamid_fields' };
+    }
+
+    const normalizedUsage = normalizeGeminiUsageMetadata(usageMetadata);
+    const totalTokens = Math.max(1, parseInt(normalizedUsage.totalSessionTokens, 10) || 1);
+    const credits = calculateAiMessageCreditsFromTokens(totalTokens);
+    const nowIso = new Date().toISOString();
+    let payload = removeUndefinedValues({
+        wamid: safeWamid,
+        clinic_id: safeClinicId || null,
+        user_id: safeClinicId || null,
+        doctor_id: safeClinicId || null,
+        patient_number: safePatientNumber,
+        patient_phone: safePatientNumber,
+        phone: safePatientNumber,
+        message_text: safeText,
+        message_body: safeText,
+        body: safeText,
+        text: safeText,
+        content: safeText,
+        sender_type: 'ai',
+        sender: 'bot',
+        role: 'assistant',
+        direction: 'outbound',
+        status: 'SENT',
+        message_id: safeWamid,
+        meta_message_id: safeWamid,
+        metadata: {
+            wamid: safeWamid,
+            message_id: safeWamid,
+            meta_message_id: safeWamid,
+            clinic_id: safeClinicId || null,
+            patient_number: safePatientNumber,
+            sender_type: 'ai',
+            inbound_message_id: inbound.messageId || null,
+            whatsapp_business_account_id: businessAccountId || inbound.businessAccountId || null,
+            whatsapp_phone_number_id: phoneNumberId || inbound.phoneNumberId || null,
+            gemini_reply: true,
+            outbound: true,
+            ai_billing: {
+                pending_webhook_debit: true,
+                debited: false,
+                input_tokens: normalizedUsage.promptTokens,
+                output_tokens: normalizedUsage.candidateTokens,
+                total_tokens: totalTokens,
+                credits_deducted: credits
+            }
+        },
+        created_at: nowIso
+    });
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        try {
+            const { error } = await db
+                .from('messages')
+                .insert(payload);
+            if (!error) return { success: true, totalTokens, credits };
+
+            console.error('[YogiDesk Critical Core] Failed to write outbound WAMID to schema cache.', error.message || error);
+            const missingColumn = getMissingSchemaColumn(error);
+            if (isSchemaCacheError(error) && missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn) && !removedColumns.has(missingColumn)) {
+                removedColumns.add(missingColumn);
+                const { [missingColumn]: _removed, ...nextPayload } = payload;
+                payload = nextPayload;
+                continue;
+            }
+
+            return { success: false, error, totalTokens, credits };
+        } catch (error) {
+            console.error('[YogiDesk Critical Core] Failed to write outbound WAMID to schema cache.', error.message || error);
+            return { success: false, error, totalTokens, credits };
+        }
+    }
+
+    return { success: false, reason: 'empty_payload_after_schema_prune', totalTokens, credits };
+};
+
 const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId, logDelivery = null, commitDelivery = null }) => {
     const safeText = String(text || '').trim();
     if (!toPhone || !safeText) return null;
@@ -353,6 +447,20 @@ const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, busin
     });
 
     console.log('[YogiDesk Debug] Meta reply response:', JSON.stringify(response.data, null, 2));
+    const outboundWamid = response.data?.messages?.[0]?.id || null;
+    if (!outboundWamid) throw new Error('Meta response missing outbound WAMID for Gemini WhatsApp reply.');
+
+    const preCommittedMessage = await forceWriteOutboundWamidToMessages({
+        outboundWamid,
+        targetClinicId: logDelivery?.doctorId || commitDelivery?.doctorId || commitDelivery?.doctor?.id || '',
+        targetPatientNumber: payload.to,
+        generatedAiTextResponse: safeText,
+        usageMetadata: commitDelivery?.usageMetadata || {},
+        inbound: commitDelivery?.inbound || {},
+        phoneNumberId: credentials.phoneNumberId,
+        businessAccountId
+    });
+
     if (logDelivery?.doctorId) {
         await logOutboundMessageDelivery({
             doctorId: logDelivery.doctorId,
@@ -366,7 +474,9 @@ const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, busin
     const metaReplyPayload = {
         ...response.data,
         _yogidesk: {
-            phoneNumberId: credentials.phoneNumberId
+            phoneNumberId: credentials.phoneNumberId,
+            outboundWamid,
+            preCommittedMessage
         }
     };
     if (commitDelivery?.inbound && commitDelivery?.replyText) {
@@ -376,7 +486,9 @@ const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, busin
             metaReply: metaReplyPayload,
             credentials: { phoneNumberId: credentials.phoneNumberId },
             phoneNumberId,
-            businessAccountId
+            businessAccountId,
+            usageMetadata: commitDelivery.usageMetadata || {},
+            preCommittedMessage
         });
     }
     return metaReplyPayload;
@@ -1335,7 +1447,9 @@ const commitGeminiOutboundReply = async ({
     metaReply,
     credentials = {},
     phoneNumberId,
-    businessAccountId
+    businessAccountId,
+    usageMetadata = {},
+    preCommittedMessage = null
 }) => {
     const wamid = metaReply?.messages?.[0]?.id || metaReply?.message_id || metaReply?.wamid || null;
     const safeText = String(replyText || '').trim();
@@ -1353,6 +1467,17 @@ const commitGeminiOutboundReply = async ({
         patientPhone
     });
     const nowIso = new Date().toISOString();
+    const normalizedUsage = normalizeGeminiUsageMetadata(usageMetadata);
+    const totalTokens = Math.max(1, parseInt(normalizedUsage.totalSessionTokens, 10) || 1);
+    const credits = calculateAiMessageCreditsFromTokens(totalTokens);
+    const aiBillingMetadata = {
+        pending_webhook_debit: true,
+        debited: false,
+        input_tokens: normalizedUsage.promptTokens,
+        output_tokens: normalizedUsage.candidateTokens,
+        total_tokens: totalTokens,
+        credits_deducted: credits
+    };
     const existingChat = await findGeminiReplyChat({ db, ownerId, patientPhone });
     const chatMetadata = existingChat?.metadata || {};
 
@@ -1420,6 +1545,7 @@ const commitGeminiOutboundReply = async ({
             inbound_message_id: inbound.messageId || null,
             gemini_reply: true,
             outbound: true,
+            ai_billing: aiBillingMetadata,
             meta_response: metaReply
         },
         created_at: nowIso
@@ -1431,28 +1557,34 @@ const commitGeminiOutboundReply = async ({
         return { success: false, reason: 'message_insert_failed', error: insertResult.error, wamid, chatId };
     }
 
-    const messagesCommit = await insertWithSchemaFallback({
-        table: 'messages',
-        dbClient: db,
-        row: {
-            ...row,
-            user_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
-            doctor_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
-            patient_phone: patientPhone,
-            phone: patientPhone,
-            direction: 'outbound',
-            role: 'assistant',
-            content: safeText,
-            status: 'SENT',
-            message_id: wamid,
-            meta_message_id: wamid,
-            wamid,
-            metadata: {
-                ...(row.metadata || {}),
-                messages_transaction_inserted_at: nowIso
+    let messagesCommit = preCommittedMessage?.success ? preCommittedMessage : null;
+    if (!messagesCommit) {
+        messagesCommit = await insertWithSchemaFallback({
+            table: 'messages',
+            dbClient: db,
+            row: {
+                ...row,
+                user_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+                doctor_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+                clinic_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+                patient_number: patientPhone,
+                patient_phone: patientPhone,
+                phone: patientPhone,
+                direction: 'outbound',
+                role: 'assistant',
+                sender_type: 'ai',
+                content: safeText,
+                status: 'SENT',
+                message_id: wamid,
+                meta_message_id: wamid,
+                wamid,
+                metadata: {
+                    ...(row.metadata || {}),
+                    messages_transaction_inserted_at: nowIso
+                }
             }
-        }
-    });
+        });
+    }
     if (!messagesCommit.success) {
         console.warn('Gemini outbound reply messages table insert failed:', messagesCommit.error?.message || messagesCommit.error || messagesCommit.reason);
     }
@@ -1612,15 +1744,18 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                             },
                             commitDelivery: {
                                 inbound,
-                                replyText: finalReplyText
+                                replyText: finalReplyText,
+                                doctorId: doctor.id,
+                                doctor,
+                                usageMetadata: geminiResult.usageMetadata || {}
                             }
                         });
                         const inboxCommit = metaReply?._yogidesk?.inboxCommit || null;
-                        const creditDebit = await deductDoctorAiMessageCredit({
-                            doctor,
-                            usageMetadata: geminiResult.usageMetadata || {},
-                            patientPhone: inbound.fromPhone
-                        });
+                        const creditDebit = {
+                            success: true,
+                            pendingWebhookDebit: true,
+                            reason: 'debit_deferred_until_meta_status_match'
+                        };
                         result.metaReplies.push({ success: true, response: metaReply, inboxCommit, creditDebit });
                         console.log('[YogiDesk AI] Response successfully sent to patient.');
                     } catch (sendError) {
