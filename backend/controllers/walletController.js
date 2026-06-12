@@ -122,8 +122,6 @@ const sanitizePassbookRowForUi = (row = {}) => ({
     messages_delta: row.messages_delta,
     razorpay_payment_id: row.metadata?.razorpay_payment_id,
     razorpay_order_id: row.metadata?.razorpay_order_id,
-    razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
-    razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
     total_amount: row.metadata?.total_amount,
     recharge_type: row.metadata?.recharge_type,
   },
@@ -436,8 +434,6 @@ const getWalletTransactions = async (req, res) => {
             ai_messages: row.metadata?.ai_messages,
             razorpay_payment_id: row.metadata?.razorpay_payment_id,
             razorpay_order_id: row.metadata?.razorpay_order_id,
-            razorpay_invoice_id: row.metadata?.razorpay_invoice_id,
-            razorpay_invoice_short_url: row.metadata?.razorpay_invoice_short_url,
             total_amount: row.metadata?.total_amount,
           },
         }));
