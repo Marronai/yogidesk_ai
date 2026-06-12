@@ -7,10 +7,36 @@ import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { blockLiveSupportWidgetsForMetaReview } from '../utils/metaReviewSession';
 
+const TAWK_SCRIPT_ID = 'yogidesk-tawk-widget';
+const TAWK_EMBED_URL = 'https://embed.tawk.to/6a2bfd7374b4d41c29150020/1jqttc32p';
+
+const removeTawkWidget = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  document
+    .querySelectorAll(`#${TAWK_SCRIPT_ID},script[src*="embed.tawk.to"],iframe[src*="tawk.to"],iframe[title*="chat"],iframe[title*="Chat"]`)
+    .forEach((node) => node.remove());
+
+  try {
+    window.Tawk_API?.hideWidget?.();
+    window.Tawk_API?.shutdown?.();
+  } catch {
+    // Tawk cleanup must never affect dashboard routing.
+  }
+
+  try {
+    delete window.Tawk_API;
+    delete window.Tawk_LoadStart;
+  } catch {
+    window.Tawk_API = undefined;
+    window.Tawk_LoadStart = undefined;
+  }
+};
+
 const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isMetaReviewSession } = useAuth();
+  const { isAuthenticated, isMetaReviewSession, user, userProfile } = useAuth();
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
   useEffect(() => {
@@ -75,6 +101,86 @@ const MainLayout = () => {
   useEffect(() => {
     if (isMetaReviewSession) blockLiveSupportWidgetsForMetaReview();
   }, [isMetaReviewSession]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
+
+    if (!isAuthenticated || !user?.id || isMetaReviewSession) {
+      removeTawkWidget();
+      return undefined;
+    }
+
+    const clinicName = (
+      userProfile?.clinic_name ||
+      userProfile?.business_name ||
+      userProfile?.clinicName ||
+      user?.user_metadata?.clinic_name ||
+      user?.user_metadata?.businessName ||
+      user?.user_metadata?.name ||
+      localStorage.getItem('clinic_name') ||
+      localStorage.getItem('user_name') ||
+      'YogiDesk Doctor'
+    );
+    const clinicPhone = (
+      userProfile?.clinic_phone ||
+      userProfile?.phone ||
+      userProfile?.mobile ||
+      userProfile?.whatsapp_number ||
+      userProfile?.whatsapp_phone ||
+      user?.user_metadata?.phone ||
+      localStorage.getItem('user_phone') ||
+      ''
+    );
+
+    window.Tawk_API = window.Tawk_API || {};
+    window.Tawk_LoadStart = window.Tawk_LoadStart || new Date();
+    window.Tawk_API.customStyle = {
+      visibility: {
+        desktop: {
+          position: 'br',
+          xOffset: 24,
+          yOffset: 24,
+        },
+        mobile: {
+          position: 'br',
+          xOffset: 16,
+          yOffset: 84,
+        },
+      },
+    };
+    window.Tawk_API.onLoad = function onTawkLoad() {
+      try {
+        window.Tawk_API?.setAttributes?.({
+          name: clinicName || 'YogiDesk Doctor',
+          phone: clinicPhone || '',
+        }, function noop() {});
+      } catch (error) {
+        console.warn('Tawk visitor prefill skipped:', error?.message || error);
+      }
+    };
+
+    if (!document.getElementById(TAWK_SCRIPT_ID)) {
+      const script = document.createElement('script');
+      const firstScript = document.getElementsByTagName('script')[0];
+      script.id = TAWK_SCRIPT_ID;
+      script.async = true;
+      script.src = TAWK_EMBED_URL;
+      script.charset = 'UTF-8';
+      script.setAttribute('crossorigin', '*');
+      if (firstScript?.parentNode) {
+        firstScript.parentNode.insertBefore(script, firstScript);
+      } else {
+        document.head.appendChild(script);
+      }
+    } else {
+      window.Tawk_API.onLoad();
+      window.Tawk_API?.showWidget?.();
+    }
+
+    return () => {
+      removeTawkWidget();
+    };
+  }, [isAuthenticated, isMetaReviewSession, user?.id, user?.user_metadata, userProfile]);
 
   useEffect(() => {
     setLowBalanceDismissed(false);
