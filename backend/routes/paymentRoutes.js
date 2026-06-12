@@ -12,6 +12,7 @@ const {
   normalizeInvoiceContact: normalizeSharedInvoiceContact,
   toPaise: sharedToPaise,
 } = require('../services/razorpayInvoiceService');
+const { sendAiCreditInvoiceEmail } = require('../services/aiCreditInvoiceMailer');
 
 const router = express.Router();
 const db = supabaseAdmin || supabase;
@@ -622,6 +623,7 @@ router.post('/create-ai-order', async (req, res) => {
     const doctorName = doctorMetadata.full_name || doctorMetadata.name || req.body?.doctorName || req.body?.name || 'Doctor';
     const doctorEmail = doctor.email || req.body?.email || '';
     const doctorPhone = normalizeInvoiceContact(doctorMetadata.phone || req.body?.phone || req.body?.contact || '');
+    const clinicName = doctorMetadata.clinic_name || doctorMetadata.clinicName || req.body?.clinic_name || req.body?.clinicName || doctorName;
 
     const order = await client.orders.create({
       amount: amountPaise,
@@ -640,6 +642,7 @@ router.post('/create-ai-order', async (req, res) => {
         doctor_name: doctorName,
         doctor_email: doctorEmail,
         doctor_phone: doctorPhone,
+        clinic_name: clinicName,
       },
     });
 
@@ -731,6 +734,7 @@ const resolveAiRechargeFromOrder = async ({ client, orderId, fallbackPackageId =
     doctorName: notes.doctor_name || '',
     doctorEmail: notes.doctor_email || '',
     doctorPhone: notes.doctor_phone || '',
+    clinicName: notes.clinic_name || '',
   };
 };
 
@@ -862,6 +866,21 @@ router.post('/verify-ai-payment', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay', package_id: packageId, charged_at: new Date().toISOString() }
     });
+    const customInvoice = await sendAiCreditInvoiceEmail({
+      db,
+      supabaseAdmin,
+      userId,
+      recharge,
+      razorpayPaymentId,
+      paidAt: new Date(),
+      fallbackDoctor: {
+        name: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
+        doctorName: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
+        email: recharge.doctorEmail || doctor?.email,
+        phone: recharge.doctorPhone || doctor?.user_metadata?.phone,
+        clinicName: recharge.clinicName || doctor?.user_metadata?.clinic_name || doctor?.user_metadata?.clinicName,
+      },
+    });
     const invoice = await createRazorpayAiInvoice({
       client,
       userId,
@@ -891,6 +910,8 @@ router.post('/verify-ai-payment', async (req, res) => {
         razorpay_payment_id: razorpayPaymentId,
         razorpay_invoice_id: invoice?.id || null,
         razorpay_invoice_short_url: invoice?.short_url || null,
+        custom_invoice_number: customInvoice.invoiceNumber,
+        custom_invoice_email_sent: Boolean(customInvoice.sent),
         previous_ai_message_balance: currentBalance,
         next_ai_message_balance: nextBalance,
       },
@@ -1089,6 +1110,21 @@ router.post('/razorpay-webhook', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay_webhook', package_id: recharge.packageId, charged_at: new Date().toISOString() }
     });
+    const customInvoice = await sendAiCreditInvoiceEmail({
+      db,
+      supabaseAdmin,
+      userId,
+      recharge,
+      razorpayPaymentId: paymentId,
+      paidAt: payment?.created_at ? new Date(Number(payment.created_at) * 1000) : new Date(),
+      fallbackDoctor: {
+        name: recharge.doctorName || payment?.notes?.doctor_name,
+        doctorName: recharge.doctorName || payment?.notes?.doctor_name,
+        email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
+        phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
+        clinicName: recharge.clinicName || payment?.notes?.clinic_name,
+      },
+    });
     const invoice = await createRazorpayAiInvoice({
       client,
       userId,
@@ -1118,6 +1154,8 @@ router.post('/razorpay-webhook', async (req, res) => {
         razorpay_payment_id: paymentId,
         razorpay_invoice_id: invoice?.id || null,
         razorpay_invoice_short_url: invoice?.short_url || null,
+        custom_invoice_number: customInvoice.invoiceNumber,
+        custom_invoice_email_sent: Boolean(customInvoice.sent),
         webhook_event: event.event,
         previous_ai_message_balance: currentBalance,
         next_ai_message_balance: nextBalance,
