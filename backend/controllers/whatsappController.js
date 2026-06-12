@@ -123,6 +123,14 @@ const isGeminiRateLimitError = (error) => {
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MIN_HUMAN_REPLY_DELAY_MS = 30000;
+const MAX_HUMAN_REPLY_DELAY_MS = 60000;
+
+const calculateHumanReplyDelayMs = (text = '') => {
+    const textLength = String(text || '').trim().length;
+    const estimatedDelay = MIN_HUMAN_REPLY_DELAY_MS + (textLength * 80);
+    return Math.min(MAX_HUMAN_REPLY_DELAY_MS, Math.max(MIN_HUMAN_REPLY_DELAY_MS, estimatedDelay));
+};
 
 const generateGeminiContentWithRetry = async (prompt) => {
     try {
@@ -337,6 +345,39 @@ const resolveTrueClinicIdForUser = async (db, userId) => {
     }
 
     return null;
+};
+
+const sendWhatsAppTypingIndicator = async ({ inbound = {}, phoneNumberId, businessAccountId } = {}) => {
+    const messageId = String(inbound.messageId || '').trim();
+    if (!messageId) return { success: false, skipped: true, reason: 'missing_inbound_message_id' };
+
+    try {
+        const credentials = await resolveMetaReplyCredentials({
+            phoneNumberId: phoneNumberId || inbound.phoneNumberId,
+            businessAccountId: businessAccountId || inbound.businessAccountId
+        });
+        if (!credentials.phoneNumberId || !credentials.accessToken) {
+            return { success: false, skipped: true, reason: 'missing_meta_credentials' };
+        }
+
+        await axios.post(`https://graph.facebook.com/v20.0/${credentials.phoneNumberId}/messages`, {
+            messaging_product: 'whatsapp',
+            status: 'read',
+            message_id: messageId,
+            typing_indicator: { type: 'text' }
+        }, {
+            headers: {
+                Authorization: `Bearer ${credentials.accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
+
+        return { success: true };
+    } catch (error) {
+        console.warn('[YogiDesk Typing Indicator] Meta typing indicator skipped:', error.response?.data || error.message || error);
+        return { success: false, error };
+    }
 };
 
 const forceWriteOutboundWamidToMessages = async ({
@@ -1717,6 +1758,11 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                 ownerId: doctor.id,
                 patientPhone: inbound.fromPhone
             });
+            sendWhatsAppTypingIndicator({
+                inbound,
+                phoneNumberId: inbound.phoneNumberId,
+                businessAccountId: inbound.businessAccountId
+            }).catch((error) => console.warn('[YogiDesk Typing Indicator] Async dispatch failed:', error.message || error));
 
             try {
                 const geminiResult = await runGeminiForWhatsAppMessage({
@@ -1757,6 +1803,13 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
 
                 if (sendReplies && finalReplyText) {
                     try {
+                        const humanReplyDelayMs = calculateHumanReplyDelayMs(finalReplyText);
+                        console.log('[YogiDesk AI] Waiting before Gemini reply for human-like pacing.', {
+                            messageId: inbound.messageId,
+                            delayMs: humanReplyDelayMs,
+                            replyLength: finalReplyText.length
+                        });
+                        await wait(humanReplyDelayMs);
                         const metaReply = await sendGeminiWhatsAppTextReply({
                             toPhone: inbound.fromPhone,
                             text: finalReplyText,

@@ -6,6 +6,8 @@ import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import AIUsagePassbook from '../components/AIUsagePassbook';
 
+const INITIAL_AI_MESSAGE_CREDITS = 500;
+
 const defaultSettings = {
   plan: '',
   plan_tier: '',
@@ -62,6 +64,7 @@ const AISettings = () => {
       if (settingsResult.data?.success) {
         const liveProfile = profileResult.data?.profile || userProfile || {};
         const liveSettings = settingsResult.data.settings || {};
+        const currentAiMessageBalance = Number(liveSettings.ai_message_balance ?? liveSettings.aiMessageBalance ?? liveSettings.message_credit_balance ?? liveSettings.tokenLimit ?? 0);
         setProfileMeta({
           clinicName: liveProfile.clinic_name || liveProfile.business_name || liveProfile.clinicName || localStorage.getItem('clinic_name') || 'Clinic Workspace',
           clinicPhoneNumber: liveProfile.clinic_phone || liveProfile.phone || liveProfile.mobile || liveProfile.whatsapp_number || liveProfile.whatsapp_phone || localStorage.getItem('user_phone') || '',
@@ -71,8 +74,8 @@ const AISettings = () => {
         setSettings({
           ...defaultSettings,
           ...liveSettings,
-          aiMessageBalance: Number(liveSettings.ai_message_balance ?? liveSettings.aiMessageBalance ?? liveSettings.message_credit_balance ?? liveSettings.tokenLimit ?? 0),
-          aiMessageUsed: Number(liveSettings.ai_messages_used ?? liveSettings.ai_message_used ?? liveSettings.aiMessageUsed ?? liveSettings.tokenUsed ?? 0),
+          aiMessageBalance: currentAiMessageBalance,
+          aiMessageUsed: Math.max(0, INITIAL_AI_MESSAGE_CREDITS - currentAiMessageBalance),
           ...(livePlan && { plan: livePlan, plan_tier: livePlan, runtime_plan: livePlan }),
           has_trial_expired: expired,
           is_trial_expired: expired,
