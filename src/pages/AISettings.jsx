@@ -27,6 +27,7 @@ const AISettings = () => {
   const [loading, setLoading] = useState(true);
   const [usageLedgerLoading, setUsageLedgerLoading] = useState(true);
   const [aiUsageLedger, setAiUsageLedger] = useState([]);
+  const [profileMeta, setProfileMeta] = useState({ clinicName: 'Clinic Workspace', doctorIdentityId: '' });
   const [error, setError] = useState('');
   const [showTrialExpiredModal, setShowTrialExpiredModal] = useState(false);
 
@@ -60,6 +61,10 @@ const AISettings = () => {
       ]);
       if (settingsResult.data?.success) {
         const liveProfile = profileResult.data?.profile || userProfile || {};
+        setProfileMeta({
+          clinicName: liveProfile.clinic_name || liveProfile.business_name || liveProfile.clinicName || localStorage.getItem('clinic_name') || 'Clinic Workspace',
+          doctorIdentityId: liveProfile.id || liveProfile.user_id || liveProfile.doctor_id || userId || '',
+        });
         const livePlan = liveProfile.runtime_plan || liveProfile.current_plan || liveProfile.plan_tier;
         const expired = Boolean(liveProfile.has_trial_expired || liveProfile.is_trial_expired || settingsResult.data.settings?.has_trial_expired || settingsResult.data.settings?.is_trial_expired);
         setSettings({
@@ -243,13 +248,6 @@ const AISettings = () => {
             Recharge AI Messages
           </button>
         </div>
-
-        <AIUsagePassbook
-          rows={sortedAiUsageLedger}
-          loading={usageLedgerLoading}
-          onRefresh={fetchAiUsageLedger}
-          className="lg:col-span-2 lg:col-start-2"
-        />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -272,6 +270,15 @@ const AISettings = () => {
           </p>
         </div>
       </div>
+
+      <AIUsagePassbook
+        rows={sortedAiUsageLedger}
+        loading={usageLedgerLoading}
+        onRefresh={fetchAiUsageLedger}
+        clinicName={profileMeta.clinicName}
+        doctorIdentityId={profileMeta.doctorIdentityId}
+        className="w-full"
+      />
     </div>
   );
 };

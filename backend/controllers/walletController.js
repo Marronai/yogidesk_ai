@@ -153,6 +153,11 @@ const sanitizeAiUsagePassbookRow = (row = {}) => {
       provider: metadata.provider,
       model: metadata.model,
       purpose: 'ai_usage_passbook',
+      usage: metadata.usage || null,
+      total_tokens: metadata.usage?.total_tokens ?? metadata.total_tokens ?? null,
+      input_tokens: metadata.usage?.input_tokens ?? metadata.input_tokens ?? null,
+      output_tokens: metadata.usage?.output_tokens ?? metadata.output_tokens ?? null,
+      credits_deducted: metadata.usage?.credits_deducted ?? metadata.credits_deducted ?? creditsDeducted,
     },
   };
 };
