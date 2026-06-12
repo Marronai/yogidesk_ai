@@ -90,6 +90,8 @@ const removeUndefinedValues = (value = {}) => Object.fromEntries(
 const GEMINI_BOUNCE_WINDOW_MS = 4000;
 const GEMINI_RESULT_CACHE_MS = 30000;
 const GEMINI_429_RETRY_DELAY_MS = 10000;
+const GEMINI_HISTORY_WINDOW_DAYS = 5;
+const GEMINI_HISTORY_MESSAGE_LIMIT = 20;
 const geminiProcessingCache = new Map();
 const geminiResultCache = new Map();
 const geminiPatientDebounceQueue = new Map();
@@ -97,6 +99,8 @@ const GEMINI_MODEL_NAME = 'gemini-3.1-flash-lite';
 const GEMINI_REPORT_ESCALATION_REPLY = 'Main aapka appointment Dr. Sahab ke sath book kar deti hoon, wo live aapki reports check karke aapko sahi aur sateek salah denge. Kya main aapka slot confirm karoon?';
 const BASELINE_GEMINI_SYSTEM_INSTRUCTION = [
     'You are a polite, empathetic, professional female Clinic Desk Receptionist and Patient Care Assistant.',
+    'You are a polite, professional, and empathetic clinical receptionist chatbot. To make text interactive and comforting for patients, naturally integrate appropriate, clean healthcare emojis across conversational milestones.',
+    'Emoji Style: Use 🩺 or 👨‍⚕️ when mentioning doctors/consultations, 📅 or ⏰ for appointments/timings, 📍 for clinic locations, 💰 for consultation fees, and ✅ for successful confirmation cards. Keep sentences structured, concise, and beautifully humanized.',
     'Use natural, warm, comforting conversational Hinglish like a real human coordinator.',
     'Handle patient inquiries, doctor availability, clinic details, and appointment coordination only.',
     'Never provide official prescriptions, independent diagnosis, lab-report conclusions, or treatment decisions.'
@@ -165,6 +169,8 @@ const fetchClinicKnowledgeBaseForDoctor = async (doctorId) => {
 
 const buildGeminiSystemInstruction = (dbData = {}) => [
     'Identity: You are the official polite, empathetic, professional female Clinic Desk Receptionist and Patient Care Assistant for this clinic.',
+    'Clinical Receptionist Style: You are a polite, professional, and empathetic clinical receptionist chatbot. To make text interactive and comforting for patients, naturally integrate appropriate, clean healthcare emojis across conversational milestones.',
+    'Emoji Guidelines: Use 🩺 or 👨‍⚕️ when mentioning doctors/consultations, 📅 or ⏰ for appointments/timings, 📍 for clinic locations, 💰 for consultation fees, and ✅ for successful confirmation cards. Keep sentences structured, concise, and beautifully humanized.',
     'Tone & Language: Speak like a real warm human coordinator in natural comforting conversational Hinglish, mixing Hindi and English as patients normally do. Avoid cold robotic phrasing, stiff scripts, and overly technical medical jargon.',
     'Behavior Boundary: You only handle patient inquiries, doctor availability, clinic information, and appointment slot coordination. Never issue official prescriptions, independent diagnosis, lab-report conclusions, or treatment decisions.',
     'Here is the strict, verified ground-truth data for this specific doctor only. Do NOT invent, hallucinate, or use any outside knowledge:',
@@ -179,8 +185,9 @@ const buildGeminiSystemInstruction = (dbData = {}) => [
     `3. If the patient asks about medical diagnostics, interpretations, or uploading laboratory reports, including phrases like "Mera report check karo" or "Is this report normal?", reply exactly: "${GEMINI_REPORT_ESCALATION_REPLY}" Never attempt to diagnose or interpret medical reports yourself under any condition.`,
     '4. If clinic-specific information is missing, say: "Kindly book an appointment to consult the doctor directly."',
     '5. Continue collecting Patient Name, Appointment Date, and Time naturally. When a patient explicitly confirms a preferred date and time slot for an appointment, you MUST automatically invoke the `bookPatientAppointment` function tool passing the patient\'s parsed credentials. If native tool calling is unavailable in this channel, append \'[CONFIRM_BOOKING: Name | Date | Time]\' at the end so the booking hook can execute securely.',
-    '6. Appointment date rule: The absolute date for the appointment. You MUST dynamically compute this relative to today\'s date (Current Date: 2026-06-10) and output it strictly in \'YYYY-MM-DD\' format. Never pass relative text strings like \'tomorrow\', \'parso\', or \'The day after tomorrow\'.',
-    '7. Appointment time rule: The exact scheduled time slot for the appointment. You MUST dynamically parse relative spoken time expressions from the patient (e.g., \'2 PM\', \'3 baje dopehar ko\', \'4:30 pm\') and transform them strictly into 24-hour HH:MM format (e.g., \'14:00\', \'15:00\', \'16:30\'). Never pass \'PM\', \'AM\', or unformatted strings raw to the handler.'
+    `6. Appointment date rule: The absolute date for the appointment. You MUST dynamically compute this relative to today\'s date (Current Date: ${formatDateOnly(new Date())}) and output it strictly in \'YYYY-MM-DD\' format. Never pass relative text strings like \'tomorrow\', \'parso\', or \'The day after tomorrow\'.`,
+    '7. Appointment time rule: The exact scheduled time slot for the appointment. You MUST dynamically parse relative spoken time expressions from the patient (e.g., \'2 PM\', \'3 baje dopehar ko\', \'4:30 pm\') and transform them strictly into 24-hour HH:MM format (e.g., \'14:00\', \'15:00\', \'16:30\'). Never pass \'PM\', \'AM\', or unformatted strings raw to the handler.',
+    '8. Appointment status and slot validation rule: Do not infer appointment status, booked slots, or confirmations from chat history. Use only the direct appointment database lookup context supplied in this prompt, and if it is missing, ask the patient for the exact date/time or say the clinic desk will verify.'
 ].join('\n');
 
 const buildGeminiDedupeKey = ({ messageId, fromPhone, text, phoneNumberId, businessAccountId, languageCode }) => {
@@ -310,7 +317,7 @@ const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } 
     }
 };
 
-const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId, logDelivery = null }) => {
+const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, businessAccountId, logDelivery = null, commitDelivery = null }) => {
     const safeText = String(text || '').trim();
     if (!toPhone || !safeText) return null;
 
@@ -356,12 +363,23 @@ const sendGeminiWhatsAppTextReply = async ({ toPhone, text, phoneNumberId, busin
             status: 'sent'
         });
     }
-    return {
+    const metaReplyPayload = {
         ...response.data,
         _yogidesk: {
             phoneNumberId: credentials.phoneNumberId
         }
     };
+    if (commitDelivery?.inbound && commitDelivery?.replyText) {
+        metaReplyPayload._yogidesk.inboxCommit = await commitGeminiOutboundReply({
+            inbound: commitDelivery.inbound,
+            replyText: commitDelivery.replyText,
+            metaReply: metaReplyPayload,
+            credentials: { phoneNumberId: credentials.phoneNumberId },
+            phoneNumberId,
+            businessAccountId
+        });
+    }
+    return metaReplyPayload;
 };
 
 const extractWhatsAppInboundTextMessages = (payload = {}) => {
@@ -509,15 +527,18 @@ const isDoctorSuspendedForMeta = async (doctorId) => {
     }
 };
 
-const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit = 12 }) => {
+const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit = GEMINI_HISTORY_MESSAGE_LIMIT }) => {
     const db = supabaseAdmin || supabase;
     if (!db?.from) return [];
 
+    const safeLimit = Math.min(Math.max(Number(limit) || GEMINI_HISTORY_MESSAGE_LIMIT, 1), GEMINI_HISTORY_MESSAGE_LIMIT);
+    const historyCutoffIso = new Date(Date.now() - GEMINI_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
     let query = db
         .from('inbox_messages')
         .select('sender, from_me, body_content, body, text, message_body, message_text, created_at, sender_phone, receiver_phone')
+        .gte('created_at', historyCutoffIso)
         .order('created_at', { ascending: false })
-        .limit(limit);
+        .limit(safeLimit);
 
     if (chatId) {
         query = query.eq('chat_id', chatId);
@@ -538,6 +559,7 @@ const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit =
             return phoneDigitsOnly(message.sender_phone).endsWith(safePatientPhone.slice(-10)) ||
                 phoneDigitsOnly(message.receiver_phone).endsWith(safePatientPhone.slice(-10));
         })
+        .slice(0, GEMINI_HISTORY_MESSAGE_LIMIT)
         .reverse()
         .map((message) => {
             const body = message.message_text || message.message_body || message.body_content || message.body || message.text || '';
@@ -545,6 +567,47 @@ const fetchConversationHistory = async ({ chatId, ownerId, patientPhone, limit =
             return `${role}: ${String(body || '').trim()}`;
         })
         .filter(Boolean);
+};
+
+const shouldFetchAppointmentLookupContext = (text = '') => {
+    const normalized = String(text || '').toLowerCase();
+    return /\b(appointment|booking|booked|confirm|confirmation|slot|status|schedule|timing|time|date|available|availability)\b/.test(normalized) ||
+        /(अपॉइंटमेंट|बुकिंग|कन्फर्म|स्लॉट|समय|तारीख)/i.test(normalized);
+};
+
+const fetchAppointmentLookupContext = async ({ doctorId, patientPhone, latestText }) => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.from || !doctorId || !shouldFetchAppointmentLookupContext(latestText)) return [];
+
+    const patientDigits = phoneDigitsOnly(patientPhone);
+    const cutoffIso = new Date(Date.now() - GEMINI_HISTORY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    let query = db
+        .from('appointments')
+        .select('patient_name, patient_phone, appointment_date, appointment_time, status, created_at')
+        .or(`user_id.eq.${doctorId},doctor_id.eq.${doctorId}`)
+        .gte('created_at', cutoffIso)
+        .order('appointment_date', { ascending: false })
+        .order('appointment_time', { ascending: false })
+        .limit(20);
+
+    if (patientDigits) {
+        const last10 = patientDigits.slice(-10);
+        query = query.ilike('patient_phone', `%${last10}`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+        console.warn('[YogiDesk Secure AI] Appointment lookup context failed:', error.message || error);
+        return [];
+    }
+
+    return (data || [])
+        .slice(0, 10)
+        .map((appointment) => {
+            const date = parseStrictIsoDateOnly(appointment.appointment_date) || sanitizeGeminiContextValue(appointment.appointment_date, '-', 40);
+            const time = normalizeAppointmentTimeValue(appointment.appointment_time) || sanitizeGeminiContextValue(appointment.appointment_time, '-', 40);
+            return `- ${sanitizeGeminiContextValue(appointment.patient_name, 'Patient', 80)} | ${date} ${time} | ${sanitizeGeminiContextValue(appointment.status, 'Pending', 40)}`;
+        });
 };
 
 const parseGeminiBookingConfirmation = (replyText = '') => {
@@ -570,10 +633,37 @@ const formatDateOnly = (date) => {
     return `${year}-${month}-${day}`;
 };
 
+const parseStrictIsoDateOnly = (value) => {
+    const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+    if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) return '';
+    return formatDateOnly(parsed);
+};
+
+const parseLooseAppointmentDate = (value) => {
+    const rawValue = String(value || '').trim();
+    const dmyMatch = rawValue.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (dmyMatch) {
+        const day = Number(dmyMatch[1]);
+        const month = Number(dmyMatch[2]);
+        const year = Number(dmyMatch[3]);
+        return parseStrictIsoDateOnly(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+    }
+
+    const parsed = new Date(rawValue);
+    if (!Number.isFinite(parsed.getTime())) return '';
+    return formatDateOnly(parsed);
+};
+
 const parseRelativeAppointmentDate = (value) => {
     let rawDate = sanitizeGeminiContextValue(value, '', 80);
     if (!rawDate) return '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return rawDate;
+    const strictIsoDate = parseStrictIsoDateOnly(rawDate);
+    if (strictIsoDate) return strictIsoDate;
 
     const normalized = rawDate.toLowerCase();
     const today = new Date();
@@ -593,7 +683,7 @@ const parseRelativeAppointmentDate = (value) => {
         rawDate = formatDateOnly(today);
     }
 
-    return /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : '';
+    return parseStrictIsoDateOnly(rawDate) || parseLooseAppointmentDate(rawDate);
 };
 
 const normalizeAppointmentDateValue = (value) => parseRelativeAppointmentDate(value);
@@ -776,19 +866,21 @@ const bookPatientAppointment = async ({
     source = 'whatsapp_gemini',
     metadata = {}
 }) => {
+    const db = supabaseAdmin || supabase;
     const doctorId = String(doctor?.id || '').trim();
     const safePatientName = normalizeAppointmentNameValue(patientName || inbound.patientName);
     const safePatientPhone = phoneDigitsOnly(patientPhone || inbound.fromPhone || '');
     const safeAppointmentDate = normalizeAppointmentDateValue(appointmentDate);
     const safeAppointmentTime = normalizeAppointmentTimeValue(appointmentTime);
 
-    if (!isUuid(doctorId) || !safePatientName || !safePatientPhone || !safeAppointmentDate || !safeAppointmentTime) {
+    if (!db?.from || !isUuid(doctorId) || !safePatientName || !safePatientPhone || !safeAppointmentDate || !safeAppointmentTime) {
         return { success: false, reason: 'missing_required_appointment_fields' };
     }
 
     const nowIso = new Date().toISOString();
     const result = await insertWithSchemaFallback({
         table: 'appointments',
+        dbClient: db,
         row: {
             user_id: doctorId,
             doctor_id: doctorId,
@@ -824,22 +916,26 @@ const bookPatientAppointment = async ({
     return { success: true, data: appointment };
 };
 
-const saveGeminiAppointmentAsync = ({ doctor, inbound, booking }) => {
-    if (!booking?.patientName || !booking?.appointmentDate || !booking?.appointmentTime) return;
+const saveGeminiAppointment = async ({ doctor, inbound, booking }) => {
+    if (!booking?.patientName || !booking?.appointmentDate || !booking?.appointmentTime) {
+        return { success: false, reason: 'missing_booking_payload' };
+    }
 
-    Promise.resolve()
-        .then(async () => {
-            const result = await bookPatientAppointment({
-                doctor,
-                inbound,
-                patientName: booking.patientName,
-                patientPhone: inbound.fromPhone,
-                appointmentDate: booking.appointmentDate,
-                appointmentTime: booking.appointmentTime
-            });
-            if (!result.success) console.error('Gemini appointment save failed:', result.error?.message || result.error || result.reason);
-        })
-        .catch((error) => console.error('Gemini appointment async save crashed:', error.message || error));
+    try {
+        const result = await bookPatientAppointment({
+            doctor,
+            inbound,
+            patientName: booking.patientName,
+            patientPhone: inbound.fromPhone,
+            appointmentDate: booking.appointmentDate,
+            appointmentTime: booking.appointmentTime
+        });
+        if (!result.success) console.error('Gemini appointment save failed:', result.error?.message || result.error || result.reason);
+        return result;
+    } catch (error) {
+        console.error('Gemini appointment save crashed:', error.message || error);
+        return { success: false, reason: 'appointment_save_crashed', error };
+    }
 };
 
 const calculateAiMessageCreditsFromTokens = (totalTokenCount) => {
@@ -1013,12 +1109,20 @@ const runGeminiForWhatsAppMessage = async ({ inbound, doctor, chatId, languageCo
         patientPhone: inbound.fromPhone
     });
     const clinicKnowledgeBase = await fetchClinicKnowledgeBaseForDoctor(doctor?.id);
+    const appointmentLookupContext = await fetchAppointmentLookupContext({
+        doctorId: doctor?.id,
+        patientPhone: inbound.fromPhone,
+        latestText: inbound.text
+    });
     const systemInstruction = buildGeminiSystemInstruction(clinicKnowledgeBase || {});
     const prompt = [
         systemInstruction,
         '',
         'Conversation so far:',
         history.length ? history.join('\n') : 'No earlier messages.',
+        '',
+        'Direct appointment database lookup for slot/status validation:',
+        appointmentLookupContext.length ? appointmentLookupContext.join('\n') : 'No direct appointment rows matched this request.',
         '',
         `Latest Patient Message: ${String(inbound.text || '').slice(0, 2048)}`,
         `Preferred language: ${languageCode}.`
@@ -1326,6 +1430,32 @@ const commitGeminiOutboundReply = async ({
         return { success: false, reason: 'message_insert_failed', error: insertResult.error, wamid, chatId };
     }
 
+    const messagesCommit = await insertWithSchemaFallback({
+        table: 'messages',
+        dbClient: db,
+        row: {
+            ...row,
+            user_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+            doctor_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+            patient_phone: patientPhone,
+            phone: patientPhone,
+            direction: 'outbound',
+            role: 'assistant',
+            content: safeText,
+            status: 'SENT',
+            message_id: wamid,
+            meta_message_id: wamid,
+            wamid,
+            metadata: {
+                ...(row.metadata || {}),
+                messages_transaction_inserted_at: nowIso
+            }
+        }
+    });
+    if (!messagesCommit.success) {
+        console.warn('Gemini outbound reply messages table insert failed:', messagesCommit.error?.message || messagesCommit.error || messagesCommit.reason);
+    }
+
     await writeGeminiInboxChatSafely({
         db,
         chatId,
@@ -1350,7 +1480,7 @@ const commitGeminiOutboundReply = async ({
         }
     });
 
-    return { success: true, wamid, chatId };
+    return { success: true, wamid, chatId, messagesCommit };
 };
 
 const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'hi', sendReplies = false }) => {
@@ -1451,7 +1581,9 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                 }
 
                 const { cleanText, booking } = parseGeminiBookingConfirmation(geminiResult.replyText);
-                if (booking) saveGeminiAppointmentAsync({ doctor, inbound, booking });
+                const bookingSave = booking
+                    ? await saveGeminiAppointment({ doctor, inbound, booking })
+                    : null;
 
                 const finalReplyText = cleanText || geminiResult.replyText;
                 const result = {
@@ -1461,6 +1593,7 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                     replyTexts: finalReplyText ? [finalReplyText] : [],
                     bookingReady: Boolean(booking),
                     bookingPayload: booking,
+                    bookingSave,
                     metaReplies: []
                 };
 
@@ -1475,16 +1608,13 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                                 doctorId: doctor.id,
                                 senderType: 'ai_assistant',
                                 messageType: 'Session'
+                            },
+                            commitDelivery: {
+                                inbound,
+                                replyText: finalReplyText
                             }
                         });
-                        const inboxCommit = await commitGeminiOutboundReply({
-                            inbound,
-                            replyText: finalReplyText,
-                            metaReply,
-                            credentials: metaReply?._yogidesk || {},
-                            phoneNumberId: inbound.phoneNumberId,
-                            businessAccountId: inbound.businessAccountId
-                        });
+                        const inboxCommit = metaReply?._yogidesk?.inboxCommit || null;
                         const creditDebit = await deductDoctorAiMessageCredit({
                             doctor,
                             usageMetadata: geminiResult.usageMetadata || {},
