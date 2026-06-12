@@ -234,6 +234,7 @@ app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });
 app.use('/api/payments', paymentRoutes);
+app.use('/api/payment', paymentRoutes);
 app.post('/api/wallet/create-order', createWalletOrder);
 app.post('/api/wallet/verify-payment', verifyWalletPayment);
 app.get('/api/wallet/transactions', getWalletTransactions);

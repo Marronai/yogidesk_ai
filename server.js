@@ -52,6 +52,7 @@ app.get('/', (req, res) => {
     return res.status(200).json({ success: true, message: "Yogi Desk API Service Online" });
 });
 app.use('/api/payments', paymentRoutes);
+app.use('/api/payment', paymentRoutes);
 
 console.log("🚀 Yogi Desk Root Engine Initializing...");
 

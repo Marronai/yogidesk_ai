@@ -64,6 +64,7 @@ const calculateAiMessagesForAmount = (amount) => {
 
 const calculateMetaFee = (amount) => Number((Number(amount || 0) * META_FEE_RATE).toFixed(2));
 const toPaise = (amount) => Math.round(Number(amount || 0) * 100);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const normalizeInvoiceContact = (value) => {
   const digits = String(value || '').replace(/\D/g, '');
@@ -804,6 +805,203 @@ const creditAiMessagesAtomically = async ({ userId, aiMessages, usage = {} }) =>
 
   return { currentBalance, nextBalance };
 };
+
+const isPaymentTestRechargeEnabled = () => (
+  String(process.env.PAYMENT_TEST_RECHARGE_ENABLED || '').trim().toLowerCase() === 'true'
+);
+
+const hasPaymentTestRechargeAccess = (req) => {
+  const configuredToken = String(process.env.PAYMENT_TEST_RECHARGE_TOKEN || '').trim();
+  const providedToken = String(req.query?.token || req.get('x-yogidesk-test-token') || '').trim();
+  const isProduction = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+
+  if (configuredToken) return timingSafeEqualHex(configuredToken, providedToken);
+  return !isProduction;
+};
+
+const resolveTestRechargeTarget = async (clinicId) => {
+  const safeClinicId = String(clinicId || '').trim();
+  if (!UUID_PATTERN.test(safeClinicId)) return null;
+
+  if (db?.from) {
+    try {
+      const { data, error } = await db
+        .from('clinics')
+        .select('*')
+        .eq('id', safeClinicId)
+        .maybeSingle();
+
+      if (!error && data?.id) {
+        return {
+          userId: String(data.user_id || data.doctor_id || data.owner_id || data.id || '').trim(),
+          clinicName: data.clinic_name || data.name || '',
+          doctorName: data.doctor_name || data.name || '',
+          email: data.email || data.doctor_email || '',
+          phone: data.phone_number || data.phone || data.mobile || data.contact || '',
+          source: 'clinics',
+          sourceId: data.id,
+        };
+      }
+    } catch (error) {
+      console.warn('Test recharge clinic lookup skipped:', error.message || error);
+    }
+
+    for (const table of ['doctor_profiles', 'profiles']) {
+      try {
+        const { data, error } = await db
+          .from(table)
+          .select('id,name,email,phone,phone_number,mobile,clinic_name')
+          .eq('id', safeClinicId)
+          .maybeSingle();
+
+        if (!error && data?.id) {
+          return {
+            userId: data.id,
+            clinicName: data.clinic_name || data.name || '',
+            doctorName: data.name || '',
+            email: data.email || '',
+            phone: data.phone_number || data.phone || data.mobile || '',
+            source: table,
+            sourceId: data.id,
+          };
+        }
+      } catch (error) {
+        console.warn(`Test recharge profile lookup skipped in ${table}:`, error.message || error);
+      }
+    }
+  }
+
+  return null;
+};
+
+router.get('/test-recharge', async (req, res) => {
+  try {
+    if (!isPaymentTestRechargeEnabled()) {
+      return res.status(404).json({ success: false, message: 'Not found.' });
+    }
+    if (!hasPaymentTestRechargeAccess(req)) {
+      return res.status(403).json({ success: false, message: 'Test recharge token is required.' });
+    }
+
+    const target = await resolveTestRechargeTarget(req.query?.clinic_id);
+    const aiMessages = Number.parseInt(String(req.query?.messages || ''), 10);
+
+    if (!target?.userId) {
+      return res.status(400).json({ success: false, message: 'Valid clinic_id is required.' });
+    }
+    if (!Number.isInteger(aiMessages) || aiMessages <= 0 || aiMessages > 100000) {
+      return res.status(400).json({ success: false, message: 'messages must be an integer between 1 and 100000.' });
+    }
+
+    const now = new Date();
+    const razorpayOrderId = `order_test_${Date.now()}`;
+    const razorpayPaymentId = `pay_test_${Date.now()}`;
+    const recharge = {
+      order: null,
+      userId: target.userId,
+      packageId: 'test_route_bypass',
+      packageLabel: 'Test Route AI Credit Bypass',
+      subtotal: 0,
+      metaFee: 0,
+      totalAmount: 0,
+      aiMessages,
+      doctorName: target.doctorName,
+      doctorEmail: target.email,
+      doctorPhone: target.phone,
+      clinicName: target.clinicName,
+    };
+
+    const { currentBalance, nextBalance } = await creditAiMessagesAtomically({
+      userId: target.userId,
+      aiMessages,
+      usage: {
+        provider: 'test_route_bypass',
+        package_id: recharge.packageId,
+        charged_at: now.toISOString(),
+        source_id: target.sourceId,
+        source_table: target.source,
+      },
+    });
+
+    let customInvoice = { invoiceNumber: null, sent: false };
+    try {
+      customInvoice = await sendAiCreditInvoiceEmail({
+        db,
+        supabaseAdmin,
+        userId: target.userId,
+        recharge,
+        razorpayPaymentId,
+        paidAt: now,
+        fallbackDoctor: {
+          name: target.doctorName,
+          doctorName: target.doctorName,
+          email: target.email,
+          phone: target.phone,
+          clinicName: target.clinicName,
+        },
+      }) || customInvoice;
+    } catch (mailError) {
+      console.error('Invoice Email failed, keeping execution alive:', mailError);
+    }
+
+    await db.from('wallet_transactions').insert([{
+      user_id: target.userId,
+      amount: 0,
+      transaction_type: 'AI_MESSAGE_CREDIT',
+      description: `Test route AI message credits topup successful: ${razorpayPaymentId}`,
+      metadata: {
+        provider: 'test_route_bypass',
+        purpose: 'ai_message_recharge',
+        package_id: recharge.packageId,
+        ai_messages: aiMessages,
+        meta_fee: 0,
+        total_amount: 0,
+        razorpay_order_id: razorpayOrderId,
+        razorpay_payment_id: razorpayPaymentId,
+        custom_invoice_number: customInvoice.invoiceNumber,
+        custom_invoice_email_sent: Boolean(customInvoice.sent),
+        previous_ai_message_balance: currentBalance,
+        next_ai_message_balance: nextBalance,
+        source_table: target.source,
+        source_id: target.sourceId,
+        test_bypass: true,
+      },
+      created_at: now.toISOString(),
+    }]).then(({ error }) => {
+      if (error) console.error('Test AI message transaction log failed:', error.message || error);
+    });
+
+    await insertAiPassbookCredit({
+      userId: target.userId,
+      amount: 0,
+      messages: aiMessages,
+      packageId: recharge.packageId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      previousBalance: currentBalance,
+      nextBalance,
+      invoice: null,
+      source: 'test_route_bypass',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Test AI message recharge completed.',
+      userId: target.userId,
+      clinicId: req.query?.clinic_id,
+      aiMessages,
+      previousBalance: currentBalance,
+      nextBalance,
+      customInvoiceNumber: customInvoice.invoiceNumber,
+      customInvoiceEmailSent: Boolean(customInvoice.sent),
+      razorpayPaymentId,
+      testBypass: true,
+    });
+  } catch (error) {
+    console.error('Test AI recharge bypass failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to run test AI recharge bypass.' });
+  }
+});
 
 router.post('/verify-ai-payment', async (req, res) => {
   try {
