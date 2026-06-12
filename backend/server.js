@@ -4701,7 +4701,7 @@ app.get('/api/ai/settings', async (req, res) => {
         const isTrialExpired = runtimePlan.has_trial_expired;
         const profileBalance = Number(data?.ai_message_balance ?? data?.ai_token_balance ?? data?.token_limit ?? (runtimePlan.runtime_tier === 'GROWTH' ? 500 : 0));
         const clinicBalance = clinicMetrics.id ? Number(clinicMetrics.ai_message_balance ?? clinicMetrics.ai_token_balance ?? clinicMetrics.token_limit ?? profileBalance) : NaN;
-        const storedBalance = Number.isFinite(clinicBalance) ? Math.min(profileBalance, clinicBalance) : profileBalance;
+        const storedBalance = Number.isFinite(clinicBalance) ? Math.max(profileBalance, clinicBalance) : profileBalance;
         const storedUsed = Math.max(
             Number(clinicMetrics.ai_messages_used ?? clinicMetrics.ai_message_used ?? clinicMetrics.token_used ?? 0),
             Number(data?.ai_messages_used ?? data?.ai_message_used ?? data?.token_used ?? 0)

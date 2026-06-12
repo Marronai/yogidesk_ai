@@ -48,6 +48,10 @@ const AI_TERMS_COPY = {
         title: 'Computational Bracket Mapping',
         text: 'To enforce fair usage billing, message deductions calculate programmatically via computation brackets. Short inquiries consume single base units, while long, multi-turn medical history scheduling blocks tap across higher fractional usage.',
       },
+      {
+        title: 'Non-Refundable AI Credit Purchase',
+        text: 'AI credit payments are non-refundable once purchased. These credits immediately reserve and route compute capacity through upstream AI infrastructure providers such as OpenAI, Claude/Anthropic, Google AI, and NVIDIA. Since this cost is paid toward external model and GPU infrastructure rather than kept only by YogiDesk, completed AI credit purchases cannot be reversed or refunded.',
+      },
     ],
   },
   HI: {
@@ -75,6 +79,10 @@ const AI_TERMS_COPY = {
       {
         title: 'Computational Bracket Mapping',
         text: 'Deduction Calculation Metric Rule: Fair usage billing ke liye message credit deduction patient ke sawal ki lambai aur context depth (tokens) ke brackets par calculated hota hai. Chote sawalon par kam credit aur lambi chat session par us hisab se 2 se 6 credits tak deduct ho sakte hain.',
+      },
+      {
+        title: 'AI Credit Payment Non-Refundable Hai',
+        text: 'AI credits purchase hone ke baad refund nahi kiya jayega. Reason ye hai ki AI credit ka paisa sirf YogiDesk ke paas nahi rehta; iska major cost OpenAI, Claude/Anthropic, Google AI, NVIDIA jaise external AI model aur GPU infrastructure providers ko compute reserve karne ke liye jata hai. Isliye successful AI credit purchase ko reverse ya refund nahi kiya ja sakta.',
       },
     ],
   },
@@ -433,7 +441,7 @@ const AIRecharge = () => {
         {termsModalOpen && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/75 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-6" role="dialog" aria-modal="true" aria-labelledby="ai-terms-title">
             <div className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-orange-100 bg-white shadow-2xl">
-              <div className="shrink-0 bg-[#501638] px-5 py-5 text-white sm:px-7">
+              <div className="shrink-0 bg-slate-950 px-5 py-5 text-white sm:px-7">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-orange-100">
