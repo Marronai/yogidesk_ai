@@ -1484,6 +1484,28 @@ const updateTransactionMessagesByWamid = async (db, update) => {
     return lastResult;
 };
 
+const resolveTrueClinicIdForUser = async (db, userId) => {
+    const safeUserId = String(userId || '').trim();
+    if (!db?.from || !safeUserId) return null;
+
+    try {
+        const { data, error } = await db
+            .from('clinics')
+            .select('id')
+            .eq('user_id', safeUserId)
+            .maybeSingle();
+
+        if (data?.id) return data.id;
+        if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+            console.warn('True clinic id lookup failed:', error.message || error);
+        }
+    } catch (error) {
+        console.warn('True clinic id lookup crashed:', error.message || error);
+    }
+
+    return null;
+};
+
 const calculateAiCreditsFromTokens = (totalTokenCount) => {
     const totalTokens = Math.max(1, Math.ceil(Number(totalTokenCount || 0)));
     return Math.max(1, Math.ceil(totalTokens / 100));
@@ -1513,10 +1535,11 @@ const extractAiBillingFromMatchedRow = (row = {}) => {
 };
 
 const insertWalletPassbookAuditSafely = async ({ db, userId, patientNumber, inputTokens = 0, outputTokens = 0, totalTokens, credits, update, row }) => {
+    const trueClinicId = await resolveTrueClinicIdForUser(db, userId);
     let payload = removeUndefinedValues({
         user_id: userId,
         doctor_id: userId,
-        clinic_id: userId,
+        clinic_id: trueClinicId || undefined,
         patient_number: patientNumber || null,
         activity_type: 'AI_CONVERSATION_DEBIT',
         entry_type: 'AI_MESSAGE_DEBIT',

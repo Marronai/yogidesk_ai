@@ -317,6 +317,28 @@ const resolveMetaReplyCredentials = async ({ phoneNumberId, businessAccountId } 
     }
 };
 
+const resolveTrueClinicIdForUser = async (db, userId) => {
+    const safeUserId = String(userId || '').trim();
+    if (!db?.from || !safeUserId) return null;
+
+    try {
+        const { data, error } = await db
+            .from('clinics')
+            .select('id')
+            .eq('user_id', safeUserId)
+            .maybeSingle();
+
+        if (data?.id) return data.id;
+        if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116' && error.code !== 'PGRST205') {
+            console.warn('True clinic id lookup failed:', error.message || error);
+        }
+    } catch (error) {
+        console.warn('True clinic id lookup crashed:', error.message || error);
+    }
+
+    return null;
+};
+
 const forceWriteOutboundWamidToMessages = async ({
     outboundWamid,
     targetClinicId,
@@ -339,10 +361,11 @@ const forceWriteOutboundWamidToMessages = async ({
     const normalizedUsage = normalizeGeminiUsageMetadata(usageMetadata);
     const totalTokens = Math.max(1, parseInt(normalizedUsage.totalSessionTokens, 10) || 1);
     const credits = calculateAiMessageCreditsFromTokens(totalTokens);
+    const trueClinicId = await resolveTrueClinicIdForUser(db, safeClinicId);
     const nowIso = new Date().toISOString();
     let payload = removeUndefinedValues({
         wamid: safeWamid,
-        clinic_id: safeClinicId || null,
+        clinic_id: trueClinicId || undefined,
         user_id: safeClinicId || null,
         doctor_id: safeClinicId || null,
         patient_number: safePatientNumber,
@@ -364,7 +387,8 @@ const forceWriteOutboundWamidToMessages = async ({
             wamid: safeWamid,
             message_id: safeWamid,
             meta_message_id: safeWamid,
-            clinic_id: safeClinicId || null,
+            clinic_id: trueClinicId || null,
+            doctor_user_id: safeClinicId || null,
             patient_number: safePatientNumber,
             sender_type: 'ai',
             inbound_message_id: inbound.messageId || null,
@@ -1470,6 +1494,7 @@ const commitGeminiOutboundReply = async ({
     const normalizedUsage = normalizeGeminiUsageMetadata(usageMetadata);
     const totalTokens = Math.max(1, parseInt(normalizedUsage.totalSessionTokens, 10) || 1);
     const credits = calculateAiMessageCreditsFromTokens(totalTokens);
+    const trueClinicId = await resolveTrueClinicIdForUser(db, ownerId || existingChat?.user_id || existingChat?.doctor_id);
     const aiBillingMetadata = {
         pending_webhook_debit: true,
         debited: false,
@@ -1566,7 +1591,7 @@ const commitGeminiOutboundReply = async ({
                 ...row,
                 user_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
                 doctor_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
-                clinic_id: ownerId || existingChat?.user_id || existingChat?.doctor_id || null,
+                clinic_id: trueClinicId || undefined,
                 patient_number: patientPhone,
                 patient_phone: patientPhone,
                 phone: patientPhone,
