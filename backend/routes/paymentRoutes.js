@@ -866,21 +866,26 @@ router.post('/verify-ai-payment', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay', package_id: packageId, charged_at: new Date().toISOString() }
     });
-    const customInvoice = await sendAiCreditInvoiceEmail({
-      db,
-      supabaseAdmin,
-      userId,
-      recharge,
-      razorpayPaymentId,
-      paidAt: new Date(),
-      fallbackDoctor: {
-        name: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
-        doctorName: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
-        email: recharge.doctorEmail || doctor?.email,
-        phone: recharge.doctorPhone || doctor?.user_metadata?.phone,
-        clinicName: recharge.clinicName || doctor?.user_metadata?.clinic_name || doctor?.user_metadata?.clinicName,
-      },
-    });
+    let customInvoice = { invoiceNumber: null, sent: false };
+    try {
+      customInvoice = await sendAiCreditInvoiceEmail({
+        db,
+        supabaseAdmin,
+        userId,
+        recharge,
+        razorpayPaymentId,
+        paidAt: new Date(),
+        fallbackDoctor: {
+          name: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
+          doctorName: recharge.doctorName || doctor?.user_metadata?.full_name || doctor?.user_metadata?.name,
+          email: recharge.doctorEmail || doctor?.email,
+          phone: recharge.doctorPhone || doctor?.user_metadata?.phone,
+          clinicName: recharge.clinicName || doctor?.user_metadata?.clinic_name || doctor?.user_metadata?.clinicName,
+        },
+      }) || customInvoice;
+    } catch (mailError) {
+      console.error('Invoice Email failed, keeping execution alive:', mailError);
+    }
     const invoice = await createRazorpayAiInvoice({
       client,
       userId,
@@ -1110,21 +1115,26 @@ router.post('/razorpay-webhook', async (req, res) => {
       aiMessages,
       usage: { provider: 'razorpay_webhook', package_id: recharge.packageId, charged_at: new Date().toISOString() }
     });
-    const customInvoice = await sendAiCreditInvoiceEmail({
-      db,
-      supabaseAdmin,
-      userId,
-      recharge,
-      razorpayPaymentId: paymentId,
-      paidAt: payment?.created_at ? new Date(Number(payment.created_at) * 1000) : new Date(),
-      fallbackDoctor: {
-        name: recharge.doctorName || payment?.notes?.doctor_name,
-        doctorName: recharge.doctorName || payment?.notes?.doctor_name,
-        email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
-        phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
-        clinicName: recharge.clinicName || payment?.notes?.clinic_name,
-      },
-    });
+    let customInvoice = { invoiceNumber: null, sent: false };
+    try {
+      customInvoice = await sendAiCreditInvoiceEmail({
+        db,
+        supabaseAdmin,
+        userId,
+        recharge,
+        razorpayPaymentId: paymentId,
+        paidAt: payment?.created_at ? new Date(Number(payment.created_at) * 1000) : new Date(),
+        fallbackDoctor: {
+          name: recharge.doctorName || payment?.notes?.doctor_name,
+          doctorName: recharge.doctorName || payment?.notes?.doctor_name,
+          email: recharge.doctorEmail || payment?.email || payment?.notes?.doctor_email,
+          phone: recharge.doctorPhone || payment?.contact || payment?.notes?.doctor_phone,
+          clinicName: recharge.clinicName || payment?.notes?.clinic_name,
+        },
+      }) || customInvoice;
+    } catch (mailError) {
+      console.error('Invoice Email failed, keeping execution alive:', mailError);
+    }
     const invoice = await createRazorpayAiInvoice({
       client,
       userId,
