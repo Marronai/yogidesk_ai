@@ -1053,8 +1053,19 @@ const resolveDoctorTeamSession = async (req) => {
     return {
         id: sessionUser.id,
         email: sessionUser.email || null,
-        clinic_id: clinic?.id || sessionUser.user_metadata?.clinic_id || sessionUser.id
+        clinic_id: clinic?.id || null
     };
+};
+
+const getSafeTeamInviteErrorMessage = (error) => {
+    const raw = String(`${error?.message || ''} ${error?.details || ''} ${error?.code || ''}`).toLowerCase();
+    if (raw.includes('foreign key') || raw.includes('staff_members_clinic_id_fkey')) {
+        return 'Unable to link this staff invite to your clinic workspace. Please refresh and try again.';
+    }
+    if (raw.includes('duplicate') || error?.code === '23505') {
+        return 'This staff member is already invited or active in your clinic workspace.';
+    }
+    return 'Unable to send this staff invite right now. Please try again.';
 };
 
 app.get('/api/team/cooldown-status', attachDoctorSession, async (req, res) => {
@@ -1063,6 +1074,7 @@ app.get('/api/team/cooldown-status', attachDoctorSession, async (req, res) => {
         const doctorSession = await resolveDoctorTeamSession(req);
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
         if (!doctorSession?.id) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
+        if (!doctorSession.clinic_id) return res.status(409).json({ success: false, message: 'Clinic workspace is not ready for staff invites. Please refresh your profile and try again.' });
 
         req.user = { ...(req.user || {}), id: doctorSession.id, clinic_id: doctorSession.clinic_id };
 
@@ -1136,8 +1148,8 @@ app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
         const sent = await sendDirectEmail(email, 'Welcome! You have been invited to YogiDesk AI', buildTeamInviteEmail({ email, name, inviteLink }), 'system');
         return res.status(201).json({ success: true, member: data, emailSent: sent });
     } catch (error) {
-        console.error('Team invite failed:', error.message || error);
-        return res.status(500).json({ success: false, message: error.message || 'Invite failed.' });
+        console.error('Team invite failed:', error.message || error, error.details || '');
+        return res.status(500).json({ success: false, message: getSafeTeamInviteErrorMessage(error) });
     }
 });
 

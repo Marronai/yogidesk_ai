@@ -24,6 +24,14 @@ const calculateCooldown = (lastStaffDeletedAt) => {
   };
 };
 
+const getSafeInviteErrorMessage = (error) => {
+  const raw = String(`${error?.message || ''} ${error?.details || ''} ${error?.code || ''}`).toLowerCase();
+  if (raw.includes('foreign key') || raw.includes('staff_members_clinic_id_fkey')) {
+    return 'Unable to link this staff invite to your clinic workspace. Please refresh and try again.';
+  }
+  return 'Unable to create staff invite.';
+};
+
 const getClinic = async (db, adminId) => {
   const { data, error } = await db
     .from('clinics')
@@ -59,6 +67,9 @@ exports.addTeamMember = async (req, res) => {
     if (!name || !email) return res.status(400).json({ msg: 'Please enter Name and Email.' });
 
     const clinic = await getClinic(db, adminId);
+    if (!clinic?.id) {
+      return res.status(409).json({ msg: 'Clinic workspace is not ready for staff invites. Please refresh your profile and try again.' });
+    }
     const cooldown = calculateCooldown(clinic?.last_staff_deleted_at);
     if (cooldown.active) {
       return res.status(400).json({
@@ -82,7 +93,7 @@ exports.addTeamMember = async (req, res) => {
       .from(STAFF_MEMBERS_TABLE)
       .insert([{
         admin_id: adminId,
-        clinic_id: clinic?.id || adminId,
+        clinic_id: clinic.id,
         name,
         email,
         role,
@@ -102,8 +113,8 @@ exports.addTeamMember = async (req, res) => {
 
     return res.json({ msg: 'Member Added Successfully', member });
   } catch (err) {
-    console.error('Add Error:', err.message || err);
-    return res.status(500).json({ msg: 'Server Error' });
+    console.error('Add Error:', err.message || err, err.details || '');
+    return res.status(500).json({ msg: getSafeInviteErrorMessage(err) });
   }
 };
 

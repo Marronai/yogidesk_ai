@@ -14,6 +14,14 @@ const isPendingExpired = (member) => (
   && new Date(member.invite_expires_at).getTime() <= Date.now()
 );
 
+const getSafeInviteAlert = (message) => {
+  const text = String(message || '');
+  if (/foreign key|constraint|staff_members|clinic_id|violates/i.test(text)) {
+    return 'Unable to link this invite to your clinic workspace. Please refresh and try again.';
+  }
+  return text || 'Invite failed.';
+};
+
 const Team = () => {
   const { wallet, userId } = useWallet(); // Get wallet and userId from global context
   const [members, setMembers] = useState([]);  
@@ -142,7 +150,7 @@ const Team = () => {
       setInviteDraft(null);
       setAdminOtp('');
     } catch (error) {
-      setAlert(error.message || 'Invite failed.');
+      setAlert(getSafeInviteAlert(error.message));
     }
   };
 
