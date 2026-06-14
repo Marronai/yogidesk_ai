@@ -5,12 +5,9 @@ import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
 
 const seatCaps = { basic: 0, starter: 1, growth: 2, hospital: 5, multi_specialty: 5, multi: 5 };
-const DAY_MS = 24 * 60 * 60 * 1000;
-const INVITE_EXPIRY_DAYS = 3;
-const TEAM_CHANGE_COOLDOWN_DAYS = 30;
+const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
 const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
 
-const addDays = (date, days) => new Date(date.getTime() + days * DAY_MS);
 const isPendingExpired = (member) => (
   String(member?.status || '').toUpperCase() === 'PENDING'
   && member?.invite_expires_at
@@ -30,37 +27,49 @@ const Team = () => {
   const [inviteDraft, setInviteDraft] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [teamPolicy, setTeamPolicy] = useState(null);
   
   const plan = String(wallet.runtime_plan || wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase().replace(/[\s-]+/g, '_');
   const isTrialExpired = Boolean(wallet.has_trial_expired) || plan === 'basic';
-  const maxSeats = isTrialExpired ? 0 : (seatCaps[plan] ?? seatCaps.starter);
+  const maxSeats = teamPolicy?.maxSeats ?? (isTrialExpired ? 0 : (seatCaps[plan] ?? seatCaps.starter));
   const visibleMembers = useMemo(() => (
-    members.filter((member) => !['DELETED', 'EXPIRED'].includes(String(member.status || '').toUpperCase()) && !isPendingExpired(member))
+    members.filter((member) => member.is_active !== false && !member.deleted_at && !['DELETED', 'EXPIRED'].includes(String(member.status || '').toUpperCase()) && !isPendingExpired(member))
   ), [members]);
-  const deletedOrRecentMembers = useMemo(() => (
-    members.filter((member) => member.deleted_at || member.created_at)
-  ), [members]);
-  const latestTeamChangeAt = useMemo(() => {
-    const timestamps = deletedOrRecentMembers
-      .flatMap((member) => [member.deleted_at, member.created_at])
-      .filter(Boolean)
-      .map((value) => new Date(value).getTime())
-      .filter(Number.isFinite);
-    return timestamps.length ? new Date(Math.max(...timestamps)) : null;
-  }, [deletedOrRecentMembers]);
-  const nextInviteAllowedAt = latestTeamChangeAt ? addDays(latestTeamChangeAt, TEAM_CHANGE_COOLDOWN_DAYS) : null;
-  const isInviteCoolingDown = Boolean(nextInviteAllowedAt && nextInviteAllowedAt.getTime() > Date.now());
+  const isInviteCoolingDown = Boolean(teamPolicy?.cooldown?.active);
+  const cooldownRemainingDays = Math.max(0, Number(teamPolicy?.cooldown?.remainingDays || 0));
   const isFull = visibleMembers.length >= maxSeats;
   const inviteDisabled = isTrialExpired || isFull || isInviteCoolingDown || maxSeats <= 0;
+  const isCooldownAlert = /security cooldown|slot security lock/i.test(alert);
 
   const seatLabel = useMemo(() => `${visibleMembers.length} / ${maxSeats} staff seats used`, [visibleMembers.length, maxSeats]);
-  const cooldownLabel = nextInviteAllowedAt
-    ? nextInviteAllowedAt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '';
+  const cooldownLabel = `${cooldownRemainingDays} day${cooldownRemainingDays === 1 ? '' : 's'}`;
+
+  const getApiHeaders = async () => {
+    const { data } = await supabase.auth.getSession();
+    const token = data?.session?.access_token;
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+  };
 
   const getUser = async () => {
     const { data } = await supabase.auth.getUser();
     return data?.user || { id: localStorage.getItem('user_id') };
+  };
+
+  const fetchTeamPolicy = async () => {
+    if (!userId) return;
+    try {
+      const response = await fetch(`${API_URL}/api/team/cooldown-status?userId=${encodeURIComponent(userId)}`, {
+        headers: await getApiHeaders(),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Unable to load team policy.');
+      setTeamPolicy(result);
+    } catch (error) {
+      setAlert(error.message || 'Unable to load team policy.');
+    }
   };
 
   const fetchTeam = async () => {    
@@ -71,8 +80,8 @@ const Team = () => {
     }
 
     const { data: teamData } = await supabase
-      .from('team_members')
-      .select('id, name, email, status, created_at, invite_expires_at, deleted_at')
+      .from('staff_members')
+      .select('id, name, email, status, created_at, invite_expires_at, deleted_at, is_active')
       .eq('admin_id', userId)
       .order('created_at', { ascending: false });
 
@@ -84,62 +93,46 @@ const Team = () => {
       .map((member) => member.id);
 
     if (expiredIds.length) {
-      await supabase.from('team_members').update({ status: 'EXPIRED' }).in('id', expiredIds);
+      await supabase.from('staff_members').update({ status: 'EXPIRED' }).in('id', expiredIds);
     }
 
     setMembers(normalizedTeam);
+    await fetchTeamPolicy();
     setLoading(false);
   };
 
   useEffect(() => { fetchTeam(); }, [userId]);
 
-  const dispatchTeamInviteEmail = (invite) => {
-    const payload = JSON.stringify(invite);
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(`${API_URL}/api/team/dispatch-invite-email`, new Blob([payload], { type: 'application/json' }));
-      return;
-    }
-
-    fetch(`${API_URL}/api/team/dispatch-invite-email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload,
-      keepalive: true,
-    }).catch(() => {});
-  };
-
   const saveVerifiedInvite = async ({ user, nameInput, emailInput }) => {
-    const { data, error } = await supabase
-      .from('team_members')
-      .insert([{
-        admin_id: user.id,
-        name: nameInput,
-        email: emailInput,
-        status: 'PENDING',
-        invite_expires_at: addDays(new Date(), INVITE_EXPIRY_DAYS).toISOString()
-      }])
-      .select('id, name, email, status, created_at, invite_expires_at, deleted_at')
-      .single();
+    try {
+      const inviteLink = `${window.location.origin}/accept-invite?email=${encodeURIComponent(emailInput)}`;
+      const response = await fetch(`${API_URL}/api/team/invite`, {
+        method: 'POST',
+        headers: await getApiHeaders(),
+        body: JSON.stringify({
+          userId: user.id,
+          name: nameInput,
+          email: emailInput,
+          inviteLink,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Invite failed.');
 
-    if (error) {
+      setMembers((prev) => [result.member, ...prev]);
+      setTeamPolicy((prev) => prev ? {
+        ...prev,
+        activeStaffCount: Number(prev.activeStaffCount || visibleMembers.length) + 1,
+      } : prev);
+      console.log(`Yogi Desk invite setup link: ${inviteLink}`);
+      setAlert(`Invite saved and email dispatch triggered for ${emailInput}.`);
+      setForm({ name: '', email: '' });
+      setGateOpen(false);
+      setInviteDraft(null);
+      setAdminOtp('');
+    } catch (error) {
       setAlert(error.message || 'Invite failed.');
-      return;
     }
-
-    setMembers((prev) => [data, ...prev]);
-    const inviteLink = `${window.location.origin}/accept-invite?email=${encodeURIComponent(emailInput)}`;
-    dispatchTeamInviteEmail({
-      email: emailInput,
-      name: nameInput,
-      inviteLink,
-      adminId: user.id,
-    });
-    console.log(`Yogi Desk invite setup link: ${inviteLink}`);
-    setAlert(`Invite saved and email dispatch triggered for ${emailInput}.`);
-    setForm({ name: '', email: '' });
-    setGateOpen(false);
-    setInviteDraft(null);
-    setAdminOtp('');
   };
 
   const handleInvite = async (event) => {
@@ -155,7 +148,7 @@ const Team = () => {
       return;
     }
     if (isInviteCoolingDown) {
-      setAlert(`Team changes are limited to one new staff invite every ${TEAM_CHANGE_COOLDOWN_DAYS} days. You can add the next user after ${cooldownLabel}.`);
+      setAlert(`Slot Security Lock Active: Next invite available in ${cooldownLabel}.`);
       return;
     }
 
@@ -183,19 +176,23 @@ const Team = () => {
 
     try {
       setDeleting(true);
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('team_members')
-        .update({ status: 'DELETED', deleted_at: now })
-        .eq('id', deleteTarget.id)
-        .eq('admin_id', userId);
-
-      if (error) throw error;
+      const response = await fetch(`${API_URL}/api/team/members/${encodeURIComponent(deleteTarget.id)}`, {
+        method: 'DELETE',
+        headers: await getApiHeaders(),
+        body: JSON.stringify({ userId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Unable to delete this team member.');
 
       setMembers((current) => current.map((member) => (
-        member.id === deleteTarget.id ? { ...member, status: 'DELETED', deleted_at: now } : member
+        member.id === deleteTarget.id ? { ...member, ...result.member } : member
       )));
-      setAlert(`Team member deleted. You can add the next user after ${addDays(new Date(), TEAM_CHANGE_COOLDOWN_DAYS).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`);
+      setTeamPolicy((prev) => ({
+        ...(prev || {}),
+        lastStaffDeletedAt: result.lastStaffDeletedAt,
+        cooldown: result.cooldown,
+      }));
+      setAlert(`Team member archived. Slot Security Lock Active: Next invite available in ${result.cooldown?.remainingDays || TEAM_SLOT_SWAP_COOLDOWN_DAYS} days.`);
       setDeleteTarget(null);
     } catch (error) {
       setAlert(error.message || 'Unable to delete this team member.');
@@ -272,7 +269,11 @@ const Team = () => {
       </div>
 
       {alert && (
-        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+        <div className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-bold ${
+          isCooldownAlert
+            ? 'border-orange-500 bg-slate-950 text-orange-100 shadow-lg shadow-orange-100'
+            : 'border-amber-200 bg-amber-50 text-amber-800'
+        }`}>
           <AlertTriangle size={18} />
           {alert}
         </div>
@@ -342,7 +343,7 @@ const Team = () => {
               <div>
                 <h2 className="text-lg font-black text-slate-900">Delete Team Member</h2>
                 <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
-                  This will remove this staff member from your team. After deleting a user, you cannot add another new user for 30 days. Pending invites that are not accepted expire automatically after 3 days.
+                  This will archive this staff member immediately, lock slot swapping for {TEAM_SLOT_SWAP_COOLDOWN_DAYS} days, and permanently purge archived staff data after 30 days.
                 </p>
               </div>
               <button
@@ -420,9 +421,15 @@ const Team = () => {
               Send Invite
             </button>
             {isInviteCoolingDown && (
-              <div className="flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+              <div className="flex items-start gap-2 rounded-2xl border border-orange-200 bg-orange-50 p-3 text-xs font-bold leading-5 text-orange-800">
                 <Clock className="mt-0.5 shrink-0" size={15} />
-                One new staff user can be added every 30 days. Next invite available after {cooldownLabel}.
+                Slot Security Lock Active: Next invite available in {cooldownLabel}.
+              </div>
+            )}
+            {!isInviteCoolingDown && (
+              <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs font-bold leading-5 text-slate-700">
+                <Users className="mt-0.5 shrink-0 text-orange-500" size={15} />
+                Seat capacity managed by subscription limits.
               </div>
             )}
           </form>

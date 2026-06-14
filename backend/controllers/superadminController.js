@@ -164,7 +164,7 @@ exports.getUserMatrix = async (req, res) => {
       safeSelect('wallets', '*'),
       safeSelect('appointments', '*'),
       safeSelect('patients_ledger', '*'),
-      safeSelect('team_members', '*'),
+      safeSelect('staff_members', '*'),
       safeSelect('inbox_messages', '*'),
       safeSelect('wallet_transactions', '*', (query) => query.order('created_at', { ascending: false }).limit(1000)),
       safeSelect('login_activity_logs', '*', (query) => query.order('created_at', { ascending: false }).limit(1000)),

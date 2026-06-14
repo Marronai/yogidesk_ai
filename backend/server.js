@@ -243,6 +243,10 @@ app.post('/api/superadmin/login', explicitSuperadminLoginLimiter, loginSuperadmi
 app.use('/api/superadmin', superadminRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
+const TEAM_SEAT_CAPS = { basic: 0, starter: 1, growth: 2, hospital: 5, multi_specialty: 5, multi: 5 };
+const TEAM_INVITE_EXPIRY_DAYS = 3;
+const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
+const STAFF_MEMBERS_TABLE = 'staff_members';
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
@@ -914,6 +918,240 @@ app.post('/api/team/dispatch-invite-email', async (req, res) => {
     }
 });
 
+const addDaysIso = (date, days) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+const normalizeTeamPlan = (value = 'starter') => String(value || 'starter').toLowerCase().replace(/[\s-]+/g, '_');
+const calculateTeamCooldown = (lastStaffDeletedAt) => {
+    if (!lastStaffDeletedAt) return { active: false, remainingDays: 0, daysSinceLastDelete: null };
+    const deletedAtMs = new Date(lastStaffDeletedAt).getTime();
+    if (!Number.isFinite(deletedAtMs)) return { active: false, remainingDays: 0, daysSinceLastDelete: null };
+    const daysSinceLastDelete = (Date.now() - deletedAtMs) / (1000 * 60 * 60 * 24);
+    const remainingDays = Math.max(0, Math.ceil(TEAM_SLOT_SWAP_COOLDOWN_DAYS - daysSinceLastDelete));
+    return {
+        active: daysSinceLastDelete < TEAM_SLOT_SWAP_COOLDOWN_DAYS,
+        remainingDays,
+        daysSinceLastDelete
+    };
+};
+
+const getTeamWorkspaceProfile = async (db, userId) => {
+    const profileResult = await db
+        .from('doctor_profiles')
+        .select('id, subscription_tier, current_plan, plan_tier, plan, runtime_plan, has_trial_expired, last_staff_deleted_at')
+        .eq('id', userId)
+        .maybeSingle();
+    if (profileResult.error && !isSchemaCacheError(profileResult.error)) throw profileResult.error;
+
+    const walletResult = await db
+        .from('wallets')
+        .select('current_plan, plan_tier, runtime_plan')
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (walletResult.error && !isSchemaCacheError(walletResult.error)) throw walletResult.error;
+
+    let clinic = null;
+    try {
+        const clinicResult = await db
+            .from('clinics')
+            .select('id, user_id, subscription_tier, current_plan, plan_tier, plan, runtime_plan, max_seats_allocated, last_staff_deleted_at')
+            .or(`user_id.eq.${userId},id.eq.${userId}`)
+            .limit(1)
+            .maybeSingle();
+        if (clinicResult.error && !isSchemaCacheError(clinicResult.error) && clinicResult.error.code !== 'PGRST116') {
+            throw clinicResult.error;
+        }
+        clinic = clinicResult.data || null;
+    } catch (error) {
+        if (!isSchemaCacheError(error)) console.warn('Clinic team profile lookup skipped:', error.message || error);
+    }
+
+    const profile = profileResult.data || {};
+    const wallet = walletResult.data || {};
+    const plan = normalizeTeamPlan(
+        clinic?.runtime_plan || wallet.runtime_plan || profile.runtime_plan ||
+        clinic?.plan_tier || wallet.plan_tier || profile.plan_tier ||
+        clinic?.current_plan || wallet.current_plan || profile.current_plan ||
+        clinic?.subscription_tier || profile.subscription_tier ||
+        clinic?.plan || profile.plan || 'starter'
+    );
+    const isTrialExpired = Boolean(profile.has_trial_expired) || plan === 'basic';
+    const maxSeats = isTrialExpired ? 0 : Number(clinic?.max_seats_allocated || TEAM_SEAT_CAPS[plan] || TEAM_SEAT_CAPS.starter);
+    const lastStaffDeletedAt = clinic?.last_staff_deleted_at || profile.last_staff_deleted_at || null;
+
+    return { clinic, profile, wallet, plan, maxSeats, lastStaffDeletedAt, isTrialExpired };
+};
+
+const getActiveStaffCount = async (db, userId) => {
+    const { data, error } = await db
+        .from(STAFF_MEMBERS_TABLE)
+        .select('id, status, deleted_at, invite_expires_at, is_active')
+        .eq('admin_id', userId);
+    if (error) throw error;
+
+    const now = Date.now();
+    return (data || []).filter((member) => {
+        const status = String(member.status || '').toUpperCase();
+        const expired = status === 'PENDING' && member.invite_expires_at && new Date(member.invite_expires_at).getTime() <= now;
+        return !member.deleted_at && member.is_active !== false && !['DELETED', 'EXPIRED'].includes(status) && !expired;
+    }).length;
+};
+
+const stampStaffDeletedAt = async (db, userId, deletedAt) => {
+    const profileResult = await db
+        .from('doctor_profiles')
+        .update({ last_staff_deleted_at: deletedAt })
+        .eq('id', userId);
+    if (profileResult.error && !isSchemaCacheError(profileResult.error)) throw profileResult.error;
+
+    const clinicResult = await db
+        .from('clinics')
+        .update({ last_staff_deleted_at: deletedAt })
+        .or(`user_id.eq.${userId},id.eq.${userId}`);
+    if (clinicResult.error && !isSchemaCacheError(clinicResult.error)) throw clinicResult.error;
+};
+
+const buildTeamInviteEmail = ({ email, name, inviteLink }) => (`
+  <div style="font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
+        <div style="background-color: #ff6b00; padding: 20px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; letter-spacing: 1px;">YogiDesk AI</h1>
+        </div>
+        <div style="padding: 30px; text-align: center;">
+            <h2 style="color: #111827; margin-top: 0;">You've Been Invited!</h2>
+            <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Hi ${name || 'there'},</p>
+            <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Your clinic administrator has invited you to join their secure workspace on <strong>YogiDesk AI</strong>.</p>
+            <div style="margin: 40px 0;">
+                <a href="${inviteLink}" style="display: inline-block; background-color: #ff6b00; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(255,107,0,0.3);">Accept Invite & Create Password</a>
+            </div>
+            <p style="color: #4b5563; font-size: 14px; line-height: 1.6; text-align: left;">If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="${inviteLink}" style="color: #ff6b00; word-break: break-all;">${inviteLink}</a></p>
+        </div>
+        <div style="background-color: #f1f1f1; padding: 15px; text-align: center; border-top: 1px solid #e0e0e0;">
+            <p style="margin: 0; font-size: 12px; color: #666;">&copy; ${new Date().getFullYear()} YogiDesk AI. All rights reserved.</p>
+            <p style="margin: 5px 0 0 0; font-size: 10px; color: #999;">A product by Vyapar Wallah</p>
+        </div>
+    </div>
+  </div>
+`);
+
+const getTeamSessionUserId = async (req) => {
+    const sessionUser = await getSupabaseSessionUser(req);
+    if (sessionUser?.id) return sessionUser.id;
+    return '';
+};
+
+app.get('/api/team/cooldown-status', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = await getTeamSessionUserId(req);
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+
+        const workspace = await getTeamWorkspaceProfile(db, userId);
+        const cooldown = calculateTeamCooldown(workspace.lastStaffDeletedAt);
+        const activeStaffCount = await getActiveStaffCount(db, userId);
+
+        return res.status(200).json({
+            success: true,
+            plan: workspace.plan,
+            maxSeats: workspace.maxSeats,
+            activeStaffCount,
+            lastStaffDeletedAt: workspace.lastStaffDeletedAt,
+            cooldown
+        });
+    } catch (error) {
+        console.error('Team cooldown lookup failed:', error.message || error);
+        return res.status(500).json({ success: false, message: 'Unable to load team cooldown status.' });
+    }
+});
+
+app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = await getTeamSessionUserId(req);
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+
+        const name = sanitizePlainText(req.body?.name, 120);
+        const email = normalizeEmail(req.body?.email);
+        const inviteLink = String(req.body?.inviteLink || '').trim();
+        if (!name || !email || !inviteLink) {
+            return res.status(400).json({ success: false, message: 'Name, email, and invite link are required.' });
+        }
+
+        const workspace = await getTeamWorkspaceProfile(db, userId);
+        const activeStaffCount = await getActiveStaffCount(db, userId);
+        if (activeStaffCount >= workspace.maxSeats) {
+            return res.status(400).json({
+                success: false,
+                message: `Your ${workspace.plan} plan allows ${workspace.maxSeats} team seat${workspace.maxSeats === 1 ? '' : 's'}. Upgrade to add more staff.`
+            });
+        }
+
+        const cooldown = calculateTeamCooldown(workspace.lastStaffDeletedAt);
+        if (cooldown.active) {
+            return res.status(400).json({
+                success: false,
+                message: `Security Cooldown Active! You can add your next staff member after ${cooldown.remainingDays} days to prevent infinite account swapping abuse.`,
+                cooldown
+            });
+        }
+
+        const { data, error } = await db
+            .from(STAFF_MEMBERS_TABLE)
+            .insert([{
+                admin_id: userId,
+                name,
+                email,
+                status: 'PENDING',
+                is_active: true,
+                invite_expires_at: addDaysIso(new Date(), TEAM_INVITE_EXPIRY_DAYS)
+            }])
+            .select('id, name, email, status, created_at, invite_expires_at, deleted_at, is_active')
+            .single();
+        if (error) throw error;
+
+        const sent = await sendDirectEmail(email, 'Welcome! You have been invited to YogiDesk AI', buildTeamInviteEmail({ email, name, inviteLink }), 'system');
+        return res.status(201).json({ success: true, member: data, emailSent: sent });
+    } catch (error) {
+        console.error('Team invite failed:', error.message || error);
+        return res.status(500).json({ success: false, message: error.message || 'Invite failed.' });
+    }
+});
+
+app.delete('/api/team/members/:id', attachDoctorSession, async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        const userId = await getTeamSessionUserId(req);
+        const memberId = String(req.params.id || '').trim();
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+        if (!memberId) return res.status(400).json({ success: false, message: 'Member ID is required.' });
+
+        const now = new Date().toISOString();
+        const { data, error } = await db
+            .from(STAFF_MEMBERS_TABLE)
+            .update({ status: 'DELETED', is_active: false, deleted_at: now })
+            .eq('id', memberId)
+            .eq('admin_id', userId)
+            .select('id, name, email, status, deleted_at, is_active')
+            .maybeSingle();
+        if (error) throw error;
+        if (!data?.id) return res.status(404).json({ success: false, message: 'Team member not found.' });
+
+        await stampStaffDeletedAt(db, userId, now);
+
+        return res.status(200).json({
+            success: true,
+            member: data,
+            lastStaffDeletedAt: now,
+            cooldown: calculateTeamCooldown(now)
+        });
+    } catch (error) {
+        console.error('Team member soft-delete failed:', error.message || error);
+        return res.status(500).json({ success: false, message: error.message || 'Unable to delete this team member.' });
+    }
+});
+
 const updateTeamMemberActivation = async ({ memberId, authUserId }) => {
     const db = supabaseAdmin || supabase;
     let payload = {
@@ -926,7 +1164,7 @@ const updateTeamMemberActivation = async ({ memberId, authUserId }) => {
 
     while (Object.keys(payload).length > 0) {
         const { data, error } = await db
-            .from('team_members')
+            .from(STAFF_MEMBERS_TABLE)
             .update(payload)
             .eq('id', memberId)
             .select('id, admin_id, name, email, status')
@@ -962,7 +1200,7 @@ app.post('/api/team/setup-password', async (req, res) => {
         if (password.length < 8) return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
 
         const { data: member, error: memberError } = await db
-            .from('team_members')
+            .from(STAFF_MEMBERS_TABLE)
             .select('id, admin_id, name, email, status, invite_expires_at')
             .eq('email', email)
             .order('created_at', { ascending: false })
@@ -977,7 +1215,7 @@ app.post('/api/team/setup-password', async (req, res) => {
         }
 
         if (member.invite_expires_at && new Date(member.invite_expires_at).getTime() <= Date.now()) {
-            await db.from('team_members').update({ status: 'EXPIRED' }).eq('id', member.id);
+            await db.from(STAFF_MEMBERS_TABLE).update({ status: 'EXPIRED' }).eq('id', member.id);
             return res.status(410).json({ success: false, message: 'This invite has expired. Please ask your admin to send a new invite.' });
         }
 
@@ -1035,7 +1273,7 @@ app.get('/api/team/session-role', async (req, res) => {
 
         if (userId) {
             let result = await db
-                .from('team_members')
+                .from(STAFF_MEMBERS_TABLE)
                 .select(selectColumns)
                 .eq('auth_user_id', userId)
                 .eq('status', 'ACTIVE')
@@ -1045,7 +1283,7 @@ app.get('/api/team/session-role', async (req, res) => {
 
             if (result.error && getMissingSchemaColumn(result.error)) {
                 result = await db
-                    .from('team_members')
+                    .from(STAFF_MEMBERS_TABLE)
                     .select('id, admin_id, name, email, status')
                     .eq('email', email)
                     .eq('status', 'ACTIVE')
@@ -1059,7 +1297,7 @@ app.get('/api/team/session-role', async (req, res) => {
 
         if (!member && email) {
             const { data, error } = await db
-                .from('team_members')
+                .from(STAFF_MEMBERS_TABLE)
                 .select('id, admin_id, name, email, status')
                 .eq('email', email)
                 .eq('status', 'ACTIVE')
@@ -4577,7 +4815,7 @@ app.get('/api/inbox/chats', async (req, res) => {
 
         const db = supabaseAdmin || supabase;
         const { data: teamMembers, error: teamError } = await db
-            .from('team_members')
+            .from(STAFF_MEMBERS_TABLE)
             .select('id, name, email, status')
             .eq('admin_id', userId)
             .in('status', ['ACTIVE', 'INVITED']);
@@ -6057,6 +6295,25 @@ const processCampaignQueue = async () => {
 };
 
 setInterval(processCampaignQueue, 10000);
+
+const runDeletedStaffPurge = async () => {
+    const db = supabaseAdmin || supabase;
+    if (!db?.rpc) return;
+
+    try {
+        const { data, error } = await db.rpc('purge_expired_deleted_staff');
+        if (error) {
+            if (!isSchemaCacheError(error)) console.warn('Deleted staff purge skipped:', error.message || error);
+            return;
+        }
+        if (Number(data || 0) > 0) console.log(`Deleted staff purge removed ${data} expired archived record(s).`);
+    } catch (error) {
+        if (!isSchemaCacheError(error)) console.warn('Deleted staff purge failed:', error.message || error);
+    }
+};
+
+runDeletedStaffPurge();
+setInterval(runDeletedStaffPurge, Number(process.env.DELETED_STAFF_PURGE_INTERVAL_MS || 24 * 60 * 60 * 1000));
 
 startTrialReminderJob({
     db: supabaseAdmin || supabase,

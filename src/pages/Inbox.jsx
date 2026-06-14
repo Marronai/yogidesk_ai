@@ -332,7 +332,7 @@ const InboxContent = () => {
     if (!loadedFromApi) {
       try {
         const { data, error } = await supabase
-          .from('team_members')
+          .from('staff_members')
           .select('id, name, email, status')
           .eq('admin_id', user.id)
           .in('status', ['ACTIVE', 'INVITED']);
