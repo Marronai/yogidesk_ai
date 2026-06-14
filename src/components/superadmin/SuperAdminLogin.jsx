@@ -21,7 +21,7 @@ const SuperAdminLogin = () => {
         email: sanitizeEmail(form.email),
         password: form.password,
       });
-      if (!data?.session?.access_token || data?.user?.role !== 'superadmin') {
+      if (!data?.session?.access_token || !['superadmin', 'superadmin_staff'].includes(data?.user?.role)) {
         setHidden(true);
         return;
       }

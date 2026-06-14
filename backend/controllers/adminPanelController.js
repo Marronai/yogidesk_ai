@@ -8,6 +8,19 @@ const isMissingColumnError = (error) => {
 };
 
 const normalizeNumber = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const safeSelect = async (table, columns, build = (query) => query) => {
+  try {
+    const result = await build(supabase.from(table).select(columns));
+    if (result.error) {
+      if (isMissingColumnError(result.error)) return [];
+      throw result.error;
+    }
+    return result.data || [];
+  } catch (error) {
+    if (!isMissingColumnError(error)) console.warn(`Admin ${table} query skipped:`, error.message || error);
+    return [];
+  }
+};
 
 exports.getAdminSummary = async (req, res) => {
   try {
@@ -186,5 +199,103 @@ exports.getTransactionLogs = async (req, res) => {
   } catch (error) {
     console.error('Admin transaction logs failed:', error.message || error);
     return res.status(500).json({ success: false, message: 'Unable to fetch transaction logs.', error: error.message || 'Unknown error' });
+  }
+};
+
+exports.getWebhookFailures = async (req, res) => {
+  try {
+    const rows = await safeSelect(
+      'superadmin_webhook_errors',
+      'id,doctor_id,clinic_id,message_id,status,error_code,error_title,error_message,recipient_phone,business_account_id,phone_number_id,created_at,payload',
+      (query) => query.order('created_at', { ascending: false }).limit(100)
+    );
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      counters: {
+        total: rows.length,
+        meta131030: rows.filter((row) => String(row.error_code) === '131030').length,
+        meta131026: rows.filter((row) => String(row.error_code) === '131026').length,
+      },
+    });
+  } catch (error) {
+    console.error('Admin webhook failures fetch failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to fetch webhook failures.' });
+  }
+};
+
+exports.getTemplateSyncAlerts = async (req, res) => {
+  try {
+    const rows = await safeSelect(
+      'superadmin_template_sync_alerts',
+      'id,doctor_id,clinic_id,template_id,template_name,status,business_account_id,alert_level,created_at,payload',
+      (query) => query.order('created_at', { ascending: false }).limit(100)
+    );
+    const rejected = rows.filter((row) => String(row.status || '').toUpperCase() === 'REJECTED');
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      alert: rejected.length > 0 ? {
+        level: 'CRITICAL',
+        message: `${rejected.length} rejected Meta template sync alert${rejected.length === 1 ? '' : 's'} require review.`,
+        latest: rejected[0],
+      } : null,
+    });
+  } catch (error) {
+    console.error('Admin template sync alerts fetch failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to fetch template sync alerts.' });
+  }
+};
+
+exports.getCentralAnalyticsMonitor = async (req, res) => {
+  try {
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthIso = monthStart.toISOString();
+    const [messages, campaignRows, templateRows] = await Promise.all([
+      safeSelect('inbox_messages', 'id,metadata,created_at', (query) => query.gte('created_at', monthIso).limit(10000)),
+      safeSelect('campaign_analytics', 'id,campaign_type,template_category,sent_count,created_at', (query) => query.gte('created_at', monthIso).limit(10000)),
+      safeSelect('whatsapp_templates', 'id,category,created_at', (query) => query.gte('created_at', monthIso).limit(10000)),
+    ]);
+
+    const categoryOf = (row = {}) => String(
+      row.template_category ||
+      row.campaign_type ||
+      row.category ||
+      row.metadata?.template_category ||
+      row.metadata?.category ||
+      row.metadata?.last_template?.category ||
+      'UTILITY'
+    ).toUpperCase();
+    const countByCategory = (rows, weightKey = null) => rows.reduce((acc, row) => {
+      const category = categoryOf(row).includes('MARKETING') ? 'marketing' : 'utility';
+      acc[category] += weightKey ? normalizeNumber(row[weightKey]) : 1;
+      return acc;
+    }, { utility: 0, marketing: 0 });
+    const messageCounts = countByCategory(messages);
+    const campaignCounts = countByCategory(campaignRows, 'sent_count');
+    const templateCounts = countByCategory(templateRows);
+    const memory = process.memoryUsage();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        monthStart: monthIso,
+        utilityMessages: messageCounts.utility + campaignCounts.utility,
+        marketingMessages: messageCounts.marketing + campaignCounts.marketing,
+        templatesObserved: templateCounts,
+        serverLoad: {
+          uptimeSeconds: Math.round(process.uptime()),
+          rssMb: Number((memory.rss / 1024 / 1024).toFixed(2)),
+          heapUsedMb: Number((memory.heapUsed / 1024 / 1024).toFixed(2)),
+          heapTotalMb: Number((memory.heapTotal / 1024 / 1024).toFixed(2)),
+          loadAverage: typeof require('os').loadavg === 'function' ? require('os').loadavg() : [],
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Admin central analytics monitor failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to fetch analytics monitor.' });
   }
 };

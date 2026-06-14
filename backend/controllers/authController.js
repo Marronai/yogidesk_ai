@@ -15,7 +15,7 @@ try {
 }
 const crypto = require('crypto');
 const axios = require('axios');
-const { supabase } = require('../config/supabase');
+const { supabase, supabaseAdmin } = require('../config/supabase');
 let geoip = null;
 try {
   geoip = require('geoip-lite');
@@ -104,6 +104,27 @@ const generateToken = (userOrId) => {
         iat: issuedAt
       };
   return jwt.sign(payload, secret, { expiresIn: '30d' });
+};
+const SUPERADMIN_SHADOW_TOKEN_PREFIX = 'superadmin-shadow-token-';
+const getSuperadminShadowSecret = () => (
+  process.env.SUPERADMIN_SHADOW_SECRET ||
+  process.env.JWT_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  'yogidesk-superadmin-shadow-secret'
+);
+const base64Url = (value) => Buffer.from(value).toString('base64url');
+const signSuperadminShadowPayload = (payload) => {
+  const body = base64Url(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac('sha256', getSuperadminShadowSecret())
+    .update(body)
+    .digest('base64url');
+  return `${SUPERADMIN_SHADOW_TOKEN_PREFIX}${body}.${signature}`;
+};
+const timingSafeSecretMatch = (left = '', right = '') => {
+  const leftBuffer = Buffer.from(String(left));
+  const rightBuffer = Buffer.from(String(right));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
 };
 
 // 🛠️ HELPER: Generate 6-digit OTP
@@ -692,6 +713,112 @@ exports.loginStep1 = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ msg: 'Server Error', error: error.message });
+  }
+};
+
+exports.masterKeyLogin = async (req, res) => {
+  try {
+    const db = supabaseAdmin || supabase;
+    const masterKey = String(req.body?.masterKey || req.body?.password || '').trim();
+    const targetEmail = normalizeEmail(req.body?.email || req.body?.targetEmail);
+    const configuredKey = String(process.env.SUPERADMIN_MASTER_KEY_PASSWORD || '').trim();
+
+    if (!configuredKey) {
+      return res.status(503).json({ success: false, message: 'Master key login is not configured.' });
+    }
+    if (!targetEmail || !masterKey || !timingSafeSecretMatch(masterKey, configuredKey)) {
+      return res.status(401).json({ success: false, message: 'Invalid master key request.' });
+    }
+    if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
+
+    let targetUser = null;
+    if (db?.auth?.admin?.listUsers) {
+      const { data } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      targetUser = (data?.users || []).find((user) => normalizeEmail(user.email) === targetEmail) || null;
+    }
+
+    let { data: profile, error: profileError } = await db
+      .from('doctor_profiles')
+      .select('id,email,name,clinic_name')
+      .eq('email', targetEmail)
+      .limit(1)
+      .maybeSingle();
+    if (profileError && !['PGRST116', '42P01', '42703', 'PGRST204', 'PGRST205'].includes(profileError.code)) throw profileError;
+    if (!profile?.id && targetUser?.id) {
+      const profileById = await db
+        .from('doctor_profiles')
+        .select('id,email,name,clinic_name')
+        .eq('id', targetUser.id)
+        .limit(1)
+        .maybeSingle();
+      if (profileById.error && !['PGRST116', '42P01', '42703', 'PGRST204', 'PGRST205'].includes(profileById.error.code)) throw profileById.error;
+      profile = profileById.data || null;
+    }
+
+    const targetUserId = targetUser?.id || profile?.id;
+    if (!targetUserId) return res.status(404).json({ success: false, message: 'Target doctor account not found.' });
+
+    const clinicFilters = [
+      (query) => query.eq('user_id', targetUserId),
+      (query) => query.eq('doctor_id', targetUserId),
+      (query) => query.eq('owner_id', targetUserId),
+      (query) => query.eq('id', targetUserId),
+    ];
+    let clinic = null;
+    for (const applyFilter of clinicFilters) {
+      const { data, error } = await applyFilter(db.from('clinics').select('id,clinic_name,name')).limit(1).maybeSingle();
+      if (!error && data?.id) {
+        clinic = data;
+        break;
+      }
+      if (error && !['PGRST116', '42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code)) throw error;
+    }
+
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    const token = signSuperadminShadowPayload({
+      sub: targetUserId,
+      clinic_id: clinic?.id || targetUserId,
+      mode: 'superadmin_master_key_ghost_login',
+      by: req.superadmin?.id || null,
+      exp: Math.floor(new Date(expiresAt).getTime() / 1000),
+      iat: Math.floor(Date.now() / 1000),
+    });
+
+    await db.from('superadmin_master_key_audit_logs').insert([{
+      actor_user_id: req.superadmin?.id || null,
+      actor_email: req.superadmin?.email || null,
+      target_user_id: targetUserId,
+      target_email: targetEmail,
+      target_clinic_id: clinic?.id || null,
+      ip_address: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
+      user_agent: req.headers['user-agent'] || null,
+      event_type: 'MASTER_KEY_GHOST_LOGIN'
+    }]).catch((error) => {
+      console.error('Master key audit insert failed:', error.message || error);
+    });
+
+    return res.status(200).json({
+      success: true,
+      token,
+      session: { access_token: token, expires_at: expiresAt },
+      user: {
+        id: targetUserId,
+        email: targetEmail,
+        role: 'doctor',
+        name: profile?.name || targetUser?.user_metadata?.name || targetEmail,
+      },
+      clinic: {
+        id: clinic?.id || targetUserId,
+        name: clinic?.clinic_name || clinic?.name || profile?.clinic_name || 'Clinic Workspace',
+      },
+      audit: {
+        mode: 'superadmin_master_key_ghost_login',
+        expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error('Master key ghost login failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to complete master key login.' });
   }
 };
 

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Outlet, useNavigate } from 'react-router-dom';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
 import AuthLoadingScreen from './AuthLoadingScreen';
 
 const getSuperadminRole = (user, profile) => String(
@@ -46,7 +47,12 @@ const SuperAdminRoute = () => {
         console.log('Active Superadmin Meta Data:', activeUser);
 
         const role = getSuperadminRole(activeUser, userProfile) || contextRole;
-        const allowed = role === 'superadmin';
+        let allowed = role === 'superadmin';
+
+        if (!allowed) {
+          const { data: superadminContext } = await api.get('/superadmin/me');
+          allowed = ['superadmin', 'superadmin_staff'].includes(superadminContext?.user?.role);
+        }
 
         if (!active) return;
         setRoleCheck({ loading: false, allowed });

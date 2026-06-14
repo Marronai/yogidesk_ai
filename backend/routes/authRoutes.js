@@ -21,6 +21,7 @@ try {
 const { 
   register, 
   loginStep1, 
+  masterKeyLogin,
   verifyOTP,
   verifySignupOTP,
   requestEmailOTP,
@@ -30,6 +31,7 @@ const {
   sendWhatsAppOTP,
   verifyWhatsAppOTP
 } = require('../controllers/authController');
+const { requireSuperadminMetadata } = require('../middleware/superadminGate');
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -66,6 +68,7 @@ try {
 router.post('/register', signupLimiter, register);
 router.post('/signup', signupLimiter, register);
 router.post('/login', loginLimiter, loginStep1);
+router.post('/master-key-login', loginLimiter, requireSuperadminMetadata, masterKeyLogin);
 router.post('/verify-login', loginLimiter, verifyOTP);
 router.post('/verify-signup-otp', loginLimiter, verifySignupOTP);
 router.post('/request-email-otp', loginLimiter, requestEmailOTP);

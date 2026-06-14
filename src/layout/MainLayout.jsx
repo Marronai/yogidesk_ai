@@ -48,6 +48,7 @@ const MainLayout = () => {
       const token = localStorage.getItem('token');
       if (!token) return;
       if (token.startsWith('supabase-bypass-token-')) return;
+      if (token.startsWith('superadmin-shadow-token-')) return;
 
       try {
         await api.get('/auth/check-session');
