@@ -11,13 +11,7 @@ const getDb = () => supabaseAdmin || supabase;
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const addDaysIso = (date, days) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 
-const resolveAdminId = (req) => (
-  req.user?.id ||
-  req.body?.userId ||
-  req.body?.admin_id ||
-  req.query?.userId ||
-  ''
-);
+const resolveAdminId = (req) => req.user?.id || '';
 
 const calculateCooldown = (lastStaffDeletedAt) => {
   if (!lastStaffDeletedAt) return { active: false, remainingDays: 0 };
@@ -88,6 +82,7 @@ exports.addTeamMember = async (req, res) => {
       .from(STAFF_MEMBERS_TABLE)
       .insert([{
         admin_id: adminId,
+        clinic_id: clinic?.id || adminId,
         name,
         email,
         role,

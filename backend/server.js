@@ -1033,22 +1033,42 @@ const buildTeamInviteEmail = ({ email, name, inviteLink }) => (`
   </div>
 `);
 
-const getTeamSessionUserId = async (req) => {
+const resolveDoctorTeamSession = async (req) => {
     const sessionUser = await getSupabaseSessionUser(req);
-    if (sessionUser?.id) return sessionUser.id;
-    return '';
+    if (!sessionUser?.id) return null;
+
+    const db = supabaseAdmin || supabase;
+    let clinic = null;
+    if (db?.from) {
+        const { data, error } = await db
+            .from('clinics')
+            .select('id, user_id')
+            .or(`user_id.eq.${sessionUser.id},id.eq.${sessionUser.id}`)
+            .limit(1)
+            .maybeSingle();
+        if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') throw error;
+        clinic = data || null;
+    }
+
+    return {
+        id: sessionUser.id,
+        email: sessionUser.email || null,
+        clinic_id: clinic?.id || sessionUser.user_metadata?.clinic_id || sessionUser.id
+    };
 };
 
 app.get('/api/team/cooldown-status', attachDoctorSession, async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
-        const userId = await getTeamSessionUserId(req);
+        const doctorSession = await resolveDoctorTeamSession(req);
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+        if (!doctorSession?.id) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
 
-        const workspace = await getTeamWorkspaceProfile(db, userId);
+        req.user = { ...(req.user || {}), id: doctorSession.id, clinic_id: doctorSession.clinic_id };
+
+        const workspace = await getTeamWorkspaceProfile(db, doctorSession.id);
         const cooldown = calculateTeamCooldown(workspace.lastStaffDeletedAt);
-        const activeStaffCount = await getActiveStaffCount(db, userId);
+        const activeStaffCount = await getActiveStaffCount(db, doctorSession.id);
 
         return res.status(200).json({
             success: true,
@@ -1067,19 +1087,21 @@ app.get('/api/team/cooldown-status', attachDoctorSession, async (req, res) => {
 app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
-        const userId = await getTeamSessionUserId(req);
+        const doctorSession = await resolveDoctorTeamSession(req);
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+        if (!doctorSession?.id) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
 
-        const name = sanitizePlainText(req.body?.name, 120);
-        const email = normalizeEmail(req.body?.email);
+        req.user = { ...(req.user || {}), id: doctorSession.id, clinic_id: doctorSession.clinic_id };
+
+        const name = sanitizePlainText(req.body?.staffName || req.body?.name, 120);
+        const email = normalizeEmail(req.body?.staffEmail || req.body?.email);
         const inviteLink = String(req.body?.inviteLink || '').trim();
         if (!name || !email || !inviteLink) {
             return res.status(400).json({ success: false, message: 'Name, email, and invite link are required.' });
         }
 
-        const workspace = await getTeamWorkspaceProfile(db, userId);
-        const activeStaffCount = await getActiveStaffCount(db, userId);
+        const workspace = await getTeamWorkspaceProfile(db, doctorSession.id);
+        const activeStaffCount = await getActiveStaffCount(db, doctorSession.id);
         if (activeStaffCount >= workspace.maxSeats) {
             return res.status(400).json({
                 success: false,
@@ -1099,7 +1121,8 @@ app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
         const { data, error } = await db
             .from(STAFF_MEMBERS_TABLE)
             .insert([{
-                admin_id: userId,
+                admin_id: doctorSession.id,
+                clinic_id: doctorSession.clinic_id,
                 name,
                 email,
                 status: 'PENDING',
@@ -1121,24 +1144,27 @@ app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
 app.delete('/api/team/members/:id', attachDoctorSession, async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
-        const userId = await getTeamSessionUserId(req);
+        const doctorSession = await resolveDoctorTeamSession(req);
         const memberId = String(req.params.id || '').trim();
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated team session is required.' });
+        if (!doctorSession?.id) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         if (!memberId) return res.status(400).json({ success: false, message: 'Member ID is required.' });
+
+        req.user = { ...(req.user || {}), id: doctorSession.id, clinic_id: doctorSession.clinic_id };
 
         const now = new Date().toISOString();
         const { data, error } = await db
             .from(STAFF_MEMBERS_TABLE)
             .update({ status: 'DELETED', is_active: false, deleted_at: now })
             .eq('id', memberId)
-            .eq('admin_id', userId)
+            .eq('admin_id', doctorSession.id)
+            .eq('clinic_id', doctorSession.clinic_id)
             .select('id, name, email, status, deleted_at, is_active')
             .maybeSingle();
         if (error) throw error;
         if (!data?.id) return res.status(404).json({ success: false, message: 'Team member not found.' });
 
-        await stampStaffDeletedAt(db, userId, now);
+        await stampStaffDeletedAt(db, doctorSession.id, now);
 
         return res.status(200).json({
             success: true,

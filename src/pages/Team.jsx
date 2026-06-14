@@ -44,9 +44,21 @@ const Team = () => {
   const seatLabel = useMemo(() => `${visibleMembers.length} / ${maxSeats} staff seats used`, [visibleMembers.length, maxSeats]);
   const cooldownLabel = `${cooldownRemainingDays} day${cooldownRemainingDays === 1 ? '' : 's'}`;
 
+  const readStoredSessionToken = () => {
+    try {
+      const session = JSON.parse(localStorage.getItem('sb-access-token') || '{}');
+      return session?.access_token || null;
+    } catch {
+      return null;
+    }
+  };
+
   const getApiHeaders = async () => {
     const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
+    const token = readStoredSessionToken()
+      || data?.session?.access_token
+      || localStorage.getItem('token')
+      || sessionStorage.getItem('token');
     return {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -61,7 +73,7 @@ const Team = () => {
   const fetchTeamPolicy = async () => {
     if (!userId) return;
     try {
-      const response = await fetch(`${API_URL}/api/team/cooldown-status?userId=${encodeURIComponent(userId)}`, {
+      const response = await fetch(`${API_URL}/api/team/cooldown-status`, {
         headers: await getApiHeaders(),
       });
       const result = await response.json().catch(() => ({}));
@@ -110,9 +122,8 @@ const Team = () => {
         method: 'POST',
         headers: await getApiHeaders(),
         body: JSON.stringify({
-          userId: user.id,
-          name: nameInput,
-          email: emailInput,
+          staffName: nameInput,
+          staffEmail: emailInput,
           inviteLink,
         }),
       });
@@ -179,7 +190,6 @@ const Team = () => {
       const response = await fetch(`${API_URL}/api/team/members/${encodeURIComponent(deleteTarget.id)}`, {
         method: 'DELETE',
         headers: await getApiHeaders(),
-        body: JSON.stringify({ userId }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || 'Unable to delete this team member.');
@@ -232,6 +242,7 @@ const Team = () => {
 
     try {
       setGateLoading(true);
+      setAlert('');
       const response = await fetch(`${API_URL}/api/auth/verify-email-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
