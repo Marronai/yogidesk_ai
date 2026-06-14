@@ -1035,6 +1035,86 @@ const buildTeamInviteEmail = ({ email, name, inviteLink }) => (`
   </div>
 `);
 
+const selectClinicForDoctor = async (db, userId) => {
+    const { data, error } = await db
+        .from('clinics')
+        .select('id, user_id')
+        .or(`user_id.eq.${userId},id.eq.${userId}`)
+        .limit(1)
+        .maybeSingle();
+    if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') throw error;
+    return data || null;
+};
+
+const insertClinicSafely = async (db, row) => {
+    let payload = removeUndefinedValues(row);
+    const removedColumns = new Set();
+
+    while (Object.keys(payload).length > 0) {
+        const { data, error } = await db
+            .from('clinics')
+            .insert([payload])
+            .select('id, user_id')
+            .maybeSingle();
+
+        if (!error) return data || null;
+
+        const missingColumn = getMissingSchemaColumn(error);
+        if (missingColumn && !removedColumns.has(missingColumn)) {
+            removedColumns.add(missingColumn);
+            const { [missingColumn]: _removed, ...nextPayload } = payload;
+            payload = nextPayload;
+            continue;
+        }
+
+        throw error;
+    }
+
+    return null;
+};
+
+const ensureClinicForDoctor = async (db, sessionUser) => {
+    if (!db?.from || !sessionUser?.id) return null;
+
+    const existingClinic = await selectClinicForDoctor(db, sessionUser.id);
+    if (existingClinic?.id) return existingClinic;
+
+    const { data: profile, error: profileError } = await db
+        .from('doctor_profiles')
+        .select('id,email,name,clinic_name,business_name,business_category,clinic_category,specialization,subscription_tier,current_plan,plan_tier,runtime_plan,ai_message_balance,ai_token_balance,phone,phone_number,mobile')
+        .eq('id', sessionUser.id)
+        .maybeSingle();
+    if (profileError && !isSchemaCacheError(profileError) && profileError.code !== 'PGRST116') throw profileError;
+
+    const metadata = sessionUser.user_metadata || {};
+    const clinicName = profile?.clinic_name || profile?.business_name || metadata.clinic_name || metadata.businessName || metadata.business_name || 'Clinic Workspace';
+    const doctorName = profile?.name || metadata.full_name || metadata.name || sessionUser.email || 'Doctor';
+    const plan = profile?.runtime_plan || profile?.current_plan || profile?.plan_tier || profile?.subscription_tier || 'growth';
+
+    return insertClinicSafely(db, {
+        user_id: sessionUser.id,
+        doctor_id: sessionUser.id,
+        owner_id: sessionUser.id,
+        email: profile?.email || sessionUser.email || null,
+        doctor_email: profile?.email || sessionUser.email || null,
+        name: clinicName,
+        clinic_name: clinicName,
+        doctor_name: doctorName,
+        phone: profile?.phone || profile?.phone_number || profile?.mobile || null,
+        phone_number: profile?.phone_number || profile?.phone || profile?.mobile || null,
+        specialization: profile?.specialization || profile?.clinic_category || profile?.business_category || null,
+        business_category: profile?.business_category || profile?.clinic_category || profile?.specialization || null,
+        subscription_tier: plan,
+        current_plan: plan,
+        plan_tier: plan,
+        runtime_plan: plan,
+        ai_message_balance: profile?.ai_message_balance,
+        ai_token_balance: profile?.ai_token_balance,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    });
+};
+
 const resolveDoctorTeamSession = async (req) => {
     const sessionUser = await getSupabaseSessionUser(req);
     if (!sessionUser?.id) return null;
@@ -1042,14 +1122,7 @@ const resolveDoctorTeamSession = async (req) => {
     const db = supabaseAdmin || supabase;
     let clinic = null;
     if (db?.from) {
-        const { data, error } = await db
-            .from('clinics')
-            .select('id, user_id')
-            .or(`user_id.eq.${sessionUser.id},id.eq.${sessionUser.id}`)
-            .limit(1)
-            .maybeSingle();
-        if (error && !isSchemaCacheError(error) && error.code !== 'PGRST116') throw error;
-        clinic = data || null;
+        clinic = await ensureClinicForDoctor(db, sessionUser);
     }
 
     return {

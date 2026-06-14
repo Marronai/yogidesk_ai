@@ -91,6 +91,9 @@ const Team = () => {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || 'Unable to load team policy.');
       setTeamPolicy(result);
+      setAlert((current) => (
+        /clinic workspace is not ready/i.test(current) ? '' : current
+      ));
     } catch (error) {
       setAlert(error.message || 'Unable to load team policy.');
     }
