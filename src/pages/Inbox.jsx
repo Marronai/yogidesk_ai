@@ -32,6 +32,9 @@ import { useAuth } from '../context/AuthContext';
 
 const tagOptions = ['#ActiveLead', '#FollowUp'];
 const TRIAL_EXPIRED_NOTICE = 'Your 7-day complementary trial period has expired. Please recharge AI Assistant Messages to activate YogiDesk AI features again.';
+const DASHBOARD_TITLE = 'YogiDesk - Dashboard';
+const PATIENT_MESSAGE_TITLE = 'New Message from Patient! | YogiDesk';
+let notificationAudio = null;
 
 const fallbackAgent = { id: 'admin', name: 'Admin', role: 'Admin' };
 const safeTags = (chat) => (Array.isArray(chat?.metadata?.tags) ? chat.metadata.tags : []);
@@ -114,6 +117,56 @@ const logInboxError = (error) => {
     return;
   }
   console.error('Supabase Inbox Logging Error:', message);
+};
+
+const playFallbackNotificationTone = () => {
+  if (typeof window === 'undefined') return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  try {
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, context.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(1320, context.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.34);
+    window.setTimeout(() => context.close().catch(() => {}), 500);
+  } catch (error) {
+    console.log('Audio autoplay waiting for initial user interaction click gesture:', error);
+  }
+};
+
+const playNotificationSound = () => {
+  if (typeof window === 'undefined') return;
+
+  if (!notificationAudio) {
+    notificationAudio = new Audio('/sounds/notification.mp3');
+    notificationAudio.preload = 'auto';
+    notificationAudio.volume = 0.7;
+  }
+
+  notificationAudio.currentTime = 0;
+  notificationAudio.play().catch((err) => {
+    console.log('Audio autoplay waiting for initial user interaction click gesture:', err);
+    playFallbackNotificationTone();
+  });
+};
+
+const isInboundPatientMessage = (row = {}) => {
+  const sender = String(row.sender || '').toLowerCase();
+  const metadata = row.metadata || {};
+  return row.from_me !== true
+    && !['agent', 'doctor', 'bot', 'system'].includes(sender)
+    && !metadata.outbound
+    && !metadata.dialogflow_reply;
 };
 
 class InboxRenderBoundary extends React.Component {
@@ -629,6 +682,19 @@ const InboxContent = () => {
   }, []);
 
   useEffect(() => {
+    const resetTitle = () => {
+      if (!document.hidden) document.title = DASHBOARD_TITLE;
+    };
+
+    document.addEventListener('visibilitychange', resetTitle);
+    window.addEventListener('focus', resetTitle);
+    return () => {
+      document.removeEventListener('visibilitychange', resetTitle);
+      window.removeEventListener('focus', resetTitle);
+    };
+  }, []);
+
+  useEffect(() => {
     const channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'inbox_messages' }, (payload) => {
@@ -679,6 +745,13 @@ const InboxContent = () => {
           const nextRow = payload.new || {};
           const mappedMessage = mapStoredMessage(nextRow);
           setReloadToken((value) => value + 1);
+
+          if (payload.eventType === 'INSERT' && isInboundPatientMessage(nextRow)) {
+            playNotificationSound();
+            if (document.hidden) {
+              document.title = PATIENT_MESSAGE_TITLE;
+            }
+          }
 
           if (selectedChat?.id && String(nextRow.chat_id || '') === String(selectedChat.id)) {
             setMessages((prev) => mergeMessageLists(prev, [mappedMessage]));

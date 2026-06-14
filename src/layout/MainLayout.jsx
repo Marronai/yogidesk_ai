@@ -9,6 +9,8 @@ import { blockLiveSupportWidgetsForMetaReview } from '../utils/metaReviewSession
 
 const TAWK_SCRIPT_ID = 'yogidesk-tawk-widget';
 const TAWK_EMBED_URL = 'https://embed.tawk.to/6a2bfd7374b4d41c29150020/1jqttc32p';
+const WELCOME_ANIMATION_MS = 4000;
+const WELCOME_REVEAL_MS = 3200;
 
 const removeTawkWidget = () => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -37,6 +39,8 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, isMetaReviewSession, user, userProfile } = useAuth();
+  const [isWelcomeActive, setIsWelcomeActive] = useState(true);
+  const [isWelcomeRevealing, setIsWelcomeRevealing] = useState(false);
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
   useEffect(() => {
@@ -70,6 +74,38 @@ const MainLayout = () => {
   const [trialAlert, setTrialAlert] = useState(null);
   const [lowBalanceAlert, setLowBalanceAlert] = useState(null);
   const [lowBalanceDismissed, setLowBalanceDismissed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
+    if (!isAuthenticated || !user?.id || isMetaReviewSession) {
+      setIsWelcomeActive(false);
+      return undefined;
+    }
+
+    const storageKey = `yogidesk-welcome-seen:${user.id}`;
+    if (sessionStorage.getItem(storageKey) === 'true') {
+      setIsWelcomeActive(false);
+      return undefined;
+    }
+
+    setIsWelcomeActive(true);
+    setIsWelcomeRevealing(false);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const revealTimer = window.setTimeout(() => setIsWelcomeRevealing(true), WELCOME_REVEAL_MS);
+    const doneTimer = window.setTimeout(() => {
+      sessionStorage.setItem(storageKey, 'true');
+      setIsWelcomeActive(false);
+      document.body.style.overflow = previousOverflow;
+    }, WELCOME_ANIMATION_MS);
+
+    return () => {
+      window.clearTimeout(revealTimer);
+      window.clearTimeout(doneTimer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isAuthenticated, isMetaReviewSession, user?.id]);
 
   useEffect(() => {
     let active = true;
@@ -215,6 +251,65 @@ const MainLayout = () => {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-50 font-sans md:flex-row">
+      {isWelcomeActive && (
+        <div
+          className={`fixed inset-0 z-[9999] flex flex-col items-center justify-center overflow-hidden bg-neutral-950 transition-all duration-700 ease-in-out ${
+            isWelcomeRevealing ? '-translate-y-8 scale-105 opacity-0' : 'translate-y-0 scale-100 opacity-100'
+          }`}
+          role="status"
+          aria-live="polite"
+          aria-label="Opening YogiDesk workspace"
+        >
+          <style>
+            {`
+              @keyframes yogideskBrandSlide {
+                0%, 35% { width: 4rem; gap: 0; }
+                55%, 100% { width: 18rem; gap: 1rem; }
+              }
+              @keyframes yogideskWordReveal {
+                0%, 42% { opacity: 0; transform: translateX(-18px); }
+                62%, 100% { opacity: 1; transform: translateX(0); }
+              }
+              @keyframes yogideskSubcopyReveal {
+                0%, 55% { opacity: 0; transform: translateY(14px); letter-spacing: 0.34em; }
+                78%, 100% { opacity: 1; transform: translateY(0); letter-spacing: 0.02em; }
+              }
+              @keyframes yogideskAmbientSweep {
+                0% { transform: translateX(-45%) rotate(18deg); opacity: 0; }
+                45% { opacity: 0.45; }
+                100% { transform: translateX(45%) rotate(18deg); opacity: 0; }
+              }
+            `}
+          </style>
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500/20 blur-3xl" />
+            <div
+              className="absolute top-0 h-full w-1/3 bg-gradient-to-r from-transparent via-white/10 to-transparent blur-sm"
+              style={{ animation: 'yogideskAmbientSweep 3.4s ease-in-out both' }}
+            />
+          </div>
+          <div
+            className="relative flex h-20 items-center justify-center overflow-hidden"
+            style={{ animation: 'yogideskBrandSlide 3s ease-in-out both' }}
+          >
+            <div className="flex h-16 w-16 shrink-0 animate-pulse items-center justify-center rounded-2xl bg-orange-500 text-2xl font-black text-white shadow-lg shadow-orange-500/30">
+              YD
+            </div>
+            <div
+              className="whitespace-nowrap text-5xl font-black tracking-tight text-white"
+              style={{ animation: 'yogideskWordReveal 3s ease-out both' }}
+            >
+              Yogi<span className="text-orange-500">Desk</span>
+            </div>
+          </div>
+          <p
+            className="relative mt-8 text-center text-xs font-bold uppercase text-white/70 sm:text-sm"
+            style={{ animation: 'yogideskSubcopyReveal 3.4s ease-out both' }}
+          >
+            Advanced AI Assistant for Healthcare Workspaces
+          </p>
+        </div>
+      )}
       <div className="hidden flex-shrink-0 md:block">
         <Sidebar />
       </div>
