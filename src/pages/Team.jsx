@@ -4,7 +4,7 @@ import { supabase } from '../config/supabaseClient';
 import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
 
-const seatCaps = { basic: 0, starter: 1, growth: 2, hospital: 5, multi_specialty: 5, multi: 5 };
+const seatCaps = { basic: 0, starter: 1, growth: 2, enterprise: 5, hospital: 5, multi_specialty: 5, multi: 5 };
 const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
 const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
 
@@ -37,19 +37,23 @@ const Team = () => {
   const [deleting, setDeleting] = useState(false);
   const [teamPolicy, setTeamPolicy] = useState(null);
   
-  const plan = String(wallet.runtime_plan || wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase().replace(/[\s-]+/g, '_');
+  const plan = String(teamPolicy?.plan || wallet.runtime_plan || wallet.current_plan || wallet.plan_tier || 'starter').toLowerCase().replace(/[\s-]+/g, '_');
+  const planLabel = plan.replace(/_/g, ' ');
   const isTrialExpired = Boolean(wallet.has_trial_expired) || plan === 'basic';
   const maxSeats = teamPolicy?.maxSeats ?? (isTrialExpired ? 0 : (seatCaps[plan] ?? seatCaps.starter));
   const visibleMembers = useMemo(() => (
     members.filter((member) => member.is_active !== false && !member.deleted_at && !['DELETED', 'EXPIRED'].includes(String(member.status || '').toUpperCase()) && !isPendingExpired(member))
   ), [members]);
+  const activeSeatMembers = useMemo(() => (
+    visibleMembers.filter((member) => String(member.status || '').toUpperCase() === 'ACTIVE')
+  ), [visibleMembers]);
   const isInviteCoolingDown = Boolean(teamPolicy?.cooldown?.active);
   const cooldownRemainingDays = Math.max(0, Number(teamPolicy?.cooldown?.remainingDays || 0));
-  const isFull = visibleMembers.length >= maxSeats;
+  const isFull = activeSeatMembers.length >= maxSeats;
   const inviteDisabled = isTrialExpired || isFull || isInviteCoolingDown || maxSeats <= 0;
   const isCooldownAlert = /security cooldown|slot security lock/i.test(alert);
 
-  const seatLabel = useMemo(() => `${visibleMembers.length} / ${maxSeats} staff seats used`, [visibleMembers.length, maxSeats]);
+  const seatLabel = useMemo(() => `${activeSeatMembers.length} / ${maxSeats} staff seats used`, [activeSeatMembers.length, maxSeats]);
   const cooldownLabel = `${cooldownRemainingDays} day${cooldownRemainingDays === 1 ? '' : 's'}`;
 
   const readStoredSessionToken = () => {
@@ -163,7 +167,7 @@ const Team = () => {
       return;
     }
     if (isFull) {
-      setAlert(`Your ${plan} plan allows ${maxSeats} team seat${maxSeats > 1 ? 's' : ''}. Upgrade to add more staff.`);
+      setAlert(`Your ${planLabel} plan allows ${maxSeats} team seat${maxSeats > 1 ? 's' : ''}. Upgrade to add more staff.`);
       return;
     }
     if (isInviteCoolingDown) {
@@ -283,7 +287,7 @@ const Team = () => {
             <Users size={18} />
             {seatLabel}
           </div>
-          <p className="text-[11px] font-bold uppercase tracking-wider mt-1">{plan} plan</p>
+          <p className="text-[11px] font-bold uppercase tracking-wider mt-1">{planLabel} plan</p>
         </div>
       </div>
 

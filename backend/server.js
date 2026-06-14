@@ -243,7 +243,7 @@ app.post('/api/superadmin/login', explicitSuperadminLoginLimiter, loginSuperadmi
 app.use('/api/superadmin', superadminRoutes);
 
 const PLAN_CONTACT_LIMITS = { starter: 500, growth: 2000, hospital: 10000 };
-const TEAM_SEAT_CAPS = { basic: 0, starter: 1, growth: 2, hospital: 5, multi_specialty: 5, multi: 5 };
+const TEAM_SEAT_CAPS = { basic: 0, starter: 1, growth: 2, enterprise: 5, hospital: 5, multi_specialty: 5, multi: 5 };
 const TEAM_INVITE_EXPIRY_DAYS = 3;
 const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
 const STAFF_MEMBERS_TABLE = 'staff_members';
@@ -974,7 +974,9 @@ const getTeamWorkspaceProfile = async (db, userId) => {
         clinic?.plan || profile.plan || 'starter'
     );
     const isTrialExpired = Boolean(profile.has_trial_expired) || plan === 'basic';
-    const maxSeats = isTrialExpired ? 0 : Number(clinic?.max_seats_allocated || TEAM_SEAT_CAPS[plan] || TEAM_SEAT_CAPS.starter);
+    const planSeatCap = TEAM_SEAT_CAPS[plan];
+    const configuredSeatCap = Number(clinic?.max_seats_allocated || 0);
+    const maxSeats = isTrialExpired ? 0 : Number(planSeatCap || configuredSeatCap || TEAM_SEAT_CAPS.starter);
     const lastStaffDeletedAt = clinic?.last_staff_deleted_at || profile.last_staff_deleted_at || null;
 
     return { clinic, profile, wallet, plan, maxSeats, lastStaffDeletedAt, isTrialExpired };
@@ -991,7 +993,7 @@ const getActiveStaffCount = async (db, userId) => {
     return (data || []).filter((member) => {
         const status = String(member.status || '').toUpperCase();
         const expired = status === 'PENDING' && member.invite_expires_at && new Date(member.invite_expires_at).getTime() <= now;
-        return !member.deleted_at && member.is_active !== false && !['DELETED', 'EXPIRED'].includes(status) && !expired;
+        return status === 'ACTIVE' && !member.deleted_at && member.is_active !== false && !expired;
     }).length;
 };
 
@@ -1224,6 +1226,22 @@ const updateTeamMemberActivation = async ({ memberId, authUserId }) => {
     throw new Error('Unable to activate team member.');
 };
 
+const findAuthUserByEmail = async (db, email) => {
+    if (!db?.auth?.admin?.listUsers || !email) return null;
+    const targetEmail = normalizeEmail(email);
+
+    for (let page = 1; page <= 10; page += 1) {
+        const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        const users = data?.users || [];
+        const match = users.find((user) => normalizeEmail(user.email) === targetEmail);
+        if (match?.id) return match;
+        if (users.length < 1000) break;
+    }
+
+    return null;
+};
+
 app.post('/api/team/setup-password', async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
@@ -1257,6 +1275,7 @@ app.post('/api/team/setup-password', async (req, res) => {
             return res.status(410).json({ success: false, message: 'This invite has expired. Please ask your admin to send a new invite.' });
         }
 
+        let authUserRecord = null;
         const { data: authUser, error: authError } = await db.auth.admin.createUser({
             email,
             password,
@@ -1273,12 +1292,21 @@ app.post('/api/team/setup-password', async (req, res) => {
         if (authError) {
             const message = String(authError.message || '').toLowerCase();
             if (message.includes('already') || message.includes('registered')) {
-                return res.status(409).json({ success: false, message: 'An account already exists for this email. Please use login or request a fresh invite.' });
+                authUserRecord = await findAuthUserByEmail(db, email);
+                if (!authUserRecord?.id) {
+                    return res.status(409).json({
+                        success: false,
+                        message: 'This email already has an account. Please sign in to continue staff access setup.'
+                    });
+                }
+            } else {
+                throw authError;
             }
-            throw authError;
+        } else {
+            authUserRecord = authUser?.user || null;
         }
 
-        const createdUserId = authUser?.user?.id;
+        const createdUserId = authUserRecord?.id;
         if (!createdUserId) throw new Error('Supabase did not return a created auth user.');
 
         const updatedMember = await updateTeamMemberActivation({
@@ -1289,7 +1317,9 @@ app.post('/api/team/setup-password', async (req, res) => {
         return res.status(200).json({
             success: true,
             userId: createdUserId,
-            member: updatedMember
+            member: updatedMember,
+            existingAccount: Boolean(authError),
+            redirectTo: '/login'
         });
     } catch (error) {
         console.error('Team setup password error:', error.message || error);

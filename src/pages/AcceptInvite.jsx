@@ -47,10 +47,17 @@ const AcceptInvite = () => {
 
     setLoading(true);
     try {
-      await api.post('/team/setup-password', {
+      const setupResponse = await api.post('/team/setup-password', {
         email: invitedEmail,
         password: form.password,
       });
+
+      if (setupResponse.data?.existingAccount) {
+        setSuccess(true);
+        setNotice('This email already has an account. Opening login so you can enter your existing password.');
+        setTimeout(() => navigate('/login', { replace: true, state: { email: invitedEmail } }), 700);
+        return;
+      }
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: invitedEmail,
