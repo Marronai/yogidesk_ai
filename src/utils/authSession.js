@@ -46,7 +46,8 @@ export const persistSupabaseSession = (user, overrides = {}) => {
   localStorage.setItem('user_phone', overrides.phone || metadata.phone || '');
   localStorage.setItem('user_role', String(role).toUpperCase() === 'STAFF' ? 'STAFF' : 'doctor');
   localStorage.setItem('user_business_category', businessCategory);
-  localStorage.setItem('token', `supabase-bypass-token-${user.id}`);
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
 
   ensureWallet({ welcomeGift: Boolean(overrides.welcomeGift) });
 };

@@ -16,7 +16,6 @@ import {
   Smartphone,
   Users,
   Wallet,
-  ChevronDown,
   Bot,
   Lock,
   X,
@@ -44,8 +43,6 @@ const Sidebar = () => {
   const userIndustry = localStorage.getItem('user_industry') || 'general';
   const wallet = getWallet();
   const [lifetimeCount, setLifetimeCount] = useState(0);
-  const [quickRechargeOpen, setQuickRechargeOpen] = useState(false);
-  const [quickRechargeLoading, setQuickRechargeLoading] = useState(false);
   const [appRelease, setAppRelease] = useState({ apkUrl: FALLBACK_APK_URL, version: 'v1.0.0', loading: false });
   const [lockNotice, setLockNotice] = useState('');
   const [profile, setProfile] = useState({
@@ -145,51 +142,6 @@ const Sidebar = () => {
     !isMetaReviewSession || !['Appointments', 'Delivery Reports'].includes(link.name)
   ));
 
-  const openPayuRecharge = async (amount) => {
-    if (quickRechargeLoading) return;
-    try {
-      setQuickRechargeLoading(true);
-      const { data } = await supabase.auth.getUser();
-      const userId = data?.user?.id || localStorage.getItem('user_id');
-      const email = data?.user?.email || localStorage.getItem('user_email') || '';
-      const phone = data?.user?.user_metadata?.phone || localStorage.getItem('user_phone') || '';
-
-      if (!userId || !email) throw new Error('Please login again before recharging.');
-
-      const response = await api.post('/payments/initiate-payu', {
-        userId,
-        amount,
-        firstname: profile.name || 'Yogi Desk User',
-        email,
-        phone,
-      });
-
-      const payuPayload = response.data?.payload;
-      if (!response.data?.success || !payuPayload?.hash) throw new Error(response.data?.msg || 'Unable to open checkout.');
-
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = response.data.checkoutUrl;
-      form.target = '_self';
-      form.style.display = 'none';
-
-      Object.entries(payuPayload).forEach(([key, value]) => {
-        if (value === undefined || value === null) return;
-        const field = document.createElement('input');
-        field.type = 'hidden';
-        field.name = key;
-        field.value = String(value);
-        form.appendChild(field);
-      });
-
-      document.body.appendChild(form);
-      form.submit();
-    } catch (error) {
-      alert(error.message || 'Unable to start quick recharge.');
-      setQuickRechargeLoading(false);
-    }
-  };
-
   const handleDownloadAPK = async () => {
     try {
       let apkUrl = null;
@@ -280,31 +232,12 @@ const Sidebar = () => {
               <span aria-hidden="true">&gt;</span>
             </Link>
             {isWalletLow && (
-              <div className="mt-3 rounded-xl border border-orange-200 bg-white p-3">
-                <button
-                  type="button"
-                  onClick={() => setQuickRechargeOpen((open) => !open)}
-                  className="flex w-full items-center justify-between text-left text-[11px] font-black uppercase tracking-widest text-orange-700"
-                >
-                  Quick Recharge
-                  <ChevronDown size={14} className={`transition ${quickRechargeOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {quickRechargeOpen && (
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    {[200, 500].map((amount) => (
-                      <button
-                        key={amount}
-                        type="button"
-                        disabled={quickRechargeLoading}
-                        onClick={() => openPayuRecharge(amount)}
-                        className="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white transition hover:bg-orange-700 disabled:opacity-60"
-                      >
-                        Rs. {amount}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Link
+                to="/dashboard/wallet"
+                className="mt-3 flex items-center justify-center rounded-xl border border-orange-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-widest text-orange-700 transition hover:border-orange-500 hover:text-orange-600"
+              >
+                Secure Razorpay Recharge
+              </Link>
             )}
           </div>
         </div>

@@ -2,6 +2,12 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+if (!process.env.JWT_SECRET) {
+  throw new Error("CRITICAL: JWT_SECRET environment variable is completely missing!");
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
 // 🛡️ 1. Protect Middleware (Ab Session Check ke bina)
 const protect = async (req, res, next) => {
   let token;
@@ -11,7 +17,7 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
 
       // Token Verify karo
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || "mera_secret_key");
+      const decoded = jwt.verify(token, JWT_SECRET);
 
       // User dhundo
       const user = await User.findById(decoded.id).select('-password');

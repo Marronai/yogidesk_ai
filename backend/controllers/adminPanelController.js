@@ -184,7 +184,7 @@ exports.getTransactionLogs = async (req, res) => {
 
       return {
         id: row.id,
-        transaction_id: metadata.txnid || String(row.id),
+        transaction_id: metadata.razorpay_payment_id || metadata.razorpay_order_id || String(row.id),
         clinic_name: doctor.clinicName || 'Unknown',
         doctor_name: doctor.doctorName || 'Unknown',
         amount: normalizeNumber(row.amount),

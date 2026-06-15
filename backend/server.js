@@ -38,7 +38,6 @@ const { createLocalRateLimiter } = require('./utils/superadminSecurity');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 const {
-    activateSubscriptionTier,
     evaluateRuntimePlan,
     ensurePremiumTrialProfile,
     getPlanLimits,
@@ -143,11 +142,6 @@ const getMetaReviewRequestEmail = async (req) => {
     const token = getMetaReviewBearerToken(req);
     if (!token) return '';
 
-    if (token.startsWith('supabase-bypass-token-')) {
-        const fallbackEmail = req.body?.userEmail || req.query?.userEmail || req.body?.email || req.query?.email;
-        return isMetaReviewerEmail(fallbackEmail) ? String(fallbackEmail).trim().toLowerCase() : '';
-    }
-
     try {
         const client = supabaseAdmin || supabase;
         if (!client?.auth?.getUser) return '';
@@ -237,9 +231,6 @@ app.get('/', (req, res) => {
 app.use('/api/payments', paymentRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/app', appReleaseRoutes);
-app.post('/api/wallet/create-order', createWalletOrder);
-app.post('/api/wallet/verify-payment', verifyWalletPayment);
-app.get('/api/wallet/transactions', getWalletTransactions);
 app.use('/api/admin', adminControlRoutes);
 app.post('/api/superadmin/login', explicitSuperadminLoginLimiter, loginSuperadmin);
 app.use('/api/superadmin', superadminRoutes);
@@ -453,15 +444,6 @@ const getSupabaseSessionUser = async (req) => {
     const shadowUser = parseSuperadminShadowToken(token);
     if (shadowUser?.id) return shadowUser;
 
-    if (token.startsWith('supabase-bypass-token-')) {
-        const fallbackUserId = token.replace('supabase-bypass-token-', '').trim();
-        if (!fallbackUserId) return null;
-        return {
-            id: fallbackUserId,
-            email: req.body?.email || req.query?.email || null
-        };
-    }
-
     const client = supabaseAdmin || supabase;
     if (!client?.auth?.getUser) return null;
 
@@ -613,10 +595,18 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-const attachDoctorSession = (req, res, next) => {
-    const doctorId = req.user?.id || req.query?.userId || req.query?.user_id || req.body?.userId || req.body?.user_id;
-    if (doctorId) req.user = { ...(req.user || {}), id: doctorId };
-    next();
+const attachDoctorSession = async (req, res, next) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id || !isUuid(sessionUser.id)) {
+            return res.status(401).json({ success: false, message: 'Unauthorized: verified Supabase session required.' });
+        }
+        req.user = { ...(req.user || {}), ...sessionUser, id: sessionUser.id };
+        return next();
+    } catch (error) {
+        console.error('Doctor session gate failed:', error.message || error);
+        return res.status(401).json({ success: false, message: 'Unauthorized: verified Supabase session required.' });
+    }
 };
 
 const shouldCheckDoctorSuspension = (req = {}) => {
@@ -637,7 +627,8 @@ const shouldCheckDoctorSuspension = (req = {}) => {
 const rejectSuspendedDoctorMetaOperations = async (req, res, next) => {
     try {
         if (!shouldCheckDoctorSuspension(req)) return next();
-        const doctorId = req.user?.id || req.query?.doctorId || req.query?.doctor_id || req.query?.userId || req.query?.user_id || req.body?.doctorId || req.body?.doctor_id || req.body?.userId || req.body?.user_id;
+        const sessionUser = await getSupabaseSessionUser(req);
+        const doctorId = sessionUser?.id;
         if (!doctorId || !isUuid(doctorId)) return next();
 
         const db = supabaseAdmin || supabase;
@@ -725,6 +716,9 @@ app.use(rejectBlockedClinicWorkspace);
 
 app.get('/api/user/usage', attachDoctorSession, getUserUsage);
 app.get('/api/wallet/balance', attachDoctorSession, getWalletBalance);
+app.post('/api/wallet/create-order', attachDoctorSession, createWalletOrder);
+app.post('/api/wallet/verify-payment', attachDoctorSession, verifyWalletPayment);
+app.get('/api/wallet/transactions', attachDoctorSession, getWalletTransactions);
 app.post('/api/patients', attachDoctorSession, addPatient);
 app.post('/api/patients/bulk', attachDoctorSession, addPatients);
 
@@ -756,11 +750,11 @@ app.get('/api/appointments', attachDoctorSession, async (req, res) => {
 });
 
 app.post('/api/appointments', attachDoctorSession, async (req, res) => {
-    const doctorId = String(req.user?.id || req.body?.doctor_id || req.body?.doctorId || '').trim();
+    const doctorId = String(req.user?.id || '').trim();
     if (!doctorId || !isUuid(doctorId)) {
-        return res.status(400).json({
+        return res.status(401).json({
             success: false,
-            message: 'Doctor ID context is missing or unauthenticated'
+            message: 'Unauthorized: verified Supabase session required.'
         });
     }
 
@@ -863,7 +857,7 @@ app.post('/api/auth/dispatch-welcome-email', async (req, res) => {
 app.get('/api/profile/trial', attachDoctorSession, async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
-        const userId = req.user?.id || req.query?.userId;
+        const userId = req.user?.id;
         if (!db?.from || !userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
 
         const { data, error } = await db
@@ -893,7 +887,7 @@ app.get('/api/profile/trial', attachDoctorSession, async (req, res) => {
 app.post('/api/profile/onboarding-tour-complete', attachDoctorSession, async (req, res) => {
     try {
         const db = supabaseAdmin || supabase;
-        const userId = req.user?.id || req.body?.userId;
+        const userId = req.user?.id;
         if (!db?.from || !userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
 
         const { error } = await db
@@ -906,41 +900,6 @@ app.post('/api/profile/onboarding-tour-complete', attachDoctorSession, async (re
     } catch (error) {
         console.error('Onboarding completion failed:', error.message || error);
         return res.status(202).json({ success: false });
-    }
-});
-
-app.post('/api/subscriptions/activate', attachDoctorSession, async (req, res) => {
-    try {
-        const db = supabaseAdmin || supabase;
-        const userId = req.user?.id || req.body?.userId;
-        const tier = req.body?.tier;
-        const paymentReference = String(req.body?.paymentReference || req.body?.txnid || '').trim();
-        const paymentValidated = req.body?.paymentValidated === true || String(req.body?.status || '').toLowerCase() === 'success';
-
-        if (!userId) return res.status(400).json({ success: false, msg: 'User ID is required.' });
-        if (!paymentValidated && !paymentReference) {
-            return res.status(402).json({ success: false, msg: 'Payment validation is required before subscription activation.' });
-        }
-
-        if (paymentReference) {
-            const { data: paymentRecord, error: paymentLookupError } = await db
-                .from('wallet_transactions')
-                .select('id')
-                .eq('user_id', userId)
-                .or(`metadata->>txnid.eq.${paymentReference},id.eq.${paymentReference}`)
-                .maybeSingle();
-
-            if (paymentLookupError) console.warn('Subscription payment lookup skipped:', paymentLookupError.message || paymentLookupError);
-            if (!paymentValidated && !paymentRecord?.id) {
-                return res.status(402).json({ success: false, msg: 'Unable to validate this payment reference.' });
-            }
-        }
-
-        const profile = await activateSubscriptionTier({ db, userId, tier, paymentReference });
-        return res.status(200).json({ success: true, profile });
-    } catch (error) {
-        console.error('Subscription activation failed:', error.message || error);
-        return res.status(500).json({ success: false, msg: 'Unable to activate subscription.' });
     }
 });
 
@@ -1505,9 +1464,10 @@ app.get('/api/team/session-role', async (req, res) => {
         const db = supabaseAdmin || supabase;
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
 
-        const userId = String(req.query.userId || '').trim();
-        const email = normalizeEmail(req.query.email);
-        if (!userId && !email) return res.status(400).json({ success: false, message: 'User id or email is required.' });
+        const sessionUser = await getSupabaseSessionUser(req);
+        const userId = sessionUser?.id || '';
+        const email = normalizeEmail(sessionUser?.email);
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
         let member = null;
         const selectColumns = 'id, admin_id, name, email, status, auth_user_id, user_id';
@@ -3318,19 +3278,16 @@ const syncTemplatesFromMetaInBackground = async (userId) => {
 };
 
 app.get('/api/templates', async (req, res) => {
+    let syncUserId = '';
     try {
         if (!supabase?.from) {
             throw new Error('Database connection unavailable.');
         }
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
-        if (!userId) {
-            return res.status(400).json({ success: false, message: 'User ID is required.' });
-        }
-        if (!sessionUser?.id || sessionUser.id !== userId) {
-            return res.status(403).json({ success: false, message: 'Forbidden' });
-        }
+        const userId = sessionUser?.id;
+        syncUserId = userId || '';
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
         const { data: templates, error } = await supabase
             .from('whatsapp_templates')
@@ -3345,7 +3302,7 @@ app.get('/api/templates', async (req, res) => {
         console.error('Template fetch error:', error.message || error);
         return res.status(400).json({ success: false, message: error.message || 'Template fetch failed.' });
     } finally {
-        const userId = req.query.userId || req.body?.userId;
+        const userId = syncUserId;
         if (userId) {
             Promise.resolve()
                 .then(() => syncTemplatesFromMetaInBackground(userId))
@@ -3363,13 +3320,8 @@ app.get('/api/templates/sync', async (req, res) => {
         }
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
-        if (!userId) {
-            return res.status(400).json({ success: false, message: 'User ID is required.' });
-        }
-        if (!sessionUser?.id || sessionUser.id !== userId) {
-            return res.status(403).json({ success: false, message: 'Forbidden' });
-        }
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
         const db = supabaseAdmin || supabase;
         const metaConfig = await getRawMetaCredentialsForUser(userId);
@@ -4071,7 +4023,8 @@ app.get('/api/templates/dashboard', async (req, res) => {
         if (!db?.from) throw new Error('Database connection unavailable.');
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
@@ -4111,11 +4064,10 @@ app.get('/api/analytics/templates', async (req, res) => {
         if (!db?.from) throw new Error('Database connection unavailable.');
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || sessionUser?.id;
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-        return await getTemplateStatusAggregation({ query: { userId } }, res, db);
+        return await getTemplateStatusAggregation({ user: { id: userId }, query: {} }, res, db);
     } catch (error) {
         console.error('Analytics templates error:', error.message || error);
         return res.status(500).json({ 
@@ -4132,12 +4084,11 @@ app.get('/api/analytics/message-history', async (req, res) => {
         if (!db?.from) throw new Error('Database connection unavailable.');
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
         const timezone = req.query.timezone || 'Asia/Kolkata';
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
-        return await getMessageSentHistory({ query: { userId, timezone } }, res, db);
+        return await getMessageSentHistory({ user: { id: userId }, query: { timezone } }, res, db);
     } catch (error) {
         console.error('Analytics message history error:', error.message || error);
         return res.status(500).json({ 
@@ -4155,12 +4106,11 @@ app.get('/api/analytics/dashboard', async (req, res) => {
         if (!db?.from) throw new Error('Database connection unavailable.');
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
         const timezone = req.query.timezone || 'Asia/Kolkata';
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
-        return await getDashboardMetrics({ query: { userId, timezone } }, res, db);
+        return await getDashboardMetrics({ user: { id: userId }, query: { timezone } }, res, db);
     } catch (error) {
         console.error('Analytics dashboard error:', error.message || error);
         return res.status(500).json({ 
@@ -4173,7 +4123,8 @@ app.get('/api/analytics/dashboard', async (req, res) => {
 app.get('/api/profile/context', async (req, res) => {
     try {
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
+        if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
         if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
@@ -4248,9 +4199,8 @@ app.post('/api/profile/onboarding', async (req, res) => {
         if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable.' });
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.body?.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const clinicName = sanitizePlainText(req.body?.clinic_name || req.body?.clinicName, 120);
         const specialization = normalizeSpecialization(req.body?.specialization);
@@ -4557,15 +4507,12 @@ app.post('/api/templates', async (req, res) => {
         } = req.body;
 
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = sessionUser?.id || req.body.userId;
+        const userId = sessionUser?.id;
 
         if (!userId) {
             return res.status(400).json({ success: false, message: 'User ID is required.' });
         }
 
-        if (sessionUser?.id && req.body.userId && req.body.userId !== sessionUser.id) {
-            return res.status(403).json({ success: false, message: 'Forbidden' });
-        }
 
         const formattedName = formatTemplateName(name);
 
@@ -4647,13 +4594,10 @@ app.delete('/api/templates/:id', async (req, res) => {
         const db = supabaseAdmin || supabase;
         const templateId = req.params.id;
         const sessionUser = await getSupabaseSessionUser(req);
-        const userId = req.query.userId || req.body?.userId || sessionUser?.id;
+        const userId = sessionUser?.id;
 
         if (!templateId || !userId) {
             return res.status(400).json({ success: false, message: 'Template ID and user ID are required.' });
-        }
-        if (!sessionUser?.id || sessionUser.id !== userId) {
-            return res.status(403).json({ success: false, message: 'Forbidden' });
         }
 
         const { data: template, error: templateError } = await db
@@ -4877,12 +4821,16 @@ app.post('/api/payments/meta-connection', async (req, res, next) => {
 }, saveMetaConnection);
 
 // ====== CAMPAIGN SCHEDULER ======
-app.post('/api/campaigns/schedule', async (req, res) => {
+app.post('/api/campaigns/schedule', attachDoctorSession, async (req, res) => {
     try {
         if (!supabase) return res.status(500).json({ success: false, msg: "Database connection unavailable" });
 
-        const { userId, template, recipients = [] } = req.body;
-        if (!userId || !template || !Array.isArray(recipients) || recipients.length === 0) {
+        const userId = String(req.user?.id || '').trim();
+        const { template, recipients = [] } = req.body || {};
+        if (!userId || !isUuid(userId)) {
+            return res.status(401).json({ success: false, msg: "Authenticated campaign session is required" });
+        }
+        if (!template || !Array.isArray(recipients) || recipients.length === 0) {
             return res.status(400).json({ success: false, msg: "Template and recipients are required" });
         }
 
@@ -4952,6 +4900,15 @@ app.post('/api/campaigns/schedule', async (req, res) => {
             status: row.status,
             scheduled_for: row.scheduled_for
         }));
+
+        const hasCrossTenantRow = [...queueRows, ...inboxChatRows, ...fallbackRows].some((row) => {
+            const rowUserId = String(row.user_id || row.doctor_id || '').trim();
+            const rowDoctorId = String(row.doctor_id || row.user_id || '').trim();
+            return rowUserId !== userId || rowDoctorId !== userId;
+        });
+        if (hasCrossTenantRow) {
+            return res.status(403).json({ success: false, msg: "Campaign workspace identity mismatch." });
+        }
 
         const queueInsertResult = await insertCampaignQueueRows({ rows: queueRows, fallbackRows });
         if (queueInsertResult.fallbackRequired) {
@@ -5105,15 +5062,13 @@ const logOutboundMessageDelivery = async ({
 
 const resolveInboxRequestUserId = async (req) => {
     const sessionUser = await getSupabaseSessionUser(req);
-    const requestedUserId = String(req.query.userId || req.body?.userId || '').trim();
-
-    if (sessionUser?.id && requestedUserId && requestedUserId !== sessionUser.id) {
-        const error = new Error('Forbidden');
-        error.statusCode = 403;
+    if (!sessionUser?.id) {
+        const error = new Error('Unauthorized');
+        error.statusCode = 401;
         throw error;
     }
 
-    return sessionUser?.id || requestedUserId || '';
+    return sessionUser.id;
 };
 
 app.get('/api/inbox/chats', async (req, res) => {
@@ -5645,12 +5600,16 @@ const handleInboxSendMessage = async (req, res) => {
 app.post('/api/inbox/send-message', handleInboxSendMessage);
 app.post('/api/messages/send', handleInboxSendMessage);
 
-app.post('/api/campaigns/send', async (req, res) => {
+app.post('/api/campaigns/send', attachDoctorSession, async (req, res) => {
     try {
         if (!supabase) return res.status(500).json({ success: false, message: "Database connection unavailable" });
 
-        const { userId, template, recipients = [] } = req.body;
-        if (!userId || !template || !Array.isArray(recipients) || recipients.length === 0) {
+        const userId = String(req.user?.id || '').trim();
+        const { template, recipients = [] } = req.body || {};
+        if (!userId || !isUuid(userId)) {
+            return res.status(401).json({ success: false, message: "Authenticated campaign session is required." });
+        }
+        if (!template || !Array.isArray(recipients) || recipients.length === 0) {
             return res.status(400).json({ success: false, message: "Template and recipients are required" });
         }
 
@@ -5828,11 +5787,15 @@ app.post('/api/campaigns/send', async (req, res) => {
 });
 
 // ====== TASK 3: DYNAMIC WALLET DEDUCTION ENGINE ======
-app.post('/api/campaign/broadcast', async (req, res) => {
-    const { userId, templateCategory, patientCount, templateName } = req.body;
+app.post('/api/campaign/broadcast', attachDoctorSession, async (req, res) => {
+    const userId = String(req.user?.id || '').trim();
+    const { templateCategory, patientCount, templateName } = req.body || {};
 
     try {
         if (!supabase) return res.status(500).json({ msg: "Database connection unavailable" });
+        if (!userId || !isUuid(userId)) {
+            return res.status(401).json({ success: false, msg: "Authenticated campaign session is required." });
+        }
 
         // 1. Calculate Costs (Flat rates, no GST breakdown shown to user)
         const unitCost = templateCategory === 'UTILITY' ? 0.20 : 1.30;
@@ -5958,25 +5921,6 @@ app.post('/api/wallet/recharge', async (req, res) => {
             success: false, 
             msg: "Recharge failed. Please contact support." 
         });
-    }
-});
-
-// ====== PAYU HASH GENERATOR ROUTE ======
-app.post('/api/payment/payu-hash', async (req, res) => {
-    const { txnid, amount, productinfo, firstname, email } = req.body;
-    const key = process.env.PAYU_MERCHANT_KEY;
-    const salt = process.env.PAYU_MERCHANT_SALT;
-
-    try {
-        if (!key || !salt) throw new Error("PayU Credentials missing in server environment");
-
-        // Formula: key|txnid|amount|productinfo|firstname|email|||||||||||salt
-        const hashString = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}|||||||||||${salt}`;
-        const hash = crypto.createHash('sha512').update(hashString).digest('hex');
-
-        return res.status(200).json({ hash });
-    } catch (error) {
-        return res.status(500).json({ success: false, msg: error.message });
     }
 });
 

@@ -7,15 +7,20 @@ const normalizeNumber = (value) => {
   return Number.isFinite(num) ? num : 0;
 };
 
+const resolveAuthenticatedUserId = (req = {}) => {
+  const userId = req.user?.id || req.auth?.user?.id || req.session?.user?.id || '';
+  return String(userId || '').trim();
+};
+
 /**
  * Get template status aggregation (Approved, Rejected, Pending)
  * Queries public.submitted_meta_templates grouped by status
  */
 const getTemplateStatusAggregation = async (req, res, db) => {
   try {
-    const userId = req.query.userId;
+    const userId = resolveAuthenticatedUserId(req);
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing userId parameter' });
+      return res.status(401).json({ success: false, error: 'Authenticated doctor session is required.' });
     }
 
     // Query template status counts grouped by status field
@@ -66,10 +71,10 @@ const getTemplateStatusAggregation = async (req, res, db) => {
  */
 const getMessageSentHistory = async (req, res, db) => {
   try {
-    const userId = req.query.userId;
+    const userId = resolveAuthenticatedUserId(req);
     const timezone = req.query.timezone || 'Asia/Kolkata';
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing userId parameter' });
+      return res.status(401).json({ success: false, error: 'Authenticated doctor session is required.' });
     }
 
     // Calculate 7-day window in UTC
@@ -152,10 +157,10 @@ const getMessageSentHistory = async (req, res, db) => {
  */
 const getDashboardMetrics = async (req, res, db) => {
   try {
-    const userId = req.query.userId;
+    const userId = resolveAuthenticatedUserId(req);
     const timezone = req.query.timezone || 'Asia/Kolkata';
     if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing userId parameter' });
+      return res.status(401).json({ success: false, error: 'Authenticated doctor session is required.' });
     }
 
     // Get template aggregation

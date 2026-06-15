@@ -27,6 +27,26 @@ const getRazorpayClient = () => {
   };
 };
 
+const getBearerToken = (req) => {
+  const header = String(req.headers.authorization || '').trim();
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+};
+
+const resolveAuthenticatedUserId = async (req) => {
+  if (req.user?.id) return req.user.id;
+
+  const token = getBearerToken(req);
+  if (!token) return '';
+
+  const client = supabaseAdmin || supabase;
+  if (!client?.auth?.getUser) return '';
+
+  const { data, error } = await client.auth.getUser(token);
+  if (error || !data?.user?.id) return '';
+  req.user = { ...(req.user || {}), ...data.user, id: data.user.id };
+  return data.user.id;
+};
+
 const createWalletReceipt = () => `wlt_${Date.now()}_${Math.floor(Math.random() * 100)}`;
 
 const parseWalletAmount = (value) => {
@@ -77,6 +97,17 @@ const fetchWalletRow = async (userId) => {
     .select('balance,is_first_recharge,welcome_gift_active,current_plan,plan_tier,lifetime_contacts_count')
     .eq('user_id', userId)
     .maybeSingle();
+};
+
+const assertWalletOwner = async (userId) => {
+  const result = await db
+    .from('wallets')
+    .select('user_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (result.error && !isSchemaCacheError(result.error)) throw result.error;
+  return !result.error && result.data?.user_id === userId;
 };
 
 const upsertWalletCreditBalance = async ({ userId, walletRow, amount }) => {
@@ -165,7 +196,7 @@ const fetchAiUsagePassbookRows = async (userId) => {
   const logsResult = await db
     .from('wallet_passbook_logs')
     .select(selectColumns)
-    .eq('user_id', userId)
+    .eq('doctor_id', userId)
     .lt('messages_delta', 0)
     .order('created_at', { ascending: false });
 
@@ -177,7 +208,7 @@ const fetchAiUsagePassbookRows = async (userId) => {
   const fallbackResult = await db
     .from('wallet_passbook')
     .select(selectColumns)
-    .eq('user_id', userId)
+    .eq('doctor_id', userId)
     .lt('messages_delta', 0)
     .order('created_at', { ascending: false });
   if (fallbackResult.error) throw fallbackResult.error;
@@ -186,13 +217,13 @@ const fetchAiUsagePassbookRows = async (userId) => {
 
 const createWalletOrder = async (req, res) => {
   try {
-    const userId = String(req.body?.userId || '').trim();
+    const userId = await resolveAuthenticatedUserId(req);
     const amount = parseWalletAmount(req.body?.amount);
 
     if (!userId) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        message: 'User ID is required.',
+        message: 'Authenticated user session is required.',
       });
     }
 
@@ -264,16 +295,16 @@ const verifyWalletPayment = async (req, res) => {
       });
     }
 
-    const userId = String(req.body?.userId || '').trim();
+    const userId = await resolveAuthenticatedUserId(req);
     const requestAmount = parseWalletAmount(req.body?.amount);
     const razorpayOrderId = String(req.body?.razorpay_order_id || '').trim();
     const razorpayPaymentId = String(req.body?.razorpay_payment_id || '').trim();
     const razorpaySignature = String(req.body?.razorpay_signature || '').trim();
 
     if (!userId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
-      return res.status(400).json({
+      return res.status(!userId ? 401 : 400).json({
         success: false,
-        message: 'Missing payment verification fields.',
+        message: !userId ? 'Authenticated user session is required.' : 'Missing payment verification fields.',
       });
     }
 
@@ -379,13 +410,22 @@ const verifyWalletPayment = async (req, res) => {
 
 const getWalletTransactions = async (req, res) => {
   try {
-    const userId = String(req.query?.userId || req.body?.userId || '').trim();
+    const userId = await resolveAuthenticatedUserId(req);
     const purpose = String(req.query?.purpose || '').trim();
 
     if (!userId) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        message: 'User ID is required.',
+        message: 'Authenticated user session is required.',
+      });
+    }
+
+    const ownsWallet = await assertWalletOwner(userId);
+    if (!ownsWallet) {
+      return res.status(403).json({
+        success: false,
+        message: 'Wallet history is not available for this authenticated session.',
+        transactions: [],
       });
     }
 
@@ -408,7 +448,7 @@ const getWalletTransactions = async (req, res) => {
         db
           .from('wallet_passbook')
           .select('id,user_id,doctor_id,patient_number,entry_type,amount,messages_delta,description,metadata,created_at')
-          .eq('user_id', userId)
+          .eq('doctor_id', userId)
           .eq('entry_type', 'AI_MESSAGE_CREDIT')
           .order('created_at', { ascending: false }),
       ]);

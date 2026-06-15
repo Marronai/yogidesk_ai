@@ -2471,7 +2471,7 @@ exports.sendTestMessage = async (req, res) => {
         try {
             const activePhone = String(req.body.patientPhone || req.body.phone || req.body.phoneNumber || '').replace(/\D/g, '');
             const activeName = req.body.patientName || req.body.name || 'Patient';
-            const ownerId = req.body.userId || req.body.doctorId || doctorId;
+            const ownerId = doctorId;
             const nowIso = new Date().toISOString();
 
             const messageText = req.body.templateText || 'Template Sent';

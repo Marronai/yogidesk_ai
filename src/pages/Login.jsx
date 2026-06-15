@@ -209,7 +209,7 @@ const Login = () => {
           // Transient session logic: session storage only
           sessionStorage.setItem('user_id', supabaseUser.id);
           sessionStorage.setItem('user_email', supabaseUser.email || '');
-          sessionStorage.setItem('token', `supabase-bypass-token-${supabaseUser.id}`);
+          sessionStorage.removeItem('token');
           
           // Remove from local storage if rememberMe is false to ensure session ends with tab
           localStorage.removeItem('sb-' + import.meta.env.VITE_SUPABASE_URL.split('//')[1].split('.')[0] + '-auth-token');
@@ -240,7 +240,7 @@ const Login = () => {
           localStorage.setItem('user_subscription_status', 'active');
           sessionStorage.setItem('user_id', supabaseUser.id);
           sessionStorage.setItem('user_email', supabaseUser.email || '');
-          sessionStorage.setItem('token', `supabase-bypass-token-${supabaseUser.id}`);
+          sessionStorage.removeItem('token');
           navigate(localStorage.getItem('user_role') === 'STAFF' ? '/staff/dashboard' : '/dashboard', { replace: true });
           return;
         }

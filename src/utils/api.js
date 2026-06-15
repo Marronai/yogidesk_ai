@@ -54,9 +54,7 @@ api.interceptors.request.use(
   async (config) => {
     const { data } = await supabase.auth.getSession();
     const token = readStoredSessionToken()
-      || data?.session?.access_token
-      || localStorage.getItem('token')
-      || sessionStorage.getItem('token');
+      || data?.session?.access_token;
 
     if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
       config.url = config.url.replace(/^\/api(?=\/|$)/, '');

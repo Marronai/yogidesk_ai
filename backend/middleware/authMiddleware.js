@@ -1,6 +1,12 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+if (!process.env.JWT_SECRET) {
+  throw new Error("CRITICAL: JWT_SECRET environment variable is completely missing!");
+}
+
+const JWT_SECRET = process.env.JWT_SECRET;
+
 // 🛡️ 1. Protect Middleware (Token Verification)
 const protect = async (req, res, next) => {
   let token;
@@ -14,8 +20,7 @@ const protect = async (req, res, next) => {
   }
 
   try {
-    const secret = process.env.JWT_SECRET || 'YogiDesk_Temporary_Secret_Key_9988';
-    const decoded = jwt.verify(token, secret);
+    const decoded = jwt.verify(token, JWT_SECRET);
 
     const user = await User.findById(decoded.id).select('-password');
     if (!user) {

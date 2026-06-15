@@ -2,9 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { supabase } from '../config/supabaseClient';
 import {
   clearStoredAuthSession,
-  getStoredAuthToken,
-  getStoredUserEmail,
-  getStoredUserId,
   persistSupabaseSession,
 } from '../utils/authSession';
 import api from '../utils/api';
@@ -58,24 +55,7 @@ const getSupabaseMetadataRole = (user) => String(
 ).trim().toLowerCase();
 
 const userFromStoredSession = () => {
-  const token = getStoredAuthToken();
-  const storedUserId = getStoredUserId();
-  const idFromToken = token?.startsWith('supabase-bypass-token-')
-    ? token.replace('supabase-bypass-token-', '').trim()
-    : '';
-  const id = storedUserId || idFromToken;
-
-  if (!token || !id) return null;
-
-  return {
-    id,
-    email: getStoredUserEmail(),
-    user_metadata: {
-      name: localStorage.getItem('user_name') || 'Doctor',
-      clinic_name: localStorage.getItem('clinic_name') || '',
-      role: localStorage.getItem('user_role') || 'doctor',
-    },
-  };
+  return null;
 };
 
 export const AuthProvider = ({ children }) => {
@@ -197,11 +177,11 @@ export const AuthProvider = ({ children }) => {
     session,
     userProfile,
     loading,
-    isAuthenticated: Boolean(user?.id && (session?.access_token || getStoredAuthToken())),
-    authToken: session?.access_token || getStoredAuthToken() || '',
+    isAuthenticated: Boolean(user?.id && session?.access_token),
+    authToken: session?.access_token || '',
     authRole: getNormalizedRole(user, userProfile),
     isSuperAdmin: getSupabaseMetadataRole(user) === 'superadmin',
-    hasLegacyStoredSession: Boolean(getStoredAuthToken() && getStoredUserId()),
+    hasLegacyStoredSession: false,
     isMetaReviewSession: Boolean(isMetaReviewUser(user) || getStoredMetaReviewSession()),
     restoreSession,
     loadUserProfile,

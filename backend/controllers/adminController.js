@@ -72,7 +72,7 @@ exports.getWalletBalance = async (req, res) => {
       return res.status(500).json({ success: false, message: "Supabase client is not initialized." });
     }
 
-    const userId = req.user?.id || req.query?.userId;
+    const userId = req.user?.id;
     if (!userId) return res.status(401).json({ success: false, message: "Unauthorized access" });
 
     const { data: walletRow, error } = await supabase

@@ -100,6 +100,62 @@ exports.sendLoginAlert = async (email, name, deviceInfo, ipAddress) => {
     });
 };
 
+exports.sendPasswordChangedAlert = async (email, name = 'Doctor') => {
+    const safeName = escapeHtml(name || 'Doctor');
+    const currentTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' });
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YogiDesk Security Alert</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="display:none;font-size:1px;color:#f8fafc;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+        Security Alert: Your YogiDesk account password was recently changed.
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:28px 16px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:18px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
+                    <tr>
+                        <td style="background:#050505;padding:28px 32px;text-align:center;">
+                            <div style="display:inline-block;background:#ff6b00;color:#ffffff;border-radius:14px;padding:10px 14px;font-weight:900;letter-spacing:0.08em;">YogiDesk</div>
+                            <p style="margin:14px 0 0;color:#cbd5e1;font-size:13px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Security Alert</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:34px 32px;">
+                            <h1 style="margin:0 0 16px;color:#111827;font-size:24px;line-height:1.25;">Password Changed</h1>
+                            <p style="margin:0 0 18px;color:#475569;font-size:16px;line-height:1.7;">Hello ${safeName},</p>
+                            <p style="margin:0 0 18px;color:#475569;font-size:16px;line-height:1.7;">Your YogiDesk account password was recently changed. If this wasn't you, please contact support immediately to lock your account.</p>
+                            <div style="margin:24px 0;padding:16px 18px;border-left:4px solid #ff6b00;background:#fff7ed;border-radius:12px;color:#334155;font-size:14px;line-height:1.6;">
+                                <strong>Time:</strong> ${currentTime} (IST)<br>
+                                <strong>Recommended action:</strong> Review your account access and notify YogiDesk support if this change was not authorized.
+                            </div>
+                            <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">YogiDesk staff will never ask for your password or OTP.</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background:#ff6b00;padding:18px 24px;text-align:center;">
+                            <p style="margin:0;color:#ffffff;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">YogiDesk AI • Clinical CRM Security</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>`;
+
+    return sendBrevoEmail({
+        to: email,
+        subject: 'Security Alert: Password Changed - YogiDesk',
+        htmlContent,
+    });
+};
+
 exports.sendOTP = async (email, name, otp) => {
     const otpCode = escapeHtml(otp);
     const htmlContent = `

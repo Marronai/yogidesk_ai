@@ -1,155 +1,262 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, CheckCircle2, XCircle, ShieldCheck, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
-import { useWallet } from '../context/WalletContext';
-import { motion } from 'framer-motion';
+import {
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { supabase } from '../config/supabaseClient';
-import { API_URL } from '../utils/api';
+import api from '../utils/api';
+
+const securityTips = [
+  'Use a mix of symbols, numbers, and letters.',
+  'Never share your password with anyone, including staff.',
+  'Enable 2FA for an extra layer of protection.',
+];
 
 const ResetPassword = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [activeTip, setActiveTip] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const navigate = useNavigate();
 
-  const validation = {
+  const validation = useMemo(() => ({
     length: password.length >= 8,
     uppercase: /[A-Z]/.test(password),
-    number: /[0-9]/.test(password),
     special: /[!@#$%^&*(),.?":{}|<>]/.test(password),
-    match: password === confirmPassword && password.length > 0
-  };
+    match: password === confirmPassword && password.length > 0,
+  }), [confirmPassword, password]);
 
-  const isValid = Object.values(validation).every(Boolean);
+  const strengthScore = [validation.length, validation.uppercase, validation.special]
+    .filter(Boolean).length;
+  const strengthLabel = ['Too weak', 'Getting started', 'Almost there', 'Strong'][strengthScore];
+  const isValid = validation.length && validation.uppercase && validation.special && validation.match;
 
   useEffect(() => {
-    // Verify that we are in a recovery flow (checking for access_token in URL/Hash)
+    const timer = window.setInterval(() => {
+      setActiveTip((current) => (current + 1) % securityTips.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setError("Invalid or expired reset link. Please request a new one.");
-      }
+      if (!session) setError('Invalid or expired reset link. Please request a new one.');
     };
     checkSession();
   }, []);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     if (!isValid) return;
 
     setLoading(true);
     setError('');
+    setSuccessMessage('');
 
     try {
-      const { data: { user }, error: updateError } = await supabase.auth.updateUser({
-        password: password
-      });
+      const response = await api.post('/auth/confirm-password-reset', { password });
+      if (!response.data?.success) throw new Error(response.data?.msg || 'Unable to update password.');
 
-      if (updateError) throw updateError;
-
-      // ⚡ Trigger Backend Transactional Alert
-      await fetch(`${API_URL}/api/auth/dispatch-login-alert`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: user.email,
-          name: user.user_metadata?.full_name || 'Doctor',
-          event: 'password_reset_success',
-          timestamp: new Date().toISOString(),
-          userAgent: navigator.userAgent
-        }),
-      }).catch(() => {}); // Fire and forget background alert
-
-      alert("Password successfully updated. Please login with your new credentials.");
-      navigate('/login');
-    } catch (error) {
-      setError(error.message || "Failed to reset password. Link might be expired.");
+      setSuccessMessage('Password Updated Successfully');
+      setPassword('');
+      setConfirmPassword('');
+      await supabase.auth.signOut().catch(() => {});
+      window.setTimeout(() => navigate('/login', { replace: true }), 3000);
+    } catch (resetError) {
+      setError(resetError.response?.data?.msg || resetError.message || 'Failed to reset password. Link might be expired.');
     } finally {
       setLoading(false);
     }
   };
 
-  const ValidationItem = ({ label, passed }) => (
-    <div className={`flex items-center gap-2 text-xs font-bold transition-colors ${passed ? 'text-emerald-600' : 'text-slate-400'}`}>
-      {passed ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-      {label}
+  const Requirement = ({ label, passed }) => (
+    <div className={`flex items-center gap-2 text-xs font-bold ${passed ? 'text-emerald-600' : 'text-slate-400'}`}>
+      {passed ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+      <span>{label}</span>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-6 font-sans">
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-white p-8 sm:p-12 rounded-[2.5rem] shadow-2xl shadow-slate-200/60 w-full max-w-md border border-slate-100 relative overflow-hidden"
-      >
-        <div className="absolute top-0 right-0 w-32 h-32 bg-orange-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50"></div>
-        
-        <div className="w-16 h-16 bg-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-orange-200 mb-8">
-          <ShieldCheck size={32} />
+    <div className="min-h-screen bg-white font-sans text-slate-950 lg:grid lg:grid-cols-[0.95fr_1.05fr]">
+      <aside className="relative hidden min-h-screen overflow-hidden bg-[#050505] px-10 py-12 text-white lg:flex lg:flex-col lg:justify-between xl:px-16">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,107,0,0.18),transparent_32%),radial-gradient(circle_at_80%_15%,rgba(255,255,255,0.08),transparent_28%)]" />
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-lg shadow-orange-500/25">
+            <ShieldCheck size={26} />
+          </div>
+          <div>
+            <p className="text-sm font-black uppercase tracking-[0.28em] text-orange-300">YogiDesk</p>
+            <p className="text-xs font-semibold text-slate-400">Secure clinical workspace</p>
+          </div>
         </div>
 
-        <h2 className="text-3xl font-black text-slate-900 mb-2">Secure Reset 🔑</h2>
-        <p className="text-slate-500 font-medium mb-8">Establish a new high-strength password for your clinical workspace.</p>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm font-bold flex items-start gap-3">
-            <AlertCircle size={18} className="shrink-0 mt-0.5" />
-            {error}
+        <div className="relative z-10 max-w-xl">
+          <p className="mb-4 text-xs font-black uppercase tracking-[0.35em] text-orange-400">Security Tips</p>
+          <div className="min-h-[180px]">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeTip}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -16 }}
+                transition={{ duration: 0.45, ease: 'easeOut' }}
+              >
+                <h1 className="text-4xl font-black leading-tight tracking-tight xl:text-5xl">
+                  Keep your patient data protected.
+                </h1>
+                <p className="mt-6 text-xl font-semibold leading-relaxed text-slate-300">
+                  {securityTips[activeTip]}
+                </p>
+              </motion.div>
+            </AnimatePresence>
           </div>
-        )}
 
-        <form onSubmit={handleSubmit} className="space-y-4 mt-6">
-          <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">New Password</label>
-            <div className="relative group">
-               <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-               <input 
-                 type="password" 
-                 required 
-                 placeholder="••••••••" 
-                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100 transition-all" 
-                 onChange={(e) => setPassword(e.target.value)} 
-               />
+          <div className="mt-10 flex gap-2">
+            {securityTips.map((tip, index) => (
+              <button
+                key={tip}
+                type="button"
+                aria-label={`Show security tip ${index + 1}`}
+                onClick={() => setActiveTip(index)}
+                className={`h-1.5 rounded-full transition-all ${index === activeTip ? 'w-10 bg-orange-500' : 'w-4 bg-white/20 hover:bg-white/40'}`}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="relative z-10 rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur">
+          <p className="text-sm font-bold text-slate-200">Password resets are protected by verified recovery sessions.</p>
+          <p className="mt-2 text-xs font-medium leading-relaxed text-slate-500">Choose a password that your team cannot guess and your browser cannot reuse elsewhere.</p>
+        </div>
+      </aside>
+
+      <main className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4 py-10 sm:px-6 lg:px-12">
+        <motion.section
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+          className="w-full max-w-md rounded-[2rem] border border-slate-100 bg-white p-6 shadow-2xl shadow-slate-200/70 sm:p-8"
+        >
+          <div className="mb-8">
+            <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 text-orange-400 shadow-lg shadow-slate-900/20">
+              <Lock size={26} />
             </div>
+            <p className="text-xs font-black uppercase tracking-[0.28em] text-orange-500">Secure Reset</p>
+            <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Create New Password</h2>
+            <p className="mt-2 text-sm font-medium leading-6 text-slate-500">
+              Set a strong password to protect your clinical data.
+            </p>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Confirm Password</label>
-            <div className="relative group">
-               <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors" />
-               <input 
-                 type="password" 
-                 required 
-                 placeholder="••••••••" 
-                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-100 transition-all" 
-                 onChange={(e) => setConfirmPassword(e.target.value)} 
-               />
+          {error && (
+            <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-bold text-red-600">
+              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <span>{error}</span>
             </div>
-          </div>
+          )}
 
-          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-2 mt-2">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Strength Check</p>
-            <div className="grid grid-cols-2 gap-y-2">
-              <ValidationItem label="8+ Characters" passed={validation.length} />
-              <ValidationItem label="1 Uppercase" passed={validation.uppercase} />
-              <ValidationItem label="1 Number" passed={validation.number} />
-              <ValidationItem label="1 Special Char" passed={validation.special} />
-              <ValidationItem label="Passwords Match" passed={validation.match} />
+          {successMessage && (
+            <div className="mb-6 flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
+              <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+              <span>{successMessage}. Redirecting to login...</span>
             </div>
-          </div>
+          )}
 
-          <button 
-            disabled={!isValid || loading} 
-            className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-slate-200 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none transition-all flex items-center justify-center gap-2 transform active:scale-[0.98] mt-4"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18}/> : "Set New Password"}
-            {!loading && <ArrowRight size={18}/>}
-          </button>
-        </form>
-      </motion.div>
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <label className="ml-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">New Password</label>
+              <div className="relative group">
+                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-orange-500" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  placeholder="Enter a strong password"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-12 text-sm font-bold text-slate-950 outline-none transition-all placeholder:text-slate-400 focus:border-orange-500 focus:bg-white focus:ring-4 focus:ring-orange-100"
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-orange-500"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="ml-1 text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Confirm Password</label>
+              <div className="relative group">
+                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-orange-500" />
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  required
+                  value={confirmPassword}
+                  placeholder="Re-enter password"
+                  className="h-14 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-12 pr-12 text-sm font-bold text-slate-950 outline-none transition-all placeholder:text-slate-400 focus:border-orange-500 focus:bg-white focus:ring-4 focus:ring-orange-100"
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+                  onClick={() => setShowConfirmPassword((value) => !value)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-orange-500"
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Password Strength</p>
+                <p className={`text-xs font-black ${strengthScore === 3 ? 'text-emerald-600' : 'text-orange-500'}`}>{strengthLabel}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[0, 1, 2].map((item) => (
+                  <div
+                    key={item}
+                    className={`h-2 rounded-full transition-all ${strengthScore > item ? 'bg-orange-500' : 'bg-slate-200'}`}
+                  />
+                ))}
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <Requirement label="8+ characters" passed={validation.length} />
+                <Requirement label="Uppercase letter" passed={validation.uppercase} />
+                <Requirement label="Symbol included" passed={validation.special} />
+                <Requirement label="Passwords match" passed={validation.match} />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!isValid || loading || Boolean(successMessage)}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-orange-500 text-sm font-black uppercase tracking-[0.18em] text-white shadow-xl shadow-orange-500/25 transition-all hover:-translate-y-0.5 hover:bg-orange-600 disabled:translate-y-0 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : 'Update Password'}
+              {!loading && <ArrowRight size={18} />}
+            </button>
+          </form>
+        </motion.section>
+      </main>
     </div>
   );
 };
+
 export default ResetPassword;

@@ -348,15 +348,10 @@ exports.createTemplate = async (req, res) => {
       variablesData = {}
     } = req.body;
 
-    const authenticatedUserId = req.user?.id;
-    const userId = authenticatedUserId || req.body.userId;
+    const userId = req.user?.id;
 
     if (!userId) {
-      return res.status(400).json({ success: false, message: 'userId is required.' });
-    }
-
-    if (authenticatedUserId && req.body.userId && req.body.userId !== authenticatedUserId) {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
+      return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
     }
 
     const formattedName = formatTemplateName(name);
@@ -456,7 +451,7 @@ exports.createTemplate = async (req, res) => {
 
 exports.getTemplates = async (req, res) => {
   try {
-    const userId = req.user?.id || req.query?.userId;
+    const userId = req.user?.id;
     if (!userId) {
       throw new Error('Authenticated user is required.');
     }
@@ -490,8 +485,8 @@ exports.getTemplates = async (req, res) => {
 
 exports.syncTemplates = async (req, res) => {
   try {
-    const userId = req.user?.id || req.query?.userId || req.body?.userId;
-    if (!userId) return res.status(400).json({ success: false, message: 'userId is required.' });
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
 
     await syncTemplatesFromMeta(userId);
     return res.status(200).json({ success: true });
@@ -506,10 +501,10 @@ exports.deleteTemplate = async (req, res) => {
     const db = getDb();
     if (!db?.from) throw new Error('Database connection unavailable.');
 
-    const userId = req.user?.id || req.query?.userId || req.body?.userId;
+    const userId = req.user?.id;
     const templateId = req.params.id;
     if (!userId || !templateId) {
-      return res.status(400).json({ success: false, message: 'Template ID and userId are required.' });
+      return res.status(!userId ? 401 : 400).json({ success: false, message: !userId ? 'Authenticated user is required.' : 'Template ID is required.' });
     }
 
     const { data: template, error: templateError } = await db
