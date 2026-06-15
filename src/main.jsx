@@ -8,3 +8,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>,
 )
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/serviceWorker.js')
+      .then((reg) => console.log('YogiDesk PWA Registered successfully:', reg.scope))
+      .catch((err) => console.error('PWA Registration crashed:', err));
+  });
+}
