@@ -103,7 +103,6 @@ exports.sendLoginAlert = async (email, name, deviceInfo, ipAddress) => {
 exports.sendPasswordChangedAlert = async (email, name = 'Doctor') => {
     const safeName = escapeHtml(name || 'Doctor');
     const currentTime = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium' });
-    const loginUrl = escapeHtml(process.env.PRODUCTION_LOGIN_URL || 'https://yogidesk-ai.com/login');
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -112,55 +111,35 @@ exports.sendPasswordChangedAlert = async (email, name = 'Doctor') => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YogiDesk Security Alert</title>
 </head>
-<body style="margin:0;padding:0;background:#101216;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-    <div style="display:none;font-size:1px;color:#101216;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
-        Security Notification: Your YogiDesk account password has been successfully changed.
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+    <div style="display:none;font-size:1px;color:#f3f4f6;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+        Security Alert: Your YogiDesk account password was recently changed.
     </div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#101216;padding:32px 14px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:30px 14px;">
         <tr>
             <td align="center">
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border:1px solid #e5e7eb;border-radius:22px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,0.28);">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;background:#ffffff;border:1px solid #e5e7eb;border-radius:18px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
                     <tr>
-                        <td style="background:#ffffff;padding:30px 34px 20px;text-align:left;">
-                            <div style="font-size:24px;font-weight:900;letter-spacing:-0.02em;color:#050505;">YogiDesk</div>
-                            <div style="height:4px;width:76px;background:#FF6B00;border-radius:999px;margin-top:16px;"></div>
+                        <td style="background:#050505;padding:28px 32px;text-align:center;">
+                            <div style="display:inline-block;background:#FF6B00;color:#ffffff;border-radius:14px;padding:10px 15px;font-size:16px;font-weight:900;letter-spacing:0.08em;">YogiDesk</div>
+                            <p style="margin:14px 0 0;color:#cbd5e1;font-size:13px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;">Security Alert</p>
                         </td>
                     </tr>
                     <tr>
-                        <td style="padding:12px 34px 34px;">
+                        <td style="padding:34px 32px;">
+                            <h1 style="margin:0 0 16px;color:#111827;font-size:24px;line-height:1.25;font-weight:900;">Password Changed</h1>
                             <p style="margin:0 0 18px;color:#475569;font-size:16px;line-height:1.7;">Hello ${safeName},</p>
-                            <h1 style="margin:0 0 18px;color:#0f172a;font-size:25px;line-height:1.3;font-weight:900;">Security Notification: Your YogiDesk Account Password Has Been Successfully Changed.</h1>
-                            <p style="margin:0 0 24px;color:#475569;font-size:15px;line-height:1.7;">We are notifying you because a verified recovery session updated the password for your YogiDesk workspace. The security details are listed below for your records.</p>
-                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;margin:0 0 28px;">
-                                <tr>
-                                    <td style="padding:15px 18px;border-bottom:1px solid #e2e8f0;color:#64748b;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Event</td>
-                                    <td style="padding:15px 18px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:14px;font-weight:800;text-align:right;">Password Modification</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding:15px 18px;border-bottom:1px solid #e2e8f0;color:#64748b;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Timestamp</td>
-                                    <td style="padding:15px 18px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:14px;font-weight:800;text-align:right;">${currentTime} IST</td>
-                                </tr>
-                                <tr>
-                                    <td style="padding:15px 18px;color:#64748b;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;">Status</td>
-                                    <td style="padding:15px 18px;color:#15803d;font-size:14px;font-weight:900;text-align:right;">Secured / Updated</td>
-                                </tr>
-                            </table>
-                            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-                                <tr>
-                                    <td bgcolor="#FF6B00" style="border-radius:999px;">
-                                        <a href="${loginUrl}" style="display:inline-block;padding:14px 24px;border-radius:999px;background:#FF6B00;color:#ffffff;font-size:14px;font-weight:900;text-decoration:none;">Login to Your Workspace</a>
-                                    </td>
-                                </tr>
-                            </table>
-                            <div style="background:#fff7ed;border:1px solid #fed7aa;border-left:4px solid #FF6B00;border-radius:14px;padding:16px 18px;color:#9a3412;font-size:14px;line-height:1.7;font-weight:700;">
-                                If you did not authorize this change, please contact YogiDesk Security Operations instantly to lock your workspace tokens.
+                            <p style="margin:0 0 22px;color:#475569;font-size:16px;line-height:1.7;">Your YogiDesk account password was recently changed. If this wasn't you, please contact support immediately to lock your account.</p>
+                            <div style="margin:24px 0;padding:17px 19px;border-left:4px solid #FF6B00;background:#fff7ed;border-radius:14px;color:#334155;font-size:14px;line-height:1.65;">
+                                <p style="margin:0 0 8px;"><strong style="color:#111827;">Time:</strong> ${currentTime} (IST)</p>
+                                <p style="margin:0;"><strong style="color:#111827;">Recommended action:</strong> Review your account access and notify YogiDesk support if this change was not authorized.</p>
                             </div>
+                            <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">YogiDesk staff will never ask for your password or OTP.</p>
                         </td>
                     </tr>
                     <tr>
-                        <td style="background:#050505;padding:20px 28px;text-align:center;">
-                            <p style="margin:0;color:#ffffff;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;">YogiDesk AI | Clinical Workspace Security</p>
-                            <p style="margin:8px 0 0;color:#94a3b8;font-size:12px;line-height:1.5;">YogiDesk staff will never ask for your password or OTP.</p>
+                        <td style="background:#FF6B00;padding:18px 24px;text-align:center;">
+                            <p style="margin:0;color:#ffffff;font-size:12px;font-weight:900;letter-spacing:0.09em;text-transform:uppercase;">YOGIDESK AI &bull; CLINICAL CRM SECURITY</p>
                         </td>
                     </tr>
                 </table>

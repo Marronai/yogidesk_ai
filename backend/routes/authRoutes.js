@@ -200,9 +200,48 @@ const requirePassport = (req, res, next) => {
 };
 
 const runGooglePassport = (options) => (req, res, next) => passport.authenticate('google', options)(req, res, next);
+const getFrontendOrigin = () => String(process.env.FRONTEND_URL || process.env.CLIENT_URL || 'https://yogidesk-ai.com').replace(/\/+$/, '');
+const getSupabaseProjectId = () => {
+  const configuredUrl = String(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  try {
+    const host = new URL(configuredUrl).hostname;
+    return host.split('.')[0] || 'oxvlgzjunhecgzfbfbwk';
+  } catch {
+    return 'oxvlgzjunhecgzfbfbwk';
+  }
+};
 
 // 1. Google par redirect
-router.get('/google', requirePassport, runGooglePassport({ scope: ['profile', 'email'] }));
+router.get('/google', async (req, res) => {
+  try {
+    const projectId = getSupabaseProjectId();
+    const callbackUrl = `${getFrontendOrigin()}/api/auth/callback/google`;
+    const googleAuthUrl = `https://${projectId}.supabase.co/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(callbackUrl)}`;
+    return res.redirect(googleAuthUrl);
+  } catch (error) {
+    console.error('OAuth proxy initialization failed:', error.message || error);
+    return res.status(500).json({ error: 'OAuth Initialization failed' });
+  }
+});
+
+router.get('/callback/google', async (req, res) => {
+  const frontendOrigin = getFrontendOrigin();
+  const accessToken = String(req.query.access_token || '').trim();
+  const refreshToken = String(req.query.refresh_token || '').trim();
+  const code = String(req.query.code || '').trim();
+
+  if (code) {
+    return res.redirect(`${frontendOrigin}/auth-success?code=${encodeURIComponent(code)}`);
+  }
+  if (accessToken) {
+    const hashParams = new URLSearchParams({
+      access_token: accessToken,
+      ...(refreshToken ? { refresh_token: refreshToken } : {}),
+    });
+    return res.redirect(`${frontendOrigin}/auth-success#${hashParams.toString()}`);
+  }
+  return res.redirect(`${frontendOrigin}/login?error=oauth_callback_missing_token`);
+});
 
 // 2. Google callback with JWT Token ✅
 router.get('/google/callback', 

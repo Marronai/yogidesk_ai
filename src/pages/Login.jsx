@@ -4,7 +4,7 @@ import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, Shiel
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
-import { handleGoogleSignIn, supabase } from '../config/supabaseClient';
+import { supabase } from '../config/supabaseClient';
 import { clearStoredAuthSession, persistSupabaseSession } from '../utils/authSession';
 import { useWallet } from '../context/WalletContext';
 import { useAuth } from '../context/AuthContext';
@@ -145,15 +145,8 @@ const Login = () => {
 
   // 🌍 GOOGLE LOGIN HANDLER (Supabase Native Auth)
   const handleGoogleLogin = async () => {
-    try {
-      setLoading(true);
-      const { error } = await handleGoogleSignIn();
-      if (error) throw error;
-    } catch (error) {
-      alert("Google Login Failed: " + error.message);
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    window.location.href = 'https://yogidesk-ai.com/api/auth/google';
   };
 
   // ✅ ENHANCED SUCCESS HANDLER (Saves session with fingerprint and persistence config)
@@ -318,15 +311,20 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row w-full bg-white font-sans overflow-hidden">
+    <div className="relative flex min-h-dvh w-full flex-col overflow-x-hidden overflow-y-auto bg-[#05070b] font-sans md:flex-row lg:overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,107,0,0.18)_0%,transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_16%,rgba(37,99,235,0.14),transparent_30%),linear-gradient(135deg,rgba(8,16,31,0.98),rgba(3,6,12,0.99)_54%,rgba(5,7,11,1))]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(148,163,184,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.2)_1px,transparent_1px)] [background-size:44px_44px]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.42)_78%)]" />
       
       {/* 1. LEFT SIDE: BRANDING & CAROUSEL */}
-      <div className="hidden md:flex md:order-1 w-full md:w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden">
-        <div className="absolute top-[-20%] left-[-20%] w-[600px] h-[600px] bg-[#FF6B00] rounded-full blur-[150px] opacity-20 animate-pulse"></div>
-        <div className="absolute bottom-[-20%] right-[-20%] w-[600px] h-[600px] bg-blue-600 rounded-full blur-[150px] opacity-20"></div>
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
+      <div className="relative hidden w-full items-center justify-center overflow-hidden border-white/10 md:order-1 md:flex md:min-h-dvh md:w-1/2 md:border-r">
+        <div className="absolute inset-0 bg-[#05070b]/35 backdrop-blur-sm"></div>
+        <div className="absolute -left-24 top-[-10%] h-[560px] w-[560px] rounded-full bg-[#FF6B00]/20 blur-[150px]"></div>
+        <div className="absolute bottom-[-18%] right-[-18%] h-[560px] w-[560px] rounded-full bg-blue-500/12 blur-[150px]"></div>
+        <div className="absolute inset-0 opacity-[0.2] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:36px_36px]"></div>
 
-        <div className="relative z-10 max-w-md text-white">
+        <div className="relative z-10 max-w-md px-8 text-white">
           <div className="mb-12">
              <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/10 px-4 py-1.5 rounded-full text-xs font-bold text-orange-300 mb-6 uppercase tracking-wider">
                 <Star size={12} className="fill-orange-300"/> Trusted by 500+ Clinics & Doctors
@@ -344,7 +342,7 @@ const Login = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.5 }}
-                className="bg-white/10 backdrop-blur-lg border border-white/10 p-8 rounded-3xl absolute inset-0"
+                className="absolute inset-0 rounded-3xl border border-white/10 bg-white/[0.07] p-8 backdrop-blur-xl"
               >
                  {slides[currentSlide].type === 'testimonial' ? (
                    <>
@@ -371,8 +369,9 @@ const Login = () => {
       </div>
 
       {/* 2. RIGHT SIDE: FORM SECTION */}
-      <div className="w-full md:w-1/2 md:order-2 flex flex-col justify-center items-center p-8 relative bg-white">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-orange-500/10 rounded-full blur-[120px] lg:hidden"></div>
+      <div className="relative flex min-h-dvh w-full flex-col items-center justify-center p-6 md:order-2 md:w-1/2 md:p-8">
+        <div className="absolute inset-0 bg-white md:bg-white/95"></div>
+        <div className="absolute left-[-10%] top-[-10%] h-[40%] w-[40%] rounded-full bg-orange-500/10 blur-[120px] lg:hidden"></div>
 
         <MotionDiv initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
           

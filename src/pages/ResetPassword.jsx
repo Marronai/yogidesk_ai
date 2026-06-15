@@ -92,8 +92,8 @@ const ResetPassword = () => {
 
   return (
     <div className="relative flex min-h-dvh overflow-x-hidden overflow-y-auto bg-[#05070b] font-sans text-slate-950 lg:overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,107,0,0.15)_0%,transparent_60%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(255,107,0,0.16),transparent_28%),radial-gradient(circle_at_84%_10%,rgba(37,99,235,0.13),transparent_30%),linear-gradient(135deg,rgba(7,12,23,0.94),rgba(3,5,10,0.98)_52%,rgba(8,10,13,1))]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,107,0,0.18)_0%,transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_84%_10%,rgba(37,99,235,0.13),transparent_30%),linear-gradient(135deg,rgba(8,16,31,0.98),rgba(3,6,12,0.99)_54%,rgba(5,7,11,1))]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:linear-gradient(rgba(148,163,184,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.18)_1px,transparent_1px)] [background-size:42px_42px]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.5)_76%)]" />
 
