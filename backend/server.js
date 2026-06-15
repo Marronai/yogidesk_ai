@@ -30,6 +30,7 @@ const {
 const adminControlRoutes = require('./routes/adminControlRoutes');
 const authRoutes = require('./routes/authRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const appReleaseRoutes = require('./routes/appReleaseRoutes');
 const superadminRoutes = require('./routes/superadminRoutes');
 const { createWalletOrder, getWalletTransactions, verifyWalletPayment } = require('./controllers/walletController');
 const { loginSuperadmin } = require('./controllers/superadminController');
@@ -235,6 +236,7 @@ app.get('/', (req, res) => {
 });
 app.use('/api/payments', paymentRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/app', appReleaseRoutes);
 app.post('/api/wallet/create-order', createWalletOrder);
 app.post('/api/wallet/verify-payment', verifyWalletPayment);
 app.get('/api/wallet/transactions', getWalletTransactions);

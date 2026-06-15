@@ -16,6 +16,7 @@ import {
   Wallet,
   ChevronDown,
   Bot,
+  Download,
   Lock,
   X,
 } from 'lucide-react';
@@ -37,6 +38,7 @@ const Sidebar = () => {
   const [lifetimeCount, setLifetimeCount] = useState(0);
   const [quickRechargeOpen, setQuickRechargeOpen] = useState(false);
   const [quickRechargeLoading, setQuickRechargeLoading] = useState(false);
+  const [appRelease, setAppRelease] = useState({ apkUrl: '', version: 'Checking...', loading: true });
   const [lockNotice, setLockNotice] = useState('');
   const [profile, setProfile] = useState({
     role: normalizeRole(),
@@ -65,6 +67,26 @@ const Sidebar = () => {
       }
     };
     loadProfile();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadLatestRelease = async () => {
+      try {
+        const { data } = await api.get(backendPath('/api/app/latest-release'));
+        if (!active) return;
+        setAppRelease({
+          apkUrl: data?.apk_url || '',
+          version: data?.version_code || 'Unavailable',
+          loading: false,
+        });
+      } catch {
+        if (active) setAppRelease({ apkUrl: '', version: 'Unavailable', loading: false });
+      }
+    };
+
+    loadLatestRelease();
     return () => { active = false; };
   }, []);
 
@@ -156,6 +178,21 @@ const Sidebar = () => {
     } catch (error) {
       alert(error.message || 'Unable to start quick recharge.');
       setQuickRechargeLoading(false);
+    }
+  };
+
+  const downloadAndroidApp = async () => {
+    try {
+      const { data } = await api.get(backendPath('/api/app/latest-release'));
+      if (!data?.apk_url) throw new Error('Android app release is not available yet.');
+      setAppRelease({
+        apkUrl: data.apk_url,
+        version: data.version_code || appRelease.version || 'Latest',
+        loading: false,
+      });
+      window.location.href = data.apk_url;
+    } catch (error) {
+      alert(error.message || 'Unable to start Android app download.');
     }
   };
 
@@ -294,6 +331,20 @@ const Sidebar = () => {
       </nav>
 
       <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-gray-50/50 mt-auto">
+        <div className="mb-3 rounded-2xl border border-blue-100 bg-white p-3 shadow-sm">
+          <button
+            type="button"
+            onClick={downloadAndroidApp}
+            disabled={appRelease.loading}
+            className="w-full bg-blue-600 font-bold text-white tracking-wide hover:bg-blue-700 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <Download size={17} />
+            📥 Download Android Mobile App
+          </button>
+          <p className="mt-2 text-center text-[11px] font-black uppercase tracking-wider text-slate-500">
+            Active Version: {appRelease.version}
+          </p>
+        </div>
         <Link to="/dashboard/support" className={menuClass('/dashboard/support')}><LifeBuoy size={20} /><span>Support</span></Link>
         <Link to="/dashboard/settings" className={menuClass('/dashboard/settings')}><Settings size={20} /><span>Settings</span></Link>
         <button

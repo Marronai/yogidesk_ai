@@ -9,10 +9,12 @@ import {
   Eye,
   KeyRound,
   LogOut,
+  PackageCheck,
   RefreshCcw,
   Search,
   Shield,
   ShieldAlert,
+  Upload,
   UserPlus,
   Users,
   Wallet,
@@ -33,6 +35,7 @@ const tabs = [
   { id: 'overview', label: 'Overview & Active Users', icon: Activity },
   { id: 'profiles', label: 'User Profiling Cards', icon: Users },
   { id: 'staff', label: 'Staff Delegation & OTP Matrix', icon: Shield },
+  { id: 'releases', label: 'App Version Control', icon: PackageCheck },
 ];
 
 const PERMISSION_OPTIONS = [
@@ -140,6 +143,8 @@ const SuperAdminDashboard = () => {
   const [internalStaff, setInternalStaff] = useState([]);
   const [staffDraft, setStaffDraft] = useState({ name: '', email: '', mobile: '', permissions: emptyPermissions });
   const [staffMessage, setStaffMessage] = useState('');
+  const [releaseDraft, setReleaseDraft] = useState({ version: '', changelog: '', file: null });
+  const [releaseMessage, setReleaseMessage] = useState('');
 
   const permissions = superadminContext.permissions || emptyPermissions;
   const canViewOverview = Boolean(permissions.can_view_owner_overview);
@@ -318,6 +323,64 @@ const SuperAdminDashboard = () => {
       ...(user.transactions || []).map((row) => [dateLabel(row.created_at), row.amount, JSON.stringify(row.metadata || {}), row.description]),
     ];
     downloadCsv(`${user.clinicName || 'clinic'}-wallet-history.csv`, rows);
+  };
+
+  const submitRelease = async (event) => {
+    event.preventDefault();
+    setReleaseMessage('');
+    if (!releaseDraft.version.trim() || !releaseDraft.file) {
+      setReleaseMessage('Version string and APK file are required.');
+      return;
+    }
+    if (!releaseDraft.file.name.toLowerCase().endsWith('.apk')) {
+      setReleaseMessage('Only raw .apk release binaries are allowed.');
+      return;
+    }
+
+    setActionId('app-release-upload');
+    let storagePath = '';
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const safeVersion = releaseDraft.version.trim().replace(/[^\w.-]/g, '-');
+      const safeFileName = releaseDraft.file.name.replace(/[^\w.-]/g, '-');
+      storagePath = `android/${safeVersion}/${Date.now()}-${safeFileName}`;
+
+      const uploadResult = await supabase.storage
+        .from('app-releases')
+        .upload(storagePath, releaseDraft.file, {
+          cacheControl: '31536000',
+          contentType: releaseDraft.file.type || 'application/vnd.android.package-archive',
+          upsert: false,
+        });
+      if (uploadResult.error) throw uploadResult.error;
+
+      const { data: publicUrlData } = supabase.storage.from('app-releases').getPublicUrl(storagePath);
+      const apkUrl = publicUrlData?.publicUrl;
+      if (!apkUrl) throw new Error('Supabase did not return a public APK URL.');
+
+      const insertResult = await supabase.from('app_system_releases').insert([{
+        version_code: releaseDraft.version.trim(),
+        changelog_notes: releaseDraft.changelog.trim(),
+        apk_url: apkUrl,
+        storage_path: storagePath,
+        file_name: releaseDraft.file.name,
+        file_size: releaseDraft.file.size,
+        uploaded_by: authData?.user?.id || null,
+        updated_at: new Date().toISOString(),
+      }]);
+      if (insertResult.error) throw insertResult.error;
+
+      setReleaseDraft({ version: '', changelog: '', file: null });
+      setReleaseMessage(`Release ${releaseDraft.version.trim()} uploaded and published.`);
+      event.target.reset();
+    } catch (releaseError) {
+      if (storagePath) {
+        await supabase.storage.from('app-releases').remove([storagePath]).catch(() => {});
+      }
+      setReleaseMessage(releaseError.message || 'Unable to publish Android release.');
+    } finally {
+      setActionId('');
+    }
   };
 
   return (
@@ -551,6 +614,68 @@ const SuperAdminDashboard = () => {
                     ))}
                   </div>
                 )}
+              </section>
+            )}
+
+            {activeTab === 'releases' && (
+              <section className="rounded-md border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 p-5">
+                  <p className="text-xs font-black uppercase tracking-widest text-[#0284c7]">OTA Binary Deployment</p>
+                  <h3 className="mt-2 text-2xl font-black">App Version Control</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">Upload Android APK releases into the public Supabase bucket and publish immutable download metadata.</p>
+                </div>
+
+                <form onSubmit={submitRelease} className="grid grid-cols-1 gap-5 p-5 xl:grid-cols-[420px_1fr]">
+                  <div className="space-y-4">
+                    <label className="block">
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">Version String</span>
+                      <input
+                        value={releaseDraft.version}
+                        onChange={(event) => setReleaseDraft((current) => ({ ...current, version: event.target.value }))}
+                        className="mt-2 w-full rounded-md border border-slate-200 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#0284c7]"
+                        placeholder="v1.0.4"
+                        required
+                      />
+                    </label>
+
+                    <label className="block">
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">Android APK Binary</span>
+                      <input
+                        type="file"
+                        accept=".apk,application/vnd.android.package-archive"
+                        onChange={(event) => setReleaseDraft((current) => ({ ...current, file: event.target.files?.[0] || null }))}
+                        className="mt-2 w-full rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-600 outline-none file:mr-3 file:rounded-md file:border-0 file:bg-[#0284c7] file:px-3 file:py-2 file:text-sm file:font-black file:text-white focus:border-[#0284c7]"
+                        required
+                      />
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={actionId === 'app-release-upload'}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-slate-950 px-5 py-3 text-sm font-black uppercase tracking-widest text-white transition hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      <Upload size={18} />
+                      {actionId === 'app-release-upload' ? 'Publishing Release' : 'Upload APK Release'}
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block">
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">Changelog Notes</span>
+                      <textarea
+                        value={releaseDraft.changelog}
+                        onChange={(event) => setReleaseDraft((current) => ({ ...current, changelog: event.target.value }))}
+                        className="mt-2 min-h-44 w-full rounded-md border border-slate-200 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#0284c7]"
+                        placeholder="Stability patches, appointment sync improvements, notification fixes..."
+                      />
+                    </label>
+                    {releaseMessage && (
+                      <p className="mt-4 rounded-md border border-[#eab308]/40 bg-[#eab308]/10 px-4 py-3 text-sm font-bold text-slate-800">
+                        {releaseMessage}
+                      </p>
+                    )}
+                  </div>
+                </form>
               </section>
             )}
           </div>
