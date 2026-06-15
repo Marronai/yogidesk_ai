@@ -4,6 +4,7 @@ const path = require('path');
 const Razorpay = require('razorpay');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { supabaseAdmin, supabase } = require('../config/supabase');
+const { getBearerToken, isJwtSegmentToken } = require('../utils/tokenGuards');
 const { createWalletOrder, verifyWalletPayment } = require('../controllers/walletController');
 const {
   calculateMetaFee: calculateSharedMetaFee,
@@ -78,14 +79,9 @@ const getRazorpayCredentials = () => ({
   keySecret: String(process.env.RAZORPAY_KEY_SECRET || '').trim(),
 });
 
-const getBearerToken = (req) => {
-  const header = String(req.headers.authorization || '').trim();
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-};
-
 const resolveAuthenticatedDoctor = async (req) => {
   const token = getBearerToken(req);
-  if (!token) return null;
+  if (!token || !isJwtSegmentToken(token)) return null;
 
   const client = supabaseAdmin || supabase;
   if (client?.auth?.getUser) {

@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('../config/supabase');
 const { isSuperAdminUser } = require('../utils/superadminSecurity');
+const { getBearerToken, isJwtSegmentToken } = require('../utils/tokenGuards');
 
 const hiddenNotFound = (res) => res.status(404).json({ success: false, message: 'Not found.' });
 const SUPERADMIN_PERMISSION_KEYS = [
@@ -25,11 +26,6 @@ const isMissing = (error) => {
   return ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error?.code) || text.includes('does not exist') || text.includes('schema cache');
 };
 
-const getBearerToken = (req) => {
-  const header = String(req.headers.authorization || '');
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-};
-
 const loadInternalStaff = async (user = {}) => {
   if (!supabaseAdmin?.from || (!user?.id && !user?.email)) return null;
   const columns = `id,name,email,auth_user_id,is_active,status,${SUPERADMIN_PERMISSION_KEYS.join(',')}`;
@@ -50,7 +46,7 @@ const loadInternalStaff = async (user = {}) => {
 const requireSuperadminMetadata = async (req, res, next) => {
   try {
     const token = getBearerToken(req);
-    if (!token || !supabaseAdmin?.auth?.getUser) return hiddenNotFound(res);
+    if (!token || !isJwtSegmentToken(token) || !supabaseAdmin?.auth?.getUser) return hiddenNotFound(res);
 
     const { data, error } = await supabaseAdmin.auth.getUser(token);
     if (error || !data?.user) return hiddenNotFound(res);

@@ -4,6 +4,7 @@ import { Building2, BriefcaseMedical, Loader2, Phone, ShieldCheck } from 'lucide
 import { supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
+import { isJwtSegmentToken } from '../utils/tokenGuards';
 
 const specializations = [
   'General Physician',
@@ -17,6 +18,22 @@ const specializations = [
   'Psychiatrist',
   'Others',
 ];
+
+const readOAuthCallbackParams = () => {
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+
+  return {
+    accessToken: searchParams.get('access_token') || hashParams.get('access_token') || '',
+    refreshToken: searchParams.get('refresh_token') || hashParams.get('refresh_token') || '',
+    legacyToken: searchParams.get('token') || hashParams.get('token') || '',
+    code: searchParams.get('code') || hashParams.get('code') || '',
+  };
+};
+
+const cleanAuthCallbackUrl = () => {
+  window.history.replaceState({}, document.title, window.location.pathname);
+};
 
 const AuthSuccess = () => {
   const navigate = useNavigate();
@@ -38,6 +55,40 @@ const AuthSuccess = () => {
 
     const completeSupabaseOAuth = async () => {
       try {
+        const { accessToken, refreshToken, legacyToken, code } = readOAuthCallbackParams();
+
+        if (accessToken) {
+          if (!isJwtSegmentToken(accessToken)) {
+            console.error('Intercepted malformed JWT segment payload:', accessToken);
+            localStorage.removeItem('sb-access-token');
+            cleanAuthCallbackUrl();
+            throw new Error('Malformed OAuth access token');
+          }
+
+          localStorage.setItem('sb-access-token', accessToken);
+          if (refreshToken) {
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+          }
+          cleanAuthCallbackUrl();
+        } else if (legacyToken) {
+          if (!isJwtSegmentToken(legacyToken)) {
+            console.error('Intercepted malformed JWT segment payload:', legacyToken);
+            localStorage.removeItem('token');
+            cleanAuthCallbackUrl();
+            throw new Error('Malformed OAuth token');
+          }
+
+          localStorage.setItem('token', legacyToken);
+          cleanAuthCallbackUrl();
+        } else if (code) {
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) throw exchangeError;
+          cleanAuthCallbackUrl();
+        }
+
         const { data, error } = await supabase.auth.getSession();
         if (error) throw error;
 

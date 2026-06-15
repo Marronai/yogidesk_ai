@@ -1,15 +1,15 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getBearerToken, isJwtSegmentToken, rejectMalformedBearer } = require('../utils/tokenGuards');
 
 const adminMiddleware = async (req, res, next) => {
-  let token;
-
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  }
+  const token = getBearerToken(req);
 
   if (!token) {
     return res.status(401).json({ msg: 'Admin authorization token required.' });
+  }
+  if (!isJwtSegmentToken(token)) {
+    return rejectMalformedBearer(res);
   }
 
   try {

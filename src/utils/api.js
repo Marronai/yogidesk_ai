@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { supabase } from '../config/supabaseClient';
+import { isJwtSegmentToken, readTokenFromStorageValue } from './tokenGuards';
 
 const trimTrailingSlashes = (value) => String(value || '').replace(/\/+$/, '');
 const stripApiSuffix = (value) => trimTrailingSlashes(value).replace(/\/api$/i, '');
@@ -41,12 +42,7 @@ const api = axios.create({
 });
 
 const readStoredSessionToken = () => {
-  try {
-    const session = JSON.parse(localStorage.getItem('sb-access-token') || '{}');
-    return session?.access_token || null;
-  } catch {
-    return null;
-  }
+  return readTokenFromStorageValue(localStorage.getItem('sb-access-token'));
 };
 
 // Add request interceptor to include auth token
@@ -59,9 +55,12 @@ api.interceptors.request.use(
     if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
       config.url = config.url.replace(/^\/api(?=\/|$)/, '');
     }
-    if (token) {
+    if (isJwtSegmentToken(token)) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
+    } else if (token) {
+      console.error('Blocked malformed JWT before Authorization injection:', token);
+      localStorage.removeItem('sb-access-token');
     }
     const sessionEmail = localStorage.getItem('user_email') || sessionStorage.getItem('user_email');
     if (sessionEmail) {

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { getBearerToken, isJwtSegmentToken, rejectMalformedBearer } = require('../utils/tokenGuards');
 
 if (!process.env.JWT_SECRET) {
   throw new Error("CRITICAL: JWT_SECRET environment variable is completely missing!");
@@ -9,14 +10,13 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // 🛡️ 1. Protect Middleware (Token Verification)
 const protect = async (req, res, next) => {
-  let token;
-
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  }
+  const token = getBearerToken(req);
 
   if (!token) {
     return res.status(401).json({ msg: 'Not authorized, no token' });
+  }
+  if (!isJwtSegmentToken(token)) {
+    return rejectMalformedBearer(res);
   }
 
   try {

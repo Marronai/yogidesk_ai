@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
 const { supabaseAdmin, supabase } = require('../config/supabase');
 const emailConfig = require('../config/emailConfig');
+const { getBearerToken, isJwtSegmentToken } = require('../utils/tokenGuards');
 
 let passport = null;
 let jwt = null;
@@ -71,11 +72,6 @@ const passwordResetLimiter = rateLimit({
   message: { success: false, msg: 'Too many password reset attempts. Please try again after 15 minutes.' }
 });
 
-const getBearerToken = (req) => {
-  const header = String(req.headers.authorization || '').trim();
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-};
-
 const validateResetPassword = (password) => {
   const value = String(password || '');
   return {
@@ -125,6 +121,13 @@ router.post('/confirm-password-reset', passwordResetLimiter, async (req, res) =>
 
     if (!token) {
       return res.status(401).json({ success: false, msg: 'Verified reset session is required.' });
+    }
+    if (!isJwtSegmentToken(token)) {
+      return res.status(401).json({
+        success: false,
+        msg: 'Access token is malformed',
+        details: 'Invalid segment layout detected'
+      });
     }
     if (!validation.valid) {
       return res.status(400).json({ success: false, msg: validation.message });

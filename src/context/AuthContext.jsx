@@ -6,6 +6,7 @@ import {
 } from '../utils/authSession';
 import api from '../utils/api';
 import { getStoredMetaReviewSession, isMetaReviewUser } from '../utils/metaReviewSession';
+import { isJwtSegmentToken } from '../utils/tokenGuards';
 
 const AuthContext = createContext(null);
 const PROFILE_SNAPSHOT_KEY = 'yogidesk_user_profile_snapshot';
@@ -32,7 +33,7 @@ const clearProfileSnapshot = () => {
 };
 
 const isSupabaseSessionActive = (session) => {
-  if (!session?.access_token || !session?.user?.id) return false;
+  if (!session?.access_token || !session?.user?.id || !isJwtSegmentToken(session.access_token)) return false;
   if (!session.expires_at) return true;
   return Number(session.expires_at) * 1000 > Date.now() + 5000;
 };

@@ -3,6 +3,7 @@ import { AlertTriangle, Clock, KeyRound, Lock, Mail, RefreshCw, Trash2, UserPlus
 import { supabase } from '../config/supabaseClient';
 import { useWallet } from '../context/WalletContext';
 import { API_URL } from '../utils/api';
+import { isJwtSegmentToken, readTokenFromStorageValue } from '../utils/tokenGuards';
 
 const seatCaps = { basic: 0, starter: 1, growth: 2, enterprise: 5, hospital: 5, multi_specialty: 5, multi: 5 };
 const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
@@ -57,12 +58,7 @@ const Team = () => {
   const cooldownLabel = `${cooldownRemainingDays} day${cooldownRemainingDays === 1 ? '' : 's'}`;
 
   const readStoredSessionToken = () => {
-    try {
-      const session = JSON.parse(localStorage.getItem('sb-access-token') || '{}');
-      return session?.access_token || null;
-    } catch {
-      return null;
-    }
+    return readTokenFromStorageValue(localStorage.getItem('sb-access-token'));
   };
 
   const getApiHeaders = async () => {
@@ -71,9 +67,10 @@ const Team = () => {
       || data?.session?.access_token
       || localStorage.getItem('token')
       || sessionStorage.getItem('token');
+    const safeToken = isJwtSegmentToken(token) ? token : '';
     return {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...(safeToken ? { Authorization: `Bearer ${safeToken}` } : {})
     };
   };
 

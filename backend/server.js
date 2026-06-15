@@ -35,6 +35,7 @@ const superadminRoutes = require('./routes/superadminRoutes');
 const { createWalletOrder, getWalletTransactions, verifyWalletPayment } = require('./controllers/walletController');
 const { loginSuperadmin } = require('./controllers/superadminController');
 const { createLocalRateLimiter } = require('./utils/superadminSecurity');
+const { getBearerToken: getGuardedBearerToken, isJwtSegmentToken } = require('./utils/tokenGuards');
 const { startMetaSyncWorker, stopMetaSyncWorker } = require('./services/metaSyncWorker');
 const { getMetaMessageId, processFailedDeliveryRefund } = require('./services/refundService');
 const {
@@ -140,7 +141,7 @@ const getMetaReviewRequestEmail = async (req) => {
     if (isMetaReviewerEmail(directEmail)) return String(directEmail).trim().toLowerCase();
 
     const token = getMetaReviewBearerToken(req);
-    if (!token) return '';
+    if (!token || !isJwtSegmentToken(token)) return '';
 
     try {
         const client = supabaseAdmin || supabase;
@@ -404,10 +405,7 @@ const getSuperadminShadowSecret = () => (
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     'yogidesk-superadmin-shadow-secret'
 );
-const getBearerToken = (req) => {
-    const header = req.headers.authorization || '';
-    return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-};
+const getBearerToken = getGuardedBearerToken;
 const parseSuperadminShadowToken = (token) => {
     if (!String(token || '').startsWith(SUPERADMIN_SHADOW_TOKEN_PREFIX)) return null;
     const raw = String(token).slice(SUPERADMIN_SHADOW_TOKEN_PREFIX.length);
@@ -443,6 +441,7 @@ const getSupabaseSessionUser = async (req) => {
     if (!token) return null;
     const shadowUser = parseSuperadminShadowToken(token);
     if (shadowUser?.id) return shadowUser;
+    if (!isJwtSegmentToken(token)) return null;
 
     const client = supabaseAdmin || supabase;
     if (!client?.auth?.getUser) return null;

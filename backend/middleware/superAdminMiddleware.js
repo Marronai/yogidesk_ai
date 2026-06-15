@@ -1,13 +1,9 @@
 const { supabaseAdmin } = require('../config/supabase');
-
-const getBearerToken = (req) => {
-  const header = String(req.headers.authorization || '');
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : null;
-};
+const { getBearerToken, isJwtSegmentToken } = require('../utils/tokenGuards');
 
 const getSupabaseUser = async (req) => {
   const token = getBearerToken(req);
-  if (!token) return null;
+  if (!token || !isJwtSegmentToken(token)) return null;
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data?.user) return null;

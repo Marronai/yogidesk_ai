@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
 const { supabaseAdmin, supabase } = require('../config/supabase');
+const { getBearerToken, isJwtSegmentToken } = require('../utils/tokenGuards');
 
 const db = supabaseAdmin || supabase;
 const WALLET_MIN_RECHARGE_AMOUNT = 10;
@@ -27,16 +28,11 @@ const getRazorpayClient = () => {
   };
 };
 
-const getBearerToken = (req) => {
-  const header = String(req.headers.authorization || '').trim();
-  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-};
-
 const resolveAuthenticatedUserId = async (req) => {
   if (req.user?.id) return req.user.id;
 
   const token = getBearerToken(req);
-  if (!token) return '';
+  if (!token || !isJwtSegmentToken(token)) return '';
 
   const client = supabaseAdmin || supabase;
   if (!client?.auth?.getUser) return '';
