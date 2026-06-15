@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Send,
   Settings,
+  Smartphone,
   Users,
   Wallet,
   ChevronDown,
@@ -28,11 +29,13 @@ import { useAuth } from '../context/AuthContext';
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
 const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
+const FALLBACK_APK_URL = `${(import.meta.env.VITE_SUPABASE_URL || 'https://oxvlgzjunhecgzfbfbwk.supabase.co').replace(/\/+$/, '')}/storage/v1/object/public/app-releases/yogidesk.apk`;
 const versionLabel = (value) => {
   const version = String(value || '').trim();
-  if (!version || version === 'Checking...' || version === 'Unavailable') return version || 'Unavailable';
+  if (!version || version === 'Checking...' || version === 'Unavailable') return 'v1.0.0';
   return version.toLowerCase().startsWith('v') ? version : `v${version}`;
 };
+const normalizeReleasePayload = (payload) => Array.isArray(payload) ? payload[0] : payload;
 
 const Sidebar = () => {
   const location = useLocation();
@@ -43,7 +46,7 @@ const Sidebar = () => {
   const [lifetimeCount, setLifetimeCount] = useState(0);
   const [quickRechargeOpen, setQuickRechargeOpen] = useState(false);
   const [quickRechargeLoading, setQuickRechargeLoading] = useState(false);
-  const [appRelease, setAppRelease] = useState({ apkUrl: '', version: 'Checking...', loading: true });
+  const [appRelease, setAppRelease] = useState({ apkUrl: FALLBACK_APK_URL, version: 'v1.0.0', loading: false });
   const [lockNotice, setLockNotice] = useState('');
   const [profile, setProfile] = useState({
     role: normalizeRole(),
@@ -81,13 +84,14 @@ const Sidebar = () => {
       try {
         const { data } = await axios.get('/api/app/latest-release');
         if (!active) return;
+        const release = normalizeReleasePayload(data);
         setAppRelease({
-          apkUrl: data?.apk_url || '',
-          version: data?.version_code || 'Unavailable',
+          apkUrl: release?.apk_url || FALLBACK_APK_URL,
+          version: release?.version_code || 'v1.0.0',
           loading: false,
         });
       } catch {
-        if (active) setAppRelease({ apkUrl: '', version: 'Unavailable', loading: false });
+        if (active) setAppRelease({ apkUrl: FALLBACK_APK_URL, version: 'v1.0.0', loading: false });
       }
     };
 
@@ -188,30 +192,36 @@ const Sidebar = () => {
 
   const handleDownloadAPK = async () => {
     try {
-      const response = await axios.get('/api/app/latest-release');
-      const apkUrl = response.data?.apk_url;
+      let apkUrl = null;
+      let latestVersion = appRelease.version || 'v1.0.0';
 
-      if (!apkUrl) {
-        console.error('Target release URL record returned empty from server');
-        return;
+      try {
+        const response = await axios.get('/api/app/latest-release');
+        const release = normalizeReleasePayload(response.data);
+        apkUrl = release?.apk_url;
+        latestVersion = release?.version_code || latestVersion;
+      } catch (apiErr) {
+        console.warn('Backend API fetch failed, falling back to static asset URL:', apiErr);
       }
+
+      if (!apkUrl) apkUrl = FALLBACK_APK_URL;
 
       setAppRelease({
         apkUrl,
-        version: response.data?.version_code || appRelease.version || 'Latest',
+        version: latestVersion,
         loading: false,
       });
 
-      const cleanLink = document.createElement('a');
-      cleanLink.href = apkUrl;
-      cleanLink.setAttribute('target', '_blank');
-      cleanLink.setAttribute('download', 'yogidesk.apk');
+      const nativeAnchor = document.createElement('a');
+      nativeAnchor.href = apkUrl;
+      nativeAnchor.setAttribute('target', '_blank');
+      nativeAnchor.setAttribute('download', 'yogidesk.apk');
 
-      document.body.appendChild(cleanLink);
-      cleanLink.click();
-      document.body.removeChild(cleanLink);
+      document.body.appendChild(nativeAnchor);
+      nativeAnchor.click();
+      document.body.removeChild(nativeAnchor);
     } catch (error) {
-      console.error('APK asset dispatch process failed:', error);
+      console.error('APK Download sequence crashed:', error);
     }
   };
 
@@ -355,12 +365,11 @@ const Sidebar = () => {
         <button
           type="button"
           onClick={handleDownloadAPK}
-          disabled={appRelease.loading}
-          className="mb-1 flex w-full items-start gap-3 rounded-xl px-4 py-3 text-left font-medium text-gray-600 transition-all hover:bg-orange-50 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-70"
+          className="mb-1 flex w-full items-start gap-3 rounded-xl px-4 py-3 text-left font-medium text-gray-600 transition-all hover:bg-orange-50 hover:text-orange-600"
         >
-          <span className="mt-0.5 text-base leading-none" aria-hidden="true">{'\uD83D\uDCE5'}</span>
+          <Smartphone size={20} className="mt-0.5 shrink-0" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate">Download Mobile App</span>
+            <span className="block truncate">Mobile App</span>
             <span className="mt-0.5 block truncate text-[10px] font-bold uppercase tracking-wider text-gray-400">
               {versionLabel(appRelease.version)} (Android APK)
             </span>
