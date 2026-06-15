@@ -8,6 +8,7 @@ const {
 } = require('../controllers/adminPanelController');
 const {
   adjustWallet,
+  adjustAiTokenPack,
   createImpersonationSession,
   getOwnerOverview,
   getSuperadminMe,
@@ -44,5 +45,6 @@ router.get('/users', getUserMatrix);
 router.patch('/users/:userId/status', updateUserStatus);
 router.post('/users/:userId/impersonate', createImpersonationSession);
 router.post('/users/:userId/wallet-adjustment', adjustWallet);
+router.post('/users/:userId/ai-token-adjustment', adjustAiTokenPack);
 
 module.exports = router;

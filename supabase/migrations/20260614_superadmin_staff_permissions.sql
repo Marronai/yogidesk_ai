@@ -2,6 +2,8 @@ create table if not exists public.superadmin_staff (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   email text not null unique,
+  mobile text,
+  otp_validation_string text,
   auth_user_id uuid unique,
   is_active boolean not null default true,
   status text not null default 'INVITED',
@@ -17,3 +19,6 @@ create table if not exists public.superadmin_staff (
 
 create index if not exists idx_superadmin_staff_email on public.superadmin_staff (email);
 create index if not exists idx_superadmin_staff_auth_user_id on public.superadmin_staff (auth_user_id);
+
+alter table public.superadmin_staff add column if not exists mobile text;
+alter table public.superadmin_staff add column if not exists otp_validation_string text;

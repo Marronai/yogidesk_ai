@@ -39,7 +39,7 @@ const daysUntil = (value) => {
   const ms = new Date(value).getTime() - Date.now();
   return Number.isFinite(ms) ? Math.ceil(ms / 86400000) : null;
 };
-const superadminStaffColumns = `id,name,email,auth_user_id,is_active,status,${SUPERADMIN_PERMISSION_KEYS.join(',')},invited_by,created_at,updated_at`;
+const superadminStaffColumns = `id,name,email,mobile,otp_validation_string,auth_user_id,is_active,status,${SUPERADMIN_PERMISSION_KEYS.join(',')},invited_by,created_at,updated_at`;
 const isOwnerSuperadmin = (req) => req.superadminRole === 'owner' || isSuperAdminUser(req.superadmin) || Boolean(req.superAdminUser);
 const hasPermission = (req, permission) => isOwnerSuperadmin(req) || Boolean(req.superadminPermissions?.[permission]);
 const requirePermission = (req, res, permission) => {
@@ -188,10 +188,18 @@ exports.listSuperadminStaff = async (req, res) => {
     if (!isOwnerSuperadmin(req)) {
       return res.status(403).json({ success: false, message: 'Only the owner super admin can view internal staff.' });
     }
-    const { data, error } = await db
+    let { data, error } = await db
       .from('superadmin_staff')
       .select(superadminStaffColumns)
       .order('created_at', { ascending: false });
+    if (error && isMissing(error)) {
+      const fallback = await db
+        .from('superadmin_staff')
+        .select(`id,name,email,auth_user_id,is_active,status,${SUPERADMIN_PERMISSION_KEYS.join(',')},invited_by,created_at,updated_at`)
+        .order('created_at', { ascending: false });
+      data = fallback.data;
+      error = fallback.error;
+    }
     if (error) throw error;
     return res.status(200).json({ success: true, data: data || [] });
   } catch (error) {
@@ -208,6 +216,7 @@ exports.inviteSuperadminStaff = async (req, res) => {
 
     const name = cleanText(req.body?.name || req.body?.staffName, 120);
     const email = cleanEmail(req.body?.email || req.body?.staffEmail);
+    const mobile = cleanText(req.body?.mobile || req.body?.phone || '', 24).replace(/[^\d+ -]/g, '');
     const permissions = sanitizePermissions(req.body?.permissions || req.body || {});
     if (!name || !email) return res.status(400).json({ success: false, message: 'Staff name and email are required.' });
     if (!Object.values(permissions).some(Boolean)) {
@@ -224,6 +233,8 @@ exports.inviteSuperadminStaff = async (req, res) => {
     const payload = {
       name,
       email,
+      mobile,
+      otp_validation_string: crypto.randomBytes(16).toString('hex'),
       is_active: true,
       status: authUserId ? 'ACTIVE' : 'INVITED',
       invited_by: req.superadmin?.id || null,
@@ -232,19 +243,31 @@ exports.inviteSuperadminStaff = async (req, res) => {
     };
     if (authUserId) payload.auth_user_id = authUserId;
 
-    const { data, error } = await db
+    let { data, error } = await db
       .from('superadmin_staff')
       .upsert(payload, { onConflict: 'email' })
       .select(superadminStaffColumns)
       .single();
+    if (error && isMissing(error)) {
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.mobile;
+      delete fallbackPayload.otp_validation_string;
+      const fallback = await db
+        .from('superadmin_staff')
+        .upsert(fallbackPayload, { onConflict: 'email' })
+        .select(`id,name,email,auth_user_id,is_active,status,${SUPERADMIN_PERMISSION_KEYS.join(',')},invited_by,created_at,updated_at`)
+        .single();
+      data = fallback.data;
+      error = fallback.error;
+    }
     if (error) throw error;
 
     return res.status(201).json({
       success: true,
       data,
       message: authUserId
-        ? 'Internal staff access mapped to the existing auth account.'
-        : 'Internal staff invitation saved. The user can access Super Admin after their auth account is created with this email.',
+        ? 'Internal staff access mapped to the existing auth account. OTP validation tracker generated.'
+        : 'Internal staff invitation saved. OTP validation tracker generated for auth onboarding.',
     });
   } catch (error) {
     console.error('Superadmin staff invite failed:', error.message || error);
@@ -349,6 +372,9 @@ exports.getUserMatrix = async (req, res) => {
         const userTeam = teamMembers.filter((row) => row.admin_id === id || row.user_id === id || row.doctor_id === id || row.clinic_id === clinic.id);
         const userMessages = inboxMessages.filter((row) => row.workspace_id === id || row.user_id === id || row.doctor_id === id || row.clinic_id === clinic.id);
         const userTransactions = transactions.filter((row) => row.user_id === id).slice(0, 8);
+        const latestRecharge = transactions
+          .filter((row) => row.user_id === id && number(row.amount) > 0)
+          .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())[0];
         const userActivity = activityLogs.filter((row) => row.user_id === id || row.doctor_id === id).slice(0, 8);
         const userAiLogs = aiLogs.filter((row) => row.user_id === id || row.doctor_id === id);
         const userSubscriptions = subscriptionEvents.filter((row) => row.user_id === id || row.doctor_id === id || row.clinic_id === clinic.id);
@@ -378,6 +404,10 @@ exports.getUserMatrix = async (req, res) => {
           expiresSoon: expiryDays !== null && expiryDays >= 0 && expiryDays <= 3,
           walletBalance: number(wallet.balance),
           walletBalanceLabel: formatInr(wallet.balance),
+          aiMessageBalance: number(clinic.ai_message_balance ?? clinic.ai_token_balance ?? clinic.token_limit ?? profile.ai_message_balance ?? profile.ai_token_balance ?? profile.token_limit),
+          aiMessagesUsed: number(clinic.ai_messages_used ?? clinic.ai_message_used ?? clinic.token_used ?? profile.ai_messages_used ?? profile.ai_message_used ?? profile.token_used),
+          lastRechargeValue: number(latestRecharge?.amount),
+          lastRechargeValueLabel: latestRecharge ? formatInr(latestRecharge.amount) : formatInr(0),
           appointments: {
             total: userAppointments.length,
             pending: userAppointments.filter((row) => String(row.status || '').toLowerCase() !== 'completed').length,
@@ -539,5 +569,79 @@ exports.adjustWallet = async (req, res) => {
   } catch (error) {
     console.error('Superadmin wallet adjustment failed:', error.message || error);
     return res.status(500).json({ success: false, message: 'Unable to adjust wallet.' });
+  }
+};
+
+exports.adjustAiTokenPack = async (req, res) => {
+  try {
+    if (!requirePermission(req, res, 'can_override_plan_wallet')) return;
+    const userId = cleanUuid(req.params?.userId);
+    const delta = Math.trunc(number(req.body?.delta ?? req.body?.amount));
+    const reason = cleanText(req.body?.reason || 'Superadmin manual AI token pack adjustment', 180);
+    if (!userId || delta === 0 || Math.abs(delta) > 1000000) {
+      return res.status(400).json({ success: false, message: 'Invalid AI token adjustment.' });
+    }
+
+    const clinic = await findClinicForUser(userId, 'id,user_id,ai_message_balance,ai_token_balance,token_limit');
+    const { data: profile } = await db
+      .from('doctor_profiles')
+      .select('id,ai_message_balance,ai_token_balance,token_limit')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const currentBalance = number(
+      clinic?.ai_message_balance ??
+      clinic?.ai_token_balance ??
+      clinic?.token_limit ??
+      profile?.ai_message_balance ??
+      profile?.ai_token_balance ??
+      profile?.token_limit
+    );
+    const nextBalance = Math.max(0, currentBalance + delta);
+    const updatePayload = {
+      ai_message_balance: nextBalance,
+      ai_token_balance: nextBalance,
+      token_limit: nextBalance,
+      updated_at: nowIso(),
+    };
+
+    if (clinic?.id) {
+      let clinicUpdate = await db.from('clinics').update(updatePayload).eq('id', clinic.id);
+      if (clinicUpdate.error && isMissing(clinicUpdate.error)) {
+        const fallbackPayload = { ...updatePayload };
+        delete fallbackPayload.updated_at;
+        clinicUpdate = await db.from('clinics').update(fallbackPayload).eq('id', clinic.id);
+      }
+      if (clinicUpdate.error && !isMissing(clinicUpdate.error)) throw clinicUpdate.error;
+    }
+
+    let profileUpdate = await db.from('doctor_profiles').update(updatePayload).eq('id', userId);
+    if (profileUpdate.error && isMissing(profileUpdate.error)) {
+      const fallbackPayload = { ...updatePayload };
+      delete fallbackPayload.updated_at;
+      profileUpdate = await db.from('doctor_profiles').update(fallbackPayload).eq('id', userId);
+    }
+    if (profileUpdate.error && !isMissing(profileUpdate.error)) throw profileUpdate.error;
+
+    await db.from('wallet_transactions').insert([{
+      user_id: userId,
+      amount: Math.abs(delta),
+      transaction_type: delta > 0 ? 'AI_TOKEN_CREDIT' : 'AI_TOKEN_DEBIT',
+      description: reason,
+      metadata: {
+        source: 'superadmin_ai_token_pack_adjustment',
+        adjusted_by: req.superadmin?.id || null,
+        balance_before: currentBalance,
+        balance_after: nextBalance,
+      },
+      created_at: nowIso(),
+    }]).catch((error) => {
+      console.warn('Superadmin AI token audit insert skipped:', error.message || error);
+    });
+
+    return res.status(200).json({ success: true, data: { user_id: userId, aiMessageBalance: nextBalance } });
+  } catch (error) {
+    console.error('Superadmin AI token adjustment failed:', error.message || error);
+    return res.status(500).json({ success: false, message: 'Unable to adjust AI token pack.' });
   }
 };
