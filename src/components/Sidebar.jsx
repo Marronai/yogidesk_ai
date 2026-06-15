@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   HeartPulse,
@@ -16,7 +17,6 @@ import {
   Wallet,
   ChevronDown,
   Bot,
-  Download,
   Lock,
   X,
 } from 'lucide-react';
@@ -28,6 +28,11 @@ import { useAuth } from '../context/AuthContext';
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const fallbackClinicName = () => localStorage.getItem('clinic_name') || localStorage.getItem('user_clinic_name') || 'Clinic Workspace';
 const TRIAL_EXPIRED_MESSAGE = 'Your 7-day complementary trial period has expired. Please upgrade your duration package under the active billing deck to reinstate full multi-specialty workspace toolsets.';
+const versionLabel = (value) => {
+  const version = String(value || '').trim();
+  if (!version || version === 'Checking...' || version === 'Unavailable') return version || 'Unavailable';
+  return version.toLowerCase().startsWith('v') ? version : `v${version}`;
+};
 
 const Sidebar = () => {
   const location = useLocation();
@@ -74,7 +79,7 @@ const Sidebar = () => {
     let active = true;
     const loadLatestRelease = async () => {
       try {
-        const { data } = await api.get(backendPath('/api/app/latest-release'));
+        const { data } = await axios.get('/api/app/latest-release');
         if (!active) return;
         setAppRelease({
           apkUrl: data?.apk_url || '',
@@ -181,18 +186,32 @@ const Sidebar = () => {
     }
   };
 
-  const downloadAndroidApp = async () => {
+  const handleDownloadAPK = async () => {
     try {
-      const { data } = await api.get(backendPath('/api/app/latest-release'));
-      if (!data?.apk_url) throw new Error('Android app release is not available yet.');
+      const response = await axios.get('/api/app/latest-release');
+      const apkUrl = response.data?.apk_url;
+
+      if (!apkUrl) {
+        console.error('Target release URL record returned empty from server');
+        return;
+      }
+
       setAppRelease({
-        apkUrl: data.apk_url,
-        version: data.version_code || appRelease.version || 'Latest',
+        apkUrl,
+        version: response.data?.version_code || appRelease.version || 'Latest',
         loading: false,
       });
-      window.location.href = data.apk_url;
+
+      const cleanLink = document.createElement('a');
+      cleanLink.href = apkUrl;
+      cleanLink.setAttribute('target', '_blank');
+      cleanLink.setAttribute('download', 'yogidesk.apk');
+
+      document.body.appendChild(cleanLink);
+      cleanLink.click();
+      document.body.removeChild(cleanLink);
     } catch (error) {
-      alert(error.message || 'Unable to start Android app download.');
+      console.error('APK asset dispatch process failed:', error);
     }
   };
 
@@ -331,22 +350,22 @@ const Sidebar = () => {
       </nav>
 
       <div className="p-4 border-t border-gray-100 flex-shrink-0 bg-gray-50/50 mt-auto">
-        <div className="mb-3 rounded-2xl border border-blue-100 bg-white p-3 shadow-sm">
-          <button
-            type="button"
-            onClick={downloadAndroidApp}
-            disabled={appRelease.loading}
-            className="w-full bg-blue-600 font-bold text-white tracking-wide hover:bg-blue-700 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl transition-all shadow-md shadow-blue-500/10 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            <Download size={17} />
-            📥 Download Android Mobile App
-          </button>
-          <p className="mt-2 text-center text-[11px] font-black uppercase tracking-wider text-slate-500">
-            Active Version: {appRelease.version}
-          </p>
-        </div>
         <Link to="/dashboard/support" className={menuClass('/dashboard/support')}><LifeBuoy size={20} /><span>Support</span></Link>
         <Link to="/dashboard/settings" className={menuClass('/dashboard/settings')}><Settings size={20} /><span>Settings</span></Link>
+        <button
+          type="button"
+          onClick={handleDownloadAPK}
+          disabled={appRelease.loading}
+          className="mb-1 flex w-full items-start gap-3 rounded-xl px-4 py-3 text-left font-medium text-gray-600 transition-all hover:bg-orange-50 hover:text-orange-600 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          <span className="mt-0.5 text-base leading-none" aria-hidden="true">{'\uD83D\uDCE5'}</span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">Download Mobile App</span>
+            <span className="mt-0.5 block truncate text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              {versionLabel(appRelease.version)} (Android APK)
+            </span>
+          </span>
+        </button>
         <button
           onClick={async () => { await logout(); navigate('/login'); }}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 hover:text-red-600 transition-all font-medium mt-2"
