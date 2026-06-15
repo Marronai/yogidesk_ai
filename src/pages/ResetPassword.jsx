@@ -91,11 +91,19 @@ const ResetPassword = () => {
   );
 
   return (
-    <div className="min-h-screen bg-white font-sans text-slate-950 lg:grid lg:grid-cols-[0.95fr_1.05fr]">
-      <aside className="relative hidden min-h-screen overflow-hidden bg-[#050505] px-10 py-12 text-white lg:flex lg:flex-col lg:justify-between xl:px-16">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,107,0,0.18),transparent_32%),radial-gradient(circle_at_80%_15%,rgba(255,255,255,0.08),transparent_28%)]" />
+    <div className="relative flex min-h-dvh overflow-x-hidden overflow-y-auto bg-[#05070b] font-sans text-slate-950 lg:overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,107,0,0.15)_0%,transparent_60%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_18%,rgba(255,107,0,0.16),transparent_28%),radial-gradient(circle_at_84%_10%,rgba(37,99,235,0.13),transparent_30%),linear-gradient(135deg,rgba(7,12,23,0.94),rgba(3,5,10,0.98)_52%,rgba(8,10,13,1))]" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:linear-gradient(rgba(148,163,184,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.18)_1px,transparent_1px)] [background-size:42px_42px]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,transparent_0%,rgba(0,0,0,0.5)_76%)]" />
+
+      <div className="relative z-10 mx-auto grid w-full max-w-6xl items-center gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8">
+        <aside className="relative hidden min-h-[720px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#05070b]/80 px-10 py-12 text-white shadow-2xl shadow-black/40 backdrop-blur-xl lg:flex lg:flex-col lg:justify-between xl:px-14">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,107,0,0.2),transparent_34%),radial-gradient(circle_at_80%_15%,rgba(56,189,248,0.08),transparent_30%)]" />
+        <div className="absolute inset-0 opacity-[0.22] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:34px_34px]" />
+        <div className="absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-orange-500/20 blur-3xl" />
         <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-lg shadow-orange-500/25">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-lg shadow-orange-500/35">
             <ShieldCheck size={26} />
           </div>
           <div>
@@ -138,18 +146,18 @@ const ResetPassword = () => {
           </div>
         </div>
 
-        <div className="relative z-10 rounded-2xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur">
+        <div className="relative z-10 rounded-2xl border border-white/10 bg-white/[0.05] p-5 backdrop-blur">
           <p className="text-sm font-bold text-slate-200">Password resets are protected by verified recovery sessions.</p>
           <p className="mt-2 text-xs font-medium leading-relaxed text-slate-500">Choose a password that your team cannot guess and your browser cannot reuse elsewhere.</p>
         </div>
-      </aside>
+        </aside>
 
-      <main className="flex min-h-screen items-center justify-center bg-[#f8fafc] px-4 py-10 sm:px-6 lg:px-12">
+        <main className="flex min-h-dvh items-center justify-center py-6 lg:min-h-[720px]">
         <motion.section
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, ease: 'easeOut' }}
-          className="w-full max-w-md rounded-[2rem] border border-slate-100 bg-white p-6 shadow-2xl shadow-slate-200/70 sm:p-8"
+          className="w-full max-w-md rounded-[2rem] border border-white/80 bg-white p-6 shadow-2xl shadow-black/35 sm:p-8"
         >
           <div className="mb-8">
             <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-950 text-orange-400 shadow-lg shadow-slate-900/20">
@@ -254,7 +262,8 @@ const ResetPassword = () => {
             </button>
           </form>
         </motion.section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 };

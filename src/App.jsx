@@ -56,7 +56,7 @@ const AppContent = () => {
   const { isMetaReviewSession } = useAuth();
   
   // Comprehensive internal route exclusion array
-  const internalDashboardPaths = ['/login', '/signup', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/superadmin'];
+  const internalDashboardPaths = ['/login', '/signup', '/forgot-password', '/reset-password', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/superadmin'];
   
   // Check if current URL starts with any internal application route
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));

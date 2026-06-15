@@ -173,9 +173,10 @@ router.post('/confirm-password-reset', passwordResetLimiter, async (req, res) =>
         });
     }
 
+    const verifiedRecipientEmail = user.email;
     const displayName = metadata.full_name || metadata.name || 'Doctor';
     if (typeof emailConfig.sendPasswordChangedAlert === 'function') {
-      await emailConfig.sendPasswordChangedAlert(user.email, displayName);
+      await emailConfig.sendPasswordChangedAlert(verifiedRecipientEmail, displayName);
     }
 
     return res.status(200).json({ success: true, msg: 'Password Updated Successfully' });
