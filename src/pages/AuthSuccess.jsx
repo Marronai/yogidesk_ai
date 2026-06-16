@@ -35,6 +35,21 @@ const cleanAuthCallbackUrl = () => {
   window.history.replaceState({}, document.title, window.location.pathname);
 };
 
+const readProfileMobile = (profile = {}) => (
+  profile.mobile || profile.phone_number || profile.phone || ''
+);
+
+const hasCompletedDoctorProfile = (profile = {}) => {
+  const mobileDigits = String(readProfileMobile(profile)).replace(/\D/g, '').slice(-10);
+  return Boolean(
+    profile.id &&
+    String(profile.name || '').trim() &&
+    String(profile.clinic_name || '').trim() &&
+    String(profile.specialization || profile.business_category || profile.clinic_category || '').trim() &&
+    mobileDigits.length === 10
+  );
+};
+
 const AuthSuccess = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -103,25 +118,25 @@ const AuthSuccess = () => {
 
         const { data: profileRow, error: profileError } = await supabase
           .from('doctor_profiles')
-          .select('id, clinic_name, specialization, whatsapp_phone_number_id')
+          .select('id, name, clinic_name, specialization, business_category, clinic_category, phone, phone_number, mobile')
           .eq('id', sessionUser.id)
           .maybeSingle();
 
         if (profileError) throw profileError;
         if (!active) return;
 
-        if (profileRow?.id) {
-          console.log('[YogiDesk Auth] Existing doctor profile found after Google OAuth. Routing to dashboard.');
+        if (hasCompletedDoctorProfile(profileRow)) {
+          console.log('[YogiDesk Auth] Completed doctor profile found after Google OAuth. Routing to dashboard.');
           navigate('/dashboard', { replace: true });
           return;
         }
 
         setForm((current) => ({
           ...current,
-          full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
-          clinic_name: sessionUser.user_metadata?.business_name || '',
-          mobile_number: sessionUser.user_metadata?.phone || '',
-          specialization: sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
+          full_name: profileRow?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
+          clinic_name: profileRow?.clinic_name || sessionUser.user_metadata?.business_name || '',
+          mobile_number: readProfileMobile(profileRow) || sessionUser.user_metadata?.phone || '',
+          specialization: profileRow?.specialization || profileRow?.business_category || profileRow?.clinic_category || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
         }));
         setNeedsOnboarding(true);
         setLoading(false);
@@ -160,13 +175,16 @@ const AuthSuccess = () => {
 
     setSaving(true);
     try {
-      await api.post('/profile/onboarding', {
+      const response = await api.post('/profile/onboarding', {
         userId: user.id,
         full_name: form.full_name.trim(),
         clinic_name: form.clinic_name.trim(),
         mobile_number: mobileDigits,
         specialization: form.specialization,
       });
+      if (![200, 201].includes(response.status) || response.data?.success !== true) {
+        throw new Error(response.data?.message || 'Profile was not saved. Please try again.');
+      }
       navigate('/dashboard', { replace: true });
     } catch (error) {
       setMessage(error?.response?.data?.message || error.message || 'Unable to save onboarding details.');
@@ -217,6 +235,7 @@ const AuthSuccess = () => {
           <div className="relative">
             <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
+              required
               value={form.full_name}
               onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
               placeholder="Full Name"
@@ -227,6 +246,7 @@ const AuthSuccess = () => {
           <div className="relative">
             <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
+              required
               value={form.clinic_name}
               onChange={(event) => setForm((current) => ({ ...current, clinic_name: event.target.value }))}
               placeholder="Clinic/Hospital Name"
@@ -237,6 +257,7 @@ const AuthSuccess = () => {
           <div className="relative">
             <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
+              required
               type="tel"
               inputMode="numeric"
               maxLength="10"
@@ -250,6 +271,7 @@ const AuthSuccess = () => {
           <div className="relative">
             <Stethoscope className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <select
+              required
               value={form.specialization}
               onChange={(event) => setForm((current) => ({ ...current, specialization: event.target.value }))}
               className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
