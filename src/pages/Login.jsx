@@ -149,6 +149,7 @@ const Login = () => {
     try {
       setLoading(true);
       sessionStorage.setItem('yogidesk_google_auth_flow', 'login');
+      localStorage.setItem('yogidesk_google_auth_flow', 'login');
       const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=login'));
       if (error) throw error;
     } catch (error) {
