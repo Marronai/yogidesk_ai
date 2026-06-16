@@ -100,23 +100,29 @@ const AuthSuccess = () => {
         persistSupabaseSession(sessionUser, { welcomeGift: true });
         localStorage.setItem('user_subscription_status', 'active');
 
-        const response = await api.get('/profile/context', { params: { userId: sessionUser.id } });
-        const profile = response.data?.profile || {};
-        const missingProfile = !profile.clinic_name || !profile.specialization || !profile.whatsapp_phone_number_id;
+        const { data: profileRow, error: profileError } = await supabase
+          .from('doctor_profiles')
+          .select('id, clinic_name, specialization, whatsapp_phone_number_id')
+          .eq('id', sessionUser.id)
+          .maybeSingle();
 
-        if (missingProfile) {
-          setForm((current) => ({
-            ...current,
-            clinic_name: profile.clinic_name || sessionUser.user_metadata?.business_name || '',
-            specialization: profile.specialization || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
-            whatsapp_phone_number_id: profile.whatsapp_phone_number_id || '',
-          }));
-          setNeedsOnboarding(true);
-          setLoading(false);
+        if (profileError) throw profileError;
+        if (!active) return;
+
+        if (profileRow?.id) {
+          console.log('[YogiDesk Auth] Existing doctor profile found after Google OAuth. Routing to dashboard.');
+          navigate('/dashboard', { replace: true });
           return;
         }
 
-        navigate('/dashboard', { replace: true });
+        setForm((current) => ({
+          ...current,
+          clinic_name: sessionUser.user_metadata?.business_name || '',
+          specialization: sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
+          whatsapp_phone_number_id: '',
+        }));
+        setNeedsOnboarding(true);
+        setLoading(false);
       } catch (error) {
         console.error('Supabase OAuth completion error:', error);
         navigate('/login?error=invalid_token', { replace: true });
