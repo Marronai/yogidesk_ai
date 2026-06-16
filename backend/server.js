@@ -436,6 +436,16 @@ const parseSuperadminShadowToken = (token) => {
         return null;
     }
 };
+
+let lastExpiredSessionLogAt = 0;
+const logExpiredSessionDebug = (reason = 'invalid Supabase session') => {
+    const now = Date.now();
+    const intervalMs = Number(process.env.AUTH_SESSION_LOG_THROTTLE_MS || 60000);
+    if (process.env.AUTH_SESSION_DEBUG !== 'true' && now - lastExpiredSessionLogAt < intervalMs) return;
+    lastExpiredSessionLogAt = now;
+    console.warn(`[YogiDesk Auth] Session expired or invalid: ${reason}`);
+};
+
 const getSupabaseSessionUser = async (req) => {
     const token = getBearerToken(req);
     if (!token) return null;
@@ -449,13 +459,13 @@ const getSupabaseSessionUser = async (req) => {
     try {
         const { data, error } = await client.auth.getUser(token);
         if (error || !data?.user?.id) {
-            console.warn(`[YogiDesk Auth] Session expired or invalid: ${error?.message || 'missing Supabase user'}`);
+            logExpiredSessionDebug(error?.message || 'missing Supabase user');
             return null;
         }
 
         return data.user;
     } catch (error) {
-        console.warn(`[YogiDesk Auth] Session validation failed: ${error?.message || 'unknown auth error'}`);
+        logExpiredSessionDebug(error?.message || 'unknown auth error');
         return null;
     }
 };

@@ -147,7 +147,8 @@ const Login = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success'));
+      sessionStorage.setItem('yogidesk_google_auth_flow', 'login');
+      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=login'));
       if (error) throw error;
     } catch (error) {
       alert(error.message || 'Google login failed. Please try again.');

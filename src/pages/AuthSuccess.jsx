@@ -28,6 +28,7 @@ const readOAuthCallbackParams = () => {
     refreshToken: searchParams.get('refresh_token') || hashParams.get('refresh_token') || '',
     legacyToken: searchParams.get('token') || hashParams.get('token') || '',
     code: searchParams.get('code') || hashParams.get('code') || '',
+    flow: searchParams.get('flow') || hashParams.get('flow') || sessionStorage.getItem('yogidesk_google_auth_flow') || '',
   };
 };
 
@@ -71,7 +72,8 @@ const AuthSuccess = () => {
 
     const completeSupabaseOAuth = async () => {
       try {
-        const { accessToken, refreshToken, legacyToken, code } = readOAuthCallbackParams();
+        const { accessToken, refreshToken, legacyToken, code, flow } = readOAuthCallbackParams();
+        const authFlow = String(flow || '').trim().toLowerCase();
 
         if (accessToken) {
           if (!isJwtSegmentToken(accessToken)) {
@@ -125,8 +127,9 @@ const AuthSuccess = () => {
         if (profileError) throw profileError;
         if (!active) return;
 
-        if (hasCompletedDoctorProfile(profileRow)) {
+        if (authFlow !== 'signup' && hasCompletedDoctorProfile(profileRow)) {
           console.log('[YogiDesk Auth] Completed doctor profile found after Google OAuth. Routing to dashboard.');
+          sessionStorage.removeItem('yogidesk_google_auth_flow');
           navigate('/dashboard', { replace: true });
           return;
         }
@@ -185,6 +188,7 @@ const AuthSuccess = () => {
       if (![200, 201].includes(response.status) || response.data?.success !== true) {
         throw new Error(response.data?.message || 'Profile was not saved. Please try again.');
       }
+      sessionStorage.removeItem('yogidesk_google_auth_flow');
       navigate('/dashboard', { replace: true });
     } catch (error) {
       setMessage(error?.response?.data?.message || error.message || 'Unable to save onboarding details.');

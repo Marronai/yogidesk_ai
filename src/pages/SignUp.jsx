@@ -231,7 +231,8 @@ const SignUp = () => {
     try {
       setLoading(true);
       setStep(4);
-      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success'));
+      sessionStorage.setItem('yogidesk_google_auth_flow', 'signup');
+      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=signup'));
       if (error) throw error;
     } catch (err) {
       alert(err.message || "Google Signup Failed");
