@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, BriefcaseMedical, Loader2, Phone, ShieldCheck } from 'lucide-react';
+import { Building2, Loader2, Phone, ShieldCheck, Stethoscope, User } from 'lucide-react';
 import { supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
@@ -43,9 +43,10 @@ const AuthSuccess = () => {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [message, setMessage] = useState('');
   const [form, setForm] = useState({
+    full_name: '',
     clinic_name: '',
+    mobile_number: '',
     specialization: '',
-    whatsapp_phone_number_id: '',
   });
 
   const displayEmail = useMemo(() => user?.email || 'your Google account', [user]);
@@ -117,9 +118,10 @@ const AuthSuccess = () => {
 
         setForm((current) => ({
           ...current,
+          full_name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
           clinic_name: sessionUser.user_metadata?.business_name || '',
+          mobile_number: sessionUser.user_metadata?.phone || '',
           specialization: sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
-          whatsapp_phone_number_id: '',
         }));
         setNeedsOnboarding(true);
         setLoading(false);
@@ -137,16 +139,22 @@ const AuthSuccess = () => {
     event.preventDefault();
     setMessage('');
 
+    const mobileDigits = String(form.mobile_number || '').replace(/\D/g, '').slice(-10);
+
+    if (!form.full_name.trim()) {
+      setMessage('Full name is required.');
+      return;
+    }
     if (!form.clinic_name.trim()) {
       setMessage('Clinic name is required.');
       return;
     }
-    if (!form.specialization.trim()) {
-      setMessage('Specialization is required.');
+    if (mobileDigits.length !== 10) {
+      setMessage('Enter a valid 10-digit mobile number connected to WhatsApp.');
       return;
     }
-    if (!form.whatsapp_phone_number_id.trim()) {
-      setMessage('Active Meta WhatsApp Phone Number ID is required.');
+    if (!form.specialization.trim()) {
+      setMessage('Specialization is required.');
       return;
     }
 
@@ -154,9 +162,10 @@ const AuthSuccess = () => {
     try {
       await api.post('/profile/onboarding', {
         userId: user.id,
+        full_name: form.full_name.trim(),
         clinic_name: form.clinic_name.trim(),
+        mobile_number: mobileDigits,
         specialization: form.specialization,
-        whatsapp_phone_number_id: form.whatsapp_phone_number_id.trim(),
       });
       navigate('/dashboard', { replace: true });
     } catch (error) {
@@ -168,24 +177,34 @@ const AuthSuccess = () => {
 
   if (loading && !needsOnboarding) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-orange-50 to-white px-4">
-        <Loader2 size={48} className="mx-auto mb-4 animate-spin text-[#FF6B00]" />
-        <h2 className="mb-2 text-2xl font-bold text-gray-800">Logging you in...</h2>
-        <p className="text-center text-gray-600">Please wait while we complete your Google sign-in.</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
+        <div className="flex flex-col items-center justify-center gap-4 overflow-visible px-8 pr-10 text-center">
+          <div className="flex items-center justify-center gap-3 overflow-visible pr-2">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-lg font-black text-white shadow-lg shadow-orange-200">
+              Y
+            </div>
+            <span className="whitespace-nowrap pr-1 text-2xl font-black tracking-normal text-slate-950">
+              YogiDesk
+            </span>
+          </div>
+          <div className="hidden" data-lottie-placeholder="premium-healthcare-loader" />
+          <Loader2 size={42} className="animate-spin text-[#FF6B00]" />
+          <p className="text-center text-sm font-semibold text-slate-500">Securing your Google sign-in...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950/95 px-4 py-10 font-sans">
-      <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white p-6 shadow-2xl sm:p-8">
-        <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+    <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,107,0,0.12),transparent_34%),#fff7ed] px-4 py-10 font-sans">
+      <div className="w-full max-w-xl rounded-3xl border border-orange-100 bg-white p-6 shadow-2xl shadow-orange-100/70 sm:p-8">
+        <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
           <ShieldCheck size={28} />
         </div>
-        <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-500">Google Account Setup</p>
-        <h1 className="mt-2 text-2xl font-black text-slate-900">Complete Your Clinic Profile</h1>
+        <p className="text-xs font-black uppercase tracking-[0.24em] text-orange-500">YogiDesk Clinic Setup</p>
+        <h1 className="mt-2 text-3xl font-black text-slate-950">Complete Your Doctor Profile</h1>
         <p className="mt-2 text-sm font-medium leading-6 text-slate-500">
-          We verified {displayEmail}. Add the required clinic details before entering your dashboard.
+          We verified {displayEmail}. Add your clinic identity before entering the operations dashboard.
         </p>
 
         {message && (
@@ -196,40 +215,54 @@ const AuthSuccess = () => {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div className="relative">
-            <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
-              value={form.clinic_name}
-              onChange={(event) => setForm((current) => ({ ...current, clinic_name: event.target.value }))}
-              placeholder="Clinic Name"
-              className="w-full rounded-2xl border border-slate-200 py-3 pl-12 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
+              value={form.full_name}
+              onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
+              placeholder="Full Name"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
             />
           </div>
 
           <div className="relative">
-            <BriefcaseMedical className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <select
-              value={form.specialization}
-              onChange={(event) => setForm((current) => ({ ...current, specialization: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-12 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
-            >
-              {specializations.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
+            <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input
+              value={form.clinic_name}
+              onChange={(event) => setForm((current) => ({ ...current, clinic_name: event.target.value }))}
+              placeholder="Clinic/Hospital Name"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+            />
           </div>
 
           <div className="relative">
             <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
-              value={form.whatsapp_phone_number_id}
-              onChange={(event) => setForm((current) => ({ ...current, whatsapp_phone_number_id: event.target.value }))}
-              placeholder="Active Meta WhatsApp Phone Number ID"
-              className="w-full rounded-2xl border border-slate-200 py-3 pl-12 pr-4 text-sm font-semibold outline-none focus:border-orange-400"
+              type="tel"
+              inputMode="numeric"
+              maxLength="10"
+              value={form.mobile_number}
+              onChange={(event) => setForm((current) => ({ ...current, mobile_number: event.target.value.replace(/\D/g, '').slice(0, 10) }))}
+              placeholder="Mobile Number linked with WhatsApp"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
             />
+          </div>
+
+          <div className="relative">
+            <Stethoscope className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <select
+              value={form.specialization}
+              onChange={(event) => setForm((current) => ({ ...current, specialization: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-4 text-sm font-bold text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-100"
+            >
+              <option value="" disabled>Select Medical Specialization</option>
+              {specializations.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
           </div>
 
           <button
             type="submit"
             disabled={saving}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-200 transition hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
           >
             {saving && <Loader2 size={18} className="animate-spin" />}
             Save Profile & Continue

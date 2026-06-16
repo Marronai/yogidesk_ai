@@ -4201,22 +4201,27 @@ app.post('/api/profile/onboarding', async (req, res) => {
         const userId = sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
 
+        const fullName = sanitizePlainText(req.body?.full_name || req.body?.fullName || req.body?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name, 120);
         const clinicName = sanitizePlainText(req.body?.clinic_name || req.body?.clinicName, 120);
         const specialization = normalizeSpecialization(req.body?.specialization);
-        const phoneNumberId = sanitizePlainText(req.body?.whatsapp_phone_number_id || req.body?.phoneNumberId, 80);
+        const mobileNumber = phoneDigitsOnly(req.body?.mobile_number || req.body?.mobileNumber || req.body?.phone || req.body?.phone_number).slice(-10);
 
+        if (!fullName) return res.status(400).json({ success: false, message: 'Full name is required.' });
         if (!clinicName) return res.status(400).json({ success: false, message: 'Clinic name is required.' });
         if (!specialization) return res.status(400).json({ success: false, message: 'Specialization is required.' });
-        if (!phoneNumberId) return res.status(400).json({ success: false, message: 'Meta WhatsApp Phone Number ID is required.' });
+        if (mobileNumber.length !== 10) return res.status(400).json({ success: false, message: 'Valid WhatsApp mobile number is required.' });
 
         const payload = {
             id: userId,
             email: sessionUser.email || null,
-            name: sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || clinicName,
+            name: fullName,
             clinic_name: clinicName,
             specialization,
             business_category: specialization,
             clinic_category: specialization,
+            phone: mobileNumber,
+            phone_number: mobileNumber,
+            mobile: mobileNumber,
             subscription_tier: 'growth',
             current_plan: 'growth',
             plan_tier: 'growth',
@@ -4224,8 +4229,6 @@ app.post('/api/profile/onboarding', async (req, res) => {
             ai_message_balance: 500,
             ai_token_balance: 500,
             plan_limits: getPlanLimits('GROWTH'),
-            whatsapp_phone_number_id: phoneNumberId,
-            meta_phone_number_id: phoneNumberId,
             updated_at: new Date().toISOString()
         };
 

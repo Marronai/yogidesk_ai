@@ -200,6 +200,9 @@ const Settings = () => {
   const [metaValidationError, setMetaValidationError] = useState('');
   const [connectionAnimation, setConnectionAnimation] = useState(null);
   const [toast, setToast] = useState(null);
+  const [accountAuthUser, setAccountAuthUser] = useState(null);
+  const [passwordSetup, setPasswordSetup] = useState({ password: '', confirmPassword: '' });
+  const [savingPassword, setSavingPassword] = useState(false);
   const [formData, setFormData] = useState(emptyForm);
   const [knowledgeBaseForm, setKnowledgeBaseForm] = useState(emptyKnowledgeBaseForm);
   const [quickReplyManagerOpen, setQuickReplyManagerOpen] = useState(false);
@@ -210,7 +213,7 @@ const Settings = () => {
   const [quickReplyError, setQuickReplyError] = useState('');
   const [automationConfig, setAutomationConfig] = useState(emptyAutomationConfig);
   const [automationError, setAutomationError] = useState('');
-  const { userProfile, loadUserProfile, isMetaReviewSession } = useAuth();
+  const { user: authContextUser, userProfile, loadUserProfile, isMetaReviewSession } = useAuth();
   const lastSavedMetaRef = useRef(null);
   const lastHydratedMetaRef = useRef('');
   const hydratingMetaRef = useRef(false);
@@ -222,6 +225,13 @@ const Settings = () => {
     { id: 'quick_replies', label: 'Quick Replies' },
     !isMetaReviewSession && { id: 'smart_automation', label: 'Smart Automation', isNew: true },
   ].filter(Boolean);
+  const activeAuthUser = accountAuthUser || authContextUser;
+  const accountProviders = [
+    ...(Array.isArray(activeAuthUser?.app_metadata?.providers) ? activeAuthUser.app_metadata.providers : []),
+    activeAuthUser?.app_metadata?.provider,
+    ...(Array.isArray(activeAuthUser?.identities) ? activeAuthUser.identities.map((identity) => identity.provider) : []),
+  ].filter(Boolean).map((provider) => String(provider).toLowerCase());
+  const showPasswordSetup = accountProviders.includes('google') && !accountProviders.includes('email');
 
   const isNumericMetaId = (value) => /^\d+$/.test(String(value || '').trim());
 
@@ -251,6 +261,7 @@ const Settings = () => {
     if (error && !storedAccount.userId) throw error;
 
     const authUser = data?.user || null;
+    if (authUser?.id) setAccountAuthUser(authUser);
     const userId = authUser?.id || storedAccount.userId;
     if (!userId) throw new Error('Unable to identify the current account.');
 
@@ -613,6 +624,31 @@ const Settings = () => {
     }
   };
 
+  const handleSetAccountPassword = async () => {
+    const password = passwordSetup.password;
+    if (password.length < 8) {
+      showToast('error', 'Password must be at least 8 characters.');
+      return;
+    }
+    if (password !== passwordSetup.confirmPassword) {
+      showToast('error', 'Confirm password does not match.');
+      return;
+    }
+
+    setSavingPassword(true);
+    try {
+      const { data, error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      if (data?.user) setAccountAuthUser(data.user);
+      setPasswordSetup({ password: '', confirmPassword: '' });
+      showToast('success', 'Account password set successfully. You can now login with email and password.');
+    } catch (error) {
+      showToast('error', error.message || 'Unable to set account password.');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
   const handleSaveConnection = async (event) => {
     event.preventDefault();
     if (isConfigured) {
@@ -819,6 +855,74 @@ const Settings = () => {
               </div>
             </div>
           </section>
+
+          {showPasswordSetup && (
+            <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm shadow-orange-100/70 sm:p-8">
+              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+                    <Lock size={22} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black text-slate-950">Set Account Password</h2>
+                    <p className="mt-1 text-sm font-medium text-slate-500">
+                      Your account was created with Google. Add a password to login with email in the future.
+                    </p>
+                  </div>
+                </div>
+                <span className="inline-flex w-fit items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-black uppercase tracking-widest text-orange-700">
+                  Google account
+                </span>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">New Password</label>
+                  <div className="relative">
+                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input
+                      type="password"
+                      value={passwordSetup.password}
+                      onChange={(event) => setPasswordSetup((current) => ({ ...current, password: event.target.value }))}
+                      placeholder="Minimum 8 characters"
+                      autoComplete="new-password"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">Confirm Password</label>
+                  <div className="relative">
+                    <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input
+                      type="password"
+                      value={passwordSetup.confirmPassword}
+                      onChange={(event) => setPasswordSetup((current) => ({ ...current, confirmPassword: event.target.value }))}
+                      placeholder="Re-enter password"
+                      autoComplete="new-password"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm font-semibold text-slate-500">
+                  Google login will continue working after this password is added.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSetAccountPassword}
+                  disabled={savingPassword || loadingProfile}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-slate-200 transition hover:bg-slate-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                >
+                  {savingPassword ? <Loader2 className="animate-spin" size={18} /> : <Lock size={18} />}
+                  {savingPassword ? 'Setting...' : 'Set Password'}
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
