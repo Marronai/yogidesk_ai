@@ -9,6 +9,7 @@ import { clearStoredAuthSession, persistSupabaseSession } from '../utils/authSes
 import { useWallet } from '../context/WalletContext';
 import { useAuth } from '../context/AuthContext';
 import api, { API_URL } from '../utils/api';
+import AuthLoadingScreen from '../components/AuthLoadingScreen';
 
 const MotionDiv = motion.div;
 const MotionForm = motion.form;
@@ -319,6 +320,7 @@ const Login = () => {
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col overflow-x-hidden overflow-y-auto bg-[#05070b] font-sans md:flex-row lg:overflow-hidden">
+      {loading && <AuthLoadingScreen message={step === 'otp' ? 'Verifying your secure login code...' : 'Securing your doctor workspace...'} />}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,107,0,0.18)_0%,transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_16%,rgba(37,99,235,0.14),transparent_30%),linear-gradient(135deg,rgba(8,16,31,0.98),rgba(3,6,12,0.99)_54%,rgba(5,7,11,1))]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(148,163,184,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.2)_1px,transparent_1px)] [background-size:44px_44px]" />

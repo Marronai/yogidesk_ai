@@ -21,6 +21,7 @@
     "framer-motion": "^12.23.26",
     "javascript-obfuscator": "^5.4.1",
     "jwt-decode": "^4.0.0",
+    "lottie-react": "^2.4.1",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

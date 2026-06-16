@@ -10,6 +10,7 @@ import { getOAuthRedirectUrl, handleGoogleSignIn, supabase } from '../config/sup
 // ⭐ Supabase Client Import (Aapne jo file banayi thi)
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
+import AuthLoadingScreen from '../components/AuthLoadingScreen';
 
 const getMissingColumnName = (error) => {
   const message = String(error?.message || error?.details || '');
@@ -371,6 +372,11 @@ const SignUp = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row w-full bg-white font-sans overflow-hidden">
+      {loading && (
+        <AuthLoadingScreen
+          message={step === 3 ? 'Verifying your clinic signup code...' : 'Preparing your YogiDesk clinic workspace...'}
+        />
+      )}
       
       {/* LEFT SIDE: BRANDING */}
       <div className="hidden lg:flex w-1/2 bg-slate-900 relative justify-center items-center overflow-hidden p-12">

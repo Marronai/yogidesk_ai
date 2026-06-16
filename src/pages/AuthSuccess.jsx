@@ -5,6 +5,7 @@ import { supabase } from '../config/supabaseClient';
 import { persistSupabaseSession } from '../utils/authSession';
 import api from '../utils/api';
 import { isJwtSegmentToken } from '../utils/tokenGuards';
+import AuthLoadingScreen from '../components/AuthLoadingScreen';
 
 const specializations = [
   'General Physician',
@@ -198,27 +199,12 @@ const AuthSuccess = () => {
   };
 
   if (loading && !needsOnboarding) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-white px-4">
-        <div className="flex flex-col items-center justify-center gap-4 overflow-visible px-8 pr-10 text-center">
-          <div className="flex items-center justify-center gap-3 overflow-visible pr-2">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-600 text-lg font-black text-white shadow-lg shadow-orange-200">
-              Y
-            </div>
-            <span className="whitespace-nowrap pr-1 text-2xl font-black tracking-normal text-slate-950">
-              YogiDesk
-            </span>
-          </div>
-          <div className="hidden" data-lottie-placeholder="premium-healthcare-loader" />
-          <Loader2 size={42} className="animate-spin text-[#FF6B00]" />
-          <p className="text-center text-sm font-semibold text-slate-500">Securing your Google sign-in...</p>
-        </div>
-      </div>
-    );
+    return <AuthLoadingScreen message="Securing your Google sign-in..." />;
   }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,107,0,0.12),transparent_34%),#fff7ed] px-4 py-10 font-sans">
+      {saving && <AuthLoadingScreen message="Saving your clinic profile..." />}
       <div className="w-full max-w-xl rounded-3xl border border-orange-100 bg-white p-6 shadow-2xl shadow-orange-100/70 sm:p-8">
         <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-orange-600 ring-1 ring-orange-100">
           <ShieldCheck size={28} />
