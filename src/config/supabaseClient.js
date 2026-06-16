@@ -5,11 +5,15 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-const getSiteOrigin = () => (
-  import.meta.env.VITE_SITE_URL ||
-  import.meta.env.VITE_PUBLIC_SITE_URL ||
-  window.location.origin
-).replace(/\/+$/, '');
+const getSiteOrigin = () => {
+  const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  return (
+    browserOrigin ||
+    import.meta.env.VITE_SITE_URL ||
+    import.meta.env.VITE_PUBLIC_SITE_URL ||
+    ''
+  ).replace(/\/+$/, '');
+};
 
 export const getOAuthRedirectUrl = (path = '/auth-success') => `${getSiteOrigin()}${path.startsWith('/') ? path : `/${path}`}`;
 

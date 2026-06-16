@@ -4,7 +4,7 @@ import { Mail, Lock, ArrowRight, Loader2, Star, Eye, EyeOff, CheckCircle2, Shiel
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ⭐ Supabase Client Import
-import { supabase } from '../config/supabaseClient';
+import { getOAuthRedirectUrl, handleGoogleSignIn, supabase } from '../config/supabaseClient';
 import { clearStoredAuthSession, persistSupabaseSession } from '../utils/authSession';
 import { useWallet } from '../context/WalletContext';
 import { useAuth } from '../context/AuthContext';
@@ -145,8 +145,14 @@ const Login = () => {
 
   // 🌍 GOOGLE LOGIN HANDLER (Supabase Native Auth)
   const handleGoogleLogin = async () => {
-    setLoading(true);
-    window.location.href = 'https://yogidesk-ai.com/api/auth/google';
+    try {
+      setLoading(true);
+      const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success'));
+      if (error) throw error;
+    } catch (error) {
+      alert(error.message || 'Google login failed. Please try again.');
+      setLoading(false);
+    }
   };
 
   // ✅ ENHANCED SUCCESS HANDLER (Saves session with fingerprint and persistence config)
@@ -370,7 +376,7 @@ const Login = () => {
 
       {/* 2. RIGHT SIDE: FORM SECTION */}
       <div className="relative flex min-h-dvh w-full flex-col items-center justify-center p-6 md:order-2 md:w-1/2 md:p-8">
-        <div className="absolute inset-0 bg-white md:bg-white/95"></div>
+        <div className="absolute inset-0 bg-white"></div>
         <div className="absolute left-[-10%] top-[-10%] h-[40%] w-[40%] rounded-full bg-orange-500/10 blur-[120px] lg:hidden"></div>
 
         <MotionDiv initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-md z-10">
