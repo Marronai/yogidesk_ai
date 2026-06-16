@@ -31,6 +31,7 @@ const resolveApiUrl = () => {
 
 const API_URL = resolveApiUrl();
 const API_BASE_URL = `${API_URL}/api`;
+let sessionExpiryRedirecting = false;
 
 // Create axios instance with default config
 const api = axios.create({
@@ -43,6 +44,24 @@ const api = axios.create({
 
 const readStoredSessionToken = () => {
   return readTokenFromStorageValue(localStorage.getItem('sb-access-token'));
+};
+
+const clearStaleSupabaseSession = () => {
+  localStorage.removeItem('sb-access-token');
+  sessionStorage.removeItem('sb-access-token');
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
+  localStorage.removeItem('user_id');
+  sessionStorage.removeItem('user_id');
+  localStorage.removeItem('user_email');
+  sessionStorage.removeItem('user_email');
+
+  Object.keys(localStorage).forEach((key) => {
+    if (key.startsWith('sb-') && key.endsWith('-auth-token')) localStorage.removeItem(key);
+  });
+  Object.keys(sessionStorage).forEach((key) => {
+    if (key.startsWith('sb-') && key.endsWith('-auth-token')) sessionStorage.removeItem(key);
+  });
 };
 
 // Add request interceptor to include auth token
@@ -79,12 +98,19 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = Number(error.response?.status);
+    const payload = error.response?.data || {};
+    const serializedPayload = JSON.stringify(payload).toUpperCase();
+    const errorCode = String(payload.code || payload.error_code || '').toUpperCase();
+    const isSessionExpired = status === 401 || errorCode === 'SESSION_EXPIRED' || serializedPayload.includes('SESSION_EXPIRED');
     const requestUrl = String(error.config?.url || '');
     const isSessionValidationRequest = requestUrl.includes('/auth/check-session');
-    if ((status === 401 || status === 403) && isSessionValidationRequest) {
-      console.log("Session expired or invalid");
-      localStorage.clear();
-      alert("You have been logged out because you logged in on another device.");
+    if (isSessionExpired && !sessionExpiryRedirecting && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      sessionExpiryRedirecting = true;
+      clearStaleSupabaseSession();
+      window.location.href = '/login';
+    } else if ((status === 401 || status === 403) && isSessionValidationRequest && !sessionExpiryRedirecting) {
+      sessionExpiryRedirecting = true;
+      clearStaleSupabaseSession();
       window.location.href = '/login';
     }
     return Promise.reject(error);

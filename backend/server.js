@@ -446,14 +446,21 @@ const getSupabaseSessionUser = async (req) => {
     const client = supabaseAdmin || supabase;
     if (!client?.auth?.getUser) return null;
 
-    const { data, error } = await client.auth.getUser(token);
-    if (error || !data?.user?.id) {
-        console.error('Settings session validation failed:', error?.message || 'missing Supabase user');
+    try {
+        const { data, error } = await client.auth.getUser(token);
+        if (error || !data?.user?.id) {
+            console.warn(`[YogiDesk Auth] Session expired or invalid: ${error?.message || 'missing Supabase user'}`);
+            return null;
+        }
+
+        return data.user;
+    } catch (error) {
+        console.warn(`[YogiDesk Auth] Session validation failed: ${error?.message || 'unknown auth error'}`);
         return null;
     }
-
-    return data.user;
 };
+
+const sendSessionExpired = (res) => res.status(401).json({ error: 'unauthorized', code: 'SESSION_EXPIRED' });
 
 const hasCompleteMetaCredentials = (row = {}) => Boolean(
     String(row.meta_phone_number_id || row.whatsapp_phone_number_id || '').trim() &&
@@ -598,13 +605,13 @@ const attachDoctorSession = async (req, res, next) => {
     try {
         const sessionUser = await getSupabaseSessionUser(req);
         if (!sessionUser?.id || !isUuid(sessionUser.id)) {
-            return res.status(401).json({ success: false, message: 'Unauthorized: verified Supabase session required.' });
+            return sendSessionExpired(res);
         }
         req.user = { ...(req.user || {}), ...sessionUser, id: sessionUser.id };
         return next();
     } catch (error) {
-        console.error('Doctor session gate failed:', error.message || error);
-        return res.status(401).json({ success: false, message: 'Unauthorized: verified Supabase session required.' });
+        console.warn(`[YogiDesk Auth] Doctor session gate rejected: ${error.message || error}`);
+        return sendSessionExpired(res);
     }
 };
 
