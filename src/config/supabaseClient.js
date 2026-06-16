@@ -8,10 +8,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 const getSiteOrigin = () => {
   const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
-    browserOrigin ||
     import.meta.env.VITE_SITE_URL ||
     import.meta.env.VITE_PUBLIC_SITE_URL ||
-    ''
+    browserOrigin ||
+    'https://yogidesk-ai.com'
   ).replace(/\/+$/, '');
 };
 
