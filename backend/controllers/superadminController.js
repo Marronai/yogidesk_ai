@@ -549,21 +549,24 @@ exports.adjustWallet = async (req, res) => {
     }
     if (upsertError) throw upsertError;
 
-    await db.from('wallet_transactions').insert([{
-      user_id: userId,
-      amount: Math.abs(amount),
-      transaction_type: amount > 0 ? 'CREDIT' : 'DEBIT',
-      description: reason,
-      metadata: {
-        source: 'superadmin_manual_adjustment',
-        adjusted_by: req.superadmin?.id || null,
-        balance_before: currentBalance,
-        balance_after: nextBalance,
-      },
-      created_at: nowIso(),
-    }]).catch((error) => {
+    try {
+      const auditResult = await db.from('wallet_transactions').insert([{
+        user_id: userId,
+        amount: Math.abs(amount),
+        transaction_type: amount > 0 ? 'CREDIT' : 'DEBIT',
+        description: reason,
+        metadata: {
+          source: 'superadmin_manual_adjustment',
+          adjusted_by: req.superadmin?.id || null,
+          balance_before: currentBalance,
+          balance_after: nextBalance,
+        },
+        created_at: nowIso(),
+      }]);
+      if (auditResult?.error) throw auditResult.error;
+    } catch (error) {
       console.warn('Superadmin wallet audit insert skipped:', error.message || error);
-    });
+    }
 
     return res.status(200).json({ success: true, data: { user_id: userId, balance: nextBalance } });
   } catch (error) {
@@ -623,21 +626,24 @@ exports.adjustAiTokenPack = async (req, res) => {
     }
     if (profileUpdate.error && !isMissing(profileUpdate.error)) throw profileUpdate.error;
 
-    await db.from('wallet_transactions').insert([{
-      user_id: userId,
-      amount: Math.abs(delta),
-      transaction_type: delta > 0 ? 'AI_TOKEN_CREDIT' : 'AI_TOKEN_DEBIT',
-      description: reason,
-      metadata: {
-        source: 'superadmin_ai_token_pack_adjustment',
-        adjusted_by: req.superadmin?.id || null,
-        balance_before: currentBalance,
-        balance_after: nextBalance,
-      },
-      created_at: nowIso(),
-    }]).catch((error) => {
+    try {
+      const auditResult = await db.from('wallet_transactions').insert([{
+        user_id: userId,
+        amount: Math.abs(delta),
+        transaction_type: delta > 0 ? 'AI_TOKEN_CREDIT' : 'AI_TOKEN_DEBIT',
+        description: reason,
+        metadata: {
+          source: 'superadmin_ai_token_pack_adjustment',
+          adjusted_by: req.superadmin?.id || null,
+          balance_before: currentBalance,
+          balance_after: nextBalance,
+        },
+        created_at: nowIso(),
+      }]);
+      if (auditResult?.error) throw auditResult.error;
+    } catch (error) {
       console.warn('Superadmin AI token audit insert skipped:', error.message || error);
-    });
+    }
 
     return res.status(200).json({ success: true, data: { user_id: userId, aiMessageBalance: nextBalance } });
   } catch (error) {

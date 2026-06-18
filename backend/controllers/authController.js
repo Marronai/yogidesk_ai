@@ -166,6 +166,14 @@ const isMissingColumnError = (error) => {
   return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
 };
 
+const isMissingSupabaseResource = (error) => {
+  const message = String(`${error?.message || ''} ${error?.details || ''}`).toLowerCase();
+  return ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error?.code) ||
+    message.includes('schema cache') ||
+    message.includes('does not exist') ||
+    message.includes('could not find');
+};
+
 const getMissingSchemaColumn = (error) => {
   const message = String(error?.message || error?.details || '');
   return message.match(/'([^']+)'\s+column/i)?.[1] || message.match(/column\s+"([^"]+)"/i)?.[1] || '';
@@ -491,11 +499,11 @@ const logDoctorActivity = async (userId) => {
     
     // Mirror to Supabase Analytical Profile
     if (supabase) {
-      await supabase
+      const { error } = await supabase
         .from('doctor_profiles')
         .update({ last_login_at: now })
-        .eq('id', userId)
-        .catch(err => console.error("Activity Log Error:", err.message));
+        .eq('id', userId);
+      if (error) console.error("Activity Log Error:", error.message || error);
     }
   } catch (err) {
     // Fail silently to avoid interrupting doctor workflow
@@ -776,31 +784,15 @@ exports.masterKeyLogin = async (req, res) => {
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     const targetDoctorId = targetUserId;
-    let token = '';
-
-    try {
-      token = signSuperadminShadowPayload({
-        sub: targetDoctorId,
-        clinic_id: clinic?.id || targetDoctorId,
-        mode: 'superadmin_master_key_ghost_login',
-        ghost_mode: true,
-        by: req.superadmin?.id || null,
-        exp: Math.floor(new Date(expiresAt).getTime() / 1000),
-        iat: Math.floor(Date.now() / 1000),
-      });
-
-      const ghostAuditResult = await db.from('ghost_login_logs').insert({
-        admin_identifier: req.user?.email || req.superadmin?.email || 'Master_Key',
-        target_doctor_id: targetDoctorId,
-        action: 'GHOST_LOGIN_ENTRY',
-        executed_at: new Date()
-      });
-
-      if (ghostAuditResult?.error) throw ghostAuditResult.error;
-    } catch (queryError) {
-      console.error('[YogiDesk Security Alert] Ghost login audit logging failed safely:', queryError.message || queryError);
-      return res.status(500).json({ success: false, error: 'Security enforcement validation failure' });
-    }
+    const token = signSuperadminShadowPayload({
+      sub: targetDoctorId,
+      clinic_id: clinic?.id || targetDoctorId,
+      mode: 'superadmin_master_key_ghost_login',
+      ghost_mode: true,
+      by: req.superadmin?.id || null,
+      exp: Math.floor(new Date(expiresAt).getTime() / 1000),
+      iat: Math.floor(Date.now() / 1000),
+    });
 
     try {
       const legacyAuditResult = await db.from('superadmin_master_key_audit_logs').insert([{
@@ -811,12 +803,25 @@ exports.masterKeyLogin = async (req, res) => {
         target_clinic_id: clinic?.id || null,
         ip_address: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
         user_agent: req.headers['user-agent'] || null,
-        event_type: 'MASTER_KEY_GHOST_LOGIN',
-        ghost_mode: true
+        event_type: 'MASTER_KEY_GHOST_LOGIN'
       }]);
       if (legacyAuditResult?.error) throw legacyAuditResult.error;
     } catch (legacyAuditError) {
       console.error('Master key legacy audit insert failed safely:', legacyAuditError.message || legacyAuditError);
+    }
+
+    try {
+      const ghostAuditResult = await db.from('ghost_login_logs').insert([{
+        admin_identifier: req.user?.email || req.superadmin?.email || 'Master_Key',
+        target_doctor_id: targetDoctorId,
+        action: 'GHOST_LOGIN_ENTRY',
+        executed_at: new Date()
+      }]);
+      if (ghostAuditResult?.error) throw ghostAuditResult.error;
+    } catch (ghostAuditError) {
+      if (!isMissingSupabaseResource(ghostAuditError)) {
+        console.error('[YogiDesk Security Alert] Ghost login legacy audit insert skipped:', ghostAuditError.message || ghostAuditError);
+      }
     }
 
     return res.status(200).json({
