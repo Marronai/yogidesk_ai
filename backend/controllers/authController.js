@@ -802,19 +802,21 @@ exports.masterKeyLogin = async (req, res) => {
       return res.status(500).json({ success: false, error: 'Security enforcement validation failure' });
     }
 
-    const legacyAuditResult = await db.from('superadmin_master_key_audit_logs').insert([{
-      actor_user_id: req.superadmin?.id || null,
-      actor_email: req.superadmin?.email || null,
-      target_user_id: targetDoctorId,
-      target_email: targetEmail,
-      target_clinic_id: clinic?.id || null,
-      ip_address: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
-      user_agent: req.headers['user-agent'] || null,
-      event_type: 'MASTER_KEY_GHOST_LOGIN',
-      ghost_mode: true
-    }]);
-    if (legacyAuditResult?.error) {
-      console.error('Master key audit insert failed safely:', legacyAuditResult.error.message || legacyAuditResult.error);
+    try {
+      const legacyAuditResult = await db.from('superadmin_master_key_audit_logs').insert([{
+        actor_user_id: req.superadmin?.id || null,
+        actor_email: req.superadmin?.email || null,
+        target_user_id: targetDoctorId,
+        target_email: targetEmail,
+        target_clinic_id: clinic?.id || null,
+        ip_address: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
+        user_agent: req.headers['user-agent'] || null,
+        event_type: 'MASTER_KEY_GHOST_LOGIN',
+        ghost_mode: true
+      }]);
+      if (legacyAuditResult?.error) throw legacyAuditResult.error;
+    } catch (legacyAuditError) {
+      console.error('Master key legacy audit insert failed safely:', legacyAuditError.message || legacyAuditError);
     }
 
     return res.status(200).json({
