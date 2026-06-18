@@ -71,9 +71,22 @@ const featureBlocks = [
     eyebrow: 'Feature 02',
     title: 'Effortless Patient Data Ingestion & Centralized Medical Contact Directory',
     description:
-      "Eliminate tedious manual record-keeping with YogiDesk's frictionless patient data adder framework, designed to build a structured, actionable healthcare contact database. Doctors, receptionists, and practice managers can ingest patient details into the system using multiple flexible channels. For instant entries between consultations, the quick adder tool allows immediate input, while the robust bulk-upload engine supports native medical CSV and Excel (.xlsx) data sheet imports to migrate thousands of patient profiles effortlessly.",
-    detail:
-      'Once processed, the records populate cleanly into a dynamic, filterable electronic patient directory displayed directly on the screen. This centralized data matrix serves as the launchpad for your entire WhatsApp patient communication strategy. Your authorized clinic team can utilize this verified database to instantly deploy operational notification templates, broadcast automation flows, and critical medical alerts, ensuring a personalized and responsive healthcare experience for every patient.',
+      "Eliminate tedious manual record-keeping with YogiDesk's frictionless patient data adder framework, designed to build a structured, actionable healthcare contact database.",
+    detail: '',
+    points: [
+      {
+        title: 'Flexible Multi-Channel Data Ingestion',
+        body: 'Ingest patient details into the system using multiple flexible channels. For instant entries between consultations, the quick adder tool allows immediate input, while the robust bulk-upload engine supports native medical CSV and Excel (.xlsx) data sheet imports to migrate thousands of patient profiles effortlessly.',
+      },
+      {
+        title: 'Dynamic Centralized Patient Directory',
+        body: 'Populate processed records cleanly into a dynamic, filterable electronic patient directory displayed directly on the screen. This centralized data matrix serves as the ultimate launchpad for your entire WhatsApp patient communication strategy.',
+      },
+      {
+        title: 'Targeted WhatsApp Communication Launchpad',
+        body: 'Empower your authorized clinic team—including doctors, nurses, and desk staff—to utilize this verified database to instantly deploy operational notification templates, broadcast automation flows, and send critical medical alerts, ensuring a personalized and responsive healthcare experience for every patient.',
+      },
+    ],
     imageSrc: '/assets/features/patient-directory.png',
     imageAlt: 'Patient data ingestion and contact directory dashboard',
     imageNote: 'Put image here: public/assets/features/patient-directory.png',
@@ -156,11 +169,11 @@ const ImageSlot = ({ src, alt, note, accent }) => {
     <div className="relative mx-auto w-full max-w-xl">
       <ImageDepth accent={accent} />
       <div className="relative overflow-hidden rounded-[1.75rem] border border-white/20 bg-white p-3 shadow-2xl shadow-slate-950/25">
-        <div className="aspect-[4/3] overflow-hidden rounded-[1.35rem] bg-slate-100">
+        <div className="flex aspect-[16/11] items-center justify-center overflow-hidden rounded-[1.35rem] bg-white sm:aspect-[16/10]">
           <img
             src={src}
             alt={alt}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
             onError={(event) => {
               event.currentTarget.style.display = 'none';
               event.currentTarget.nextElementSibling.style.display = 'flex';
@@ -195,8 +208,8 @@ const FeatureSection = ({ feature }) => {
 
           <div>
             <h2 className="text-3xl font-black leading-tight text-slate-950 sm:text-4xl">{feature.title}</h2>
-            <p className="mt-5 text-base font-medium leading-8 text-slate-600">{feature.description}</p>
-            {feature.detail && <p className="mt-4 text-base font-medium leading-8 text-slate-600">{feature.detail}</p>}
+            <p className="mt-5 text-base font-medium leading-8 text-[#1D1D1B]">{feature.description}</p>
+            {feature.detail && <p className="mt-4 text-base font-medium leading-8 text-[#1D1D1B]">{feature.detail}</p>}
           </div>
 
           {feature.points ? (
@@ -206,7 +219,7 @@ const FeatureSection = ({ feature }) => {
                   <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-slate-950" />
                   <div>
                     <h3 className="text-lg font-extrabold leading-7 text-slate-950">{point.title}</h3>
-                    <p className="mt-1 text-base font-normal leading-8 text-slate-700">{point.body}</p>
+                    <p className="mt-1 text-base font-normal leading-8 text-[#1D1D1B]">{point.body}</p>
                   </div>
                 </li>
               ))}
