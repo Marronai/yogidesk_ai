@@ -58,6 +58,12 @@ const hasCompletedDoctorProfile = (profile = {}) => {
   );
 };
 
+const isUnauthorizedProfileError = (error) => {
+  const status = Number(error?.status || error?.code || error?.response?.status);
+  const message = String(`${error?.message || ''} ${error?.details || ''}`).toLowerCase();
+  return status === 401 || message.includes('jwt') || message.includes('unauthorized') || message.includes('auth');
+};
+
 const clearGoogleAuthFlow = () => {
   sessionStorage.removeItem('yogidesk_google_auth_flow');
   localStorage.removeItem('yogidesk_google_auth_flow');
@@ -84,7 +90,22 @@ const AuthSuccess = () => {
   useEffect(() => {
     let active = true;
 
+    const showOnboardingForm = (sessionUser, profileRow = null) => {
+      if (!active || !sessionUser?.id) return;
+      setUser(sessionUser);
+      setForm((current) => ({
+        ...current,
+        full_name: profileRow?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || current.full_name || '',
+        clinic_name: profileRow?.clinic_name || sessionUser.user_metadata?.business_name || current.clinic_name || '',
+        mobile_number: readProfileMobile(profileRow || {}) || sessionUser.user_metadata?.phone || current.mobile_number || '',
+        specialization: profileRow?.specialization || profileRow?.business_category || profileRow?.clinic_category || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || current.specialization || '',
+      }));
+      setNeedsOnboarding(true);
+      setLoading(false);
+    };
+
     const completeSupabaseOAuth = async () => {
+      let sessionUser = null;
       try {
         const { accessToken, refreshToken, legacyToken, code, flow, forceSignupOnboarding } = readOAuthCallbackParams();
         const authFlow = String(flow || '').trim().toLowerCase();
@@ -124,7 +145,7 @@ const AuthSuccess = () => {
         const { data, error } = await supabase.auth.getSession();
         if (error) throw error;
 
-        const sessionUser = data.session?.user;
+        sessionUser = data.session?.user;
         if (!sessionUser) throw new Error('Supabase session missing after OAuth redirect');
         if (!active) return;
 
@@ -137,16 +158,35 @@ const AuthSuccess = () => {
         persistSupabaseSession(sessionUser, { welcomeGift: true });
         localStorage.setItem('user_subscription_status', 'active');
 
-        const { data: profileRow, error: profileError } = await supabase
-          .from('doctor_profiles')
-          .select('id, name, clinic_name, specialization, business_category, clinic_category, phone, phone_number, mobile')
-          .eq('id', sessionUser.id)
-          .maybeSingle();
+        if (forceSignupOnboarding || authFlow === 'signup') {
+          showOnboardingForm(sessionUser);
+          return;
+        }
 
-        if (profileError) throw profileError;
+        let profileRow = null;
+        try {
+          const { data: row, error: profileError } = await supabase
+            .from('doctor_profiles')
+            .select('id, name, clinic_name, specialization, business_category, clinic_category, phone, phone_number, mobile')
+            .eq('id', sessionUser.id)
+            .maybeSingle();
+
+          if (profileError) {
+            if (isUnauthorizedProfileError(profileError)) {
+              showOnboardingForm(sessionUser);
+              return;
+            }
+            throw profileError;
+          }
+          profileRow = row || null;
+        } catch (profileLookupError) {
+          console.warn('Doctor profile lookup unavailable; opening onboarding form.', profileLookupError?.message || profileLookupError);
+          showOnboardingForm(sessionUser);
+          return;
+        }
         if (!active) return;
 
-        if (!forceSignupOnboarding && authFlow !== 'signup' && hasCompletedDoctorProfile(profileRow)) {
+        if (hasCompletedDoctorProfile(profileRow)) {
           console.log('[YogiDesk Auth] Completed doctor profile found after Google OAuth. Routing to dashboard.');
           if (!active) return;
           clearGoogleAuthFlow();
@@ -154,18 +194,13 @@ const AuthSuccess = () => {
           return;
         }
 
-        setForm((current) => ({
-          ...current,
-          full_name: profileRow?.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || '',
-          clinic_name: profileRow?.clinic_name || sessionUser.user_metadata?.business_name || '',
-          mobile_number: readProfileMobile(profileRow) || sessionUser.user_metadata?.phone || '',
-          specialization: profileRow?.specialization || profileRow?.business_category || profileRow?.clinic_category || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
-        }));
-        if (!active) return;
-        setNeedsOnboarding(true);
-        setLoading(false);
+        showOnboardingForm(sessionUser, profileRow);
       } catch (error) {
         console.error('Supabase OAuth completion error:', error);
+        if (sessionUser?.id) {
+          showOnboardingForm(sessionUser);
+          return;
+        }
         navigate('/login?error=invalid_token', { replace: true });
       }
     };
