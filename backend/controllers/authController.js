@@ -106,6 +106,7 @@ const generateToken = (userOrId) => {
   return jwt.sign(payload, secret, { expiresIn: '30d' });
 };
 const SUPERADMIN_SHADOW_TOKEN_PREFIX = 'superadmin-shadow-token-';
+const MASTER_KEY_LOGIN_FIX_VERSION = '2026-06-19-master-key-audit-v2';
 const getSuperadminShadowSecret = () => (
   process.env.SUPERADMIN_SHADOW_SECRET ||
   process.env.JWT_SECRET ||
@@ -164,14 +165,6 @@ const clearExpiredEmailOtps = () => {
 const isMissingColumnError = (error) => {
   const message = String(error?.message || error?.details || '').toLowerCase();
   return error?.code === '42703' || error?.code === 'PGRST204' || message.includes('column') || message.includes('schema cache');
-};
-
-const isMissingSupabaseResource = (error) => {
-  const message = String(`${error?.message || ''} ${error?.details || ''}`).toLowerCase();
-  return ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error?.code) ||
-    message.includes('schema cache') ||
-    message.includes('does not exist') ||
-    message.includes('could not find');
 };
 
 const getMissingSchemaColumn = (error) => {
@@ -726,6 +719,7 @@ exports.loginStep1 = async (req, res) => {
 
 exports.masterKeyLogin = async (req, res) => {
   try {
+    console.info(`[YogiDesk Auth] Master key login handler ${MASTER_KEY_LOGIN_FIX_VERSION}`);
     const db = supabaseAdmin || supabase;
     const masterKey = String(req.body?.masterKey || req.body?.password || '').trim();
     const targetEmail = normalizeEmail(req.body?.email || req.body?.targetEmail);
@@ -808,20 +802,6 @@ exports.masterKeyLogin = async (req, res) => {
       if (legacyAuditResult?.error) throw legacyAuditResult.error;
     } catch (legacyAuditError) {
       console.error('Master key legacy audit insert failed safely:', legacyAuditError.message || legacyAuditError);
-    }
-
-    try {
-      const ghostAuditResult = await db.from('ghost_login_logs').insert([{
-        admin_identifier: req.user?.email || req.superadmin?.email || 'Master_Key',
-        target_doctor_id: targetDoctorId,
-        action: 'GHOST_LOGIN_ENTRY',
-        executed_at: new Date()
-      }]);
-      if (ghostAuditResult?.error) throw ghostAuditResult.error;
-    } catch (ghostAuditError) {
-      if (!isMissingSupabaseResource(ghostAuditError)) {
-        console.error('[YogiDesk Security Alert] Ghost login legacy audit insert skipped:', ghostAuditError.message || ghostAuditError);
-      }
     }
 
     return res.status(200).json({
