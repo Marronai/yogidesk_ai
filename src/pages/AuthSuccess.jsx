@@ -24,6 +24,10 @@ const readOAuthCallbackParams = () => {
   const searchParams = new URLSearchParams(window.location.search);
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
   const storedFlow = sessionStorage.getItem('yogidesk_google_auth_flow') || localStorage.getItem('yogidesk_google_auth_flow') || '';
+  const signupIntent = (
+    sessionStorage.getItem('yogidesk_google_signup_pending') === 'true' ||
+    localStorage.getItem('yogidesk_google_signup_pending') === 'true'
+  );
 
   return {
     accessToken: searchParams.get('access_token') || hashParams.get('access_token') || '',
@@ -31,6 +35,7 @@ const readOAuthCallbackParams = () => {
     legacyToken: searchParams.get('token') || hashParams.get('token') || '',
     code: searchParams.get('code') || hashParams.get('code') || '',
     flow: searchParams.get('flow') || hashParams.get('flow') || storedFlow,
+    forceSignupOnboarding: signupIntent || searchParams.get('flow') === 'signup' || hashParams.get('flow') === 'signup',
   };
 };
 
@@ -56,6 +61,8 @@ const hasCompletedDoctorProfile = (profile = {}) => {
 const clearGoogleAuthFlow = () => {
   sessionStorage.removeItem('yogidesk_google_auth_flow');
   localStorage.removeItem('yogidesk_google_auth_flow');
+  sessionStorage.removeItem('yogidesk_google_signup_pending');
+  localStorage.removeItem('yogidesk_google_signup_pending');
 };
 
 const AuthSuccess = () => {
@@ -79,7 +86,7 @@ const AuthSuccess = () => {
 
     const completeSupabaseOAuth = async () => {
       try {
-        const { accessToken, refreshToken, legacyToken, code, flow } = readOAuthCallbackParams();
+        const { accessToken, refreshToken, legacyToken, code, flow, forceSignupOnboarding } = readOAuthCallbackParams();
         const authFlow = String(flow || '').trim().toLowerCase();
 
         if (accessToken) {
@@ -139,7 +146,7 @@ const AuthSuccess = () => {
         if (profileError) throw profileError;
         if (!active) return;
 
-        if (authFlow !== 'signup' && hasCompletedDoctorProfile(profileRow)) {
+        if (!forceSignupOnboarding && authFlow !== 'signup' && hasCompletedDoctorProfile(profileRow)) {
           console.log('[YogiDesk Auth] Completed doctor profile found after Google OAuth. Routing to dashboard.');
           if (!active) return;
           clearGoogleAuthFlow();
@@ -212,7 +219,14 @@ const AuthSuccess = () => {
   };
 
   if (loading && !needsOnboarding) {
-    return <AuthLoadingScreen message="Securing your Google sign-in..." />;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white px-4 font-sans">
+        <div className="flex items-center gap-3 rounded-2xl border border-orange-100 bg-orange-50 px-5 py-4 text-sm font-black text-orange-700">
+          <Loader2 size={18} className="animate-spin" />
+          Preparing clinic setup
+        </div>
+      </div>
+    );
   }
 
   return (

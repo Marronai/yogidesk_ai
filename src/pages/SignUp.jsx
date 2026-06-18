@@ -85,6 +85,14 @@ const SignUp = () => {
     businessCategory: ''
   });
 
+  useEffect(() => {
+    if (!showDoctorSplash) return undefined;
+    const timer = window.setTimeout(() => {
+      navigate('/dashboard', { replace: true });
+    }, 7000);
+    return () => window.clearTimeout(timer);
+  }, [navigate, showDoctorSplash]);
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -282,6 +290,8 @@ const SignUp = () => {
       setLoading(true);
       sessionStorage.setItem('yogidesk_google_auth_flow', 'signup');
       localStorage.setItem('yogidesk_google_auth_flow', 'signup');
+      sessionStorage.setItem('yogidesk_google_signup_pending', 'true');
+      localStorage.setItem('yogidesk_google_signup_pending', 'true');
       const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=signup'));
       if (error) throw error;
     } catch (err) {

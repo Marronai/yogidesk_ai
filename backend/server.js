@@ -439,6 +439,14 @@ const parseSuperadminShadowToken = (token) => {
 
 let lastExpiredSessionLogAt = 0;
 const logExpiredSessionDebug = (reason = 'invalid Supabase session') => {
+    const normalizedReason = String(reason || '').toLowerCase();
+    const isRoutineMissingSession =
+        normalizedReason.includes('auth session missing') ||
+        normalizedReason.includes('jwt expired') ||
+        normalizedReason.includes('invalid jwt') ||
+        normalizedReason.includes('missing supabase user');
+    if (isRoutineMissingSession && process.env.AUTH_SESSION_DEBUG !== 'true') return;
+
     const now = Date.now();
     const intervalMs = Number(process.env.AUTH_SESSION_LOG_THROTTLE_MS || 60000);
     if (process.env.AUTH_SESSION_DEBUG !== 'true' && now - lastExpiredSessionLogAt < intervalMs) return;

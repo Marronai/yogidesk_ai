@@ -14,6 +14,7 @@ import AuthLoadingScreen from '../components/AuthLoadingScreen';
 const MotionDiv = motion.div;
 const MotionForm = motion.form;
 const META_REVIEWER_EMAIL = 'meta-tester@yogidesk-ai.com';
+const DOCTOR_SPLASH_MAX_MS = 7000;
 
 const persistFreshAuthTokens = (authSession) => {
   const accessToken = authSession?.access_token || '';
@@ -72,6 +73,11 @@ const Login = () => {
 
   useEffect(() => {
     if (!authLoading && !loading && isAuthenticated && step === 'login' && !pendingCredentials) {
+      if (localStorage.getItem('yogidesk_google_signup_pending') === 'true' || sessionStorage.getItem('yogidesk_google_signup_pending') === 'true') {
+        navigate('/auth-success?flow=signup', { replace: true });
+        return undefined;
+      }
+
       navigate(localStorage.getItem('user_role') === 'STAFF' ? '/staff/dashboard' : '/dashboard', { replace: true });
       return undefined;
     }
@@ -108,6 +114,14 @@ const Login = () => {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [countdown]);
+
+  useEffect(() => {
+    if (!showDoctorSplash) return undefined;
+    const timer = window.setTimeout(() => {
+      navigate(localStorage.getItem('user_role') === 'STAFF' ? '/staff/dashboard' : '/dashboard', { replace: true });
+    }, DOCTOR_SPLASH_MAX_MS);
+    return () => window.clearTimeout(timer);
+  }, [navigate, showDoctorSplash]);
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -180,6 +194,8 @@ const Login = () => {
       setLoading(true);
       sessionStorage.setItem('yogidesk_google_auth_flow', 'login');
       localStorage.setItem('yogidesk_google_auth_flow', 'login');
+      sessionStorage.removeItem('yogidesk_google_signup_pending');
+      localStorage.removeItem('yogidesk_google_signup_pending');
       const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=login'));
       if (error) throw error;
     } catch (error) {
