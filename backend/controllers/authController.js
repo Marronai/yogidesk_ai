@@ -775,27 +775,47 @@ exports.masterKeyLogin = async (req, res) => {
     }
 
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    const token = signSuperadminShadowPayload({
-      sub: targetUserId,
-      clinic_id: clinic?.id || targetUserId,
-      mode: 'superadmin_master_key_ghost_login',
-      by: req.superadmin?.id || null,
-      exp: Math.floor(new Date(expiresAt).getTime() / 1000),
-      iat: Math.floor(Date.now() / 1000),
-    });
+    const targetDoctorId = targetUserId;
+    let token = '';
 
-    await db.from('superadmin_master_key_audit_logs').insert([{
+    try {
+      token = signSuperadminShadowPayload({
+        sub: targetDoctorId,
+        clinic_id: clinic?.id || targetDoctorId,
+        mode: 'superadmin_master_key_ghost_login',
+        ghost_mode: true,
+        by: req.superadmin?.id || null,
+        exp: Math.floor(new Date(expiresAt).getTime() / 1000),
+        iat: Math.floor(Date.now() / 1000),
+      });
+
+      const ghostAuditResult = await db.from('ghost_login_logs').insert({
+        admin_identifier: req.user?.email || req.superadmin?.email || 'Master_Key',
+        target_doctor_id: targetDoctorId,
+        action: 'GHOST_LOGIN_ENTRY',
+        executed_at: new Date()
+      });
+
+      if (ghostAuditResult?.error) throw ghostAuditResult.error;
+    } catch (queryError) {
+      console.error('[YogiDesk Security Alert] Ghost login audit logging failed safely:', queryError.message || queryError);
+      return res.status(500).json({ success: false, error: 'Security enforcement validation failure' });
+    }
+
+    const legacyAuditResult = await db.from('superadmin_master_key_audit_logs').insert([{
       actor_user_id: req.superadmin?.id || null,
       actor_email: req.superadmin?.email || null,
-      target_user_id: targetUserId,
+      target_user_id: targetDoctorId,
       target_email: targetEmail,
       target_clinic_id: clinic?.id || null,
       ip_address: String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(),
       user_agent: req.headers['user-agent'] || null,
-      event_type: 'MASTER_KEY_GHOST_LOGIN'
-    }]).catch((error) => {
-      console.error('Master key audit insert failed:', error.message || error);
-    });
+      event_type: 'MASTER_KEY_GHOST_LOGIN',
+      ghost_mode: true
+    }]);
+    if (legacyAuditResult?.error) {
+      console.error('Master key audit insert failed safely:', legacyAuditResult.error.message || legacyAuditResult.error);
+    }
 
     return res.status(200).json({
       success: true,
@@ -813,6 +833,7 @@ exports.masterKeyLogin = async (req, res) => {
       },
       audit: {
         mode: 'superadmin_master_key_ghost_login',
+        ghost_mode: true,
         expiresAt,
       },
     });
