@@ -15,9 +15,39 @@ const MotionDiv = motion.div;
 const MotionForm = motion.form;
 const META_REVIEWER_EMAIL = 'meta-tester@yogidesk-ai.com';
 
+const persistFreshAuthTokens = (authSession) => {
+  const accessToken = authSession?.access_token || '';
+  const refreshToken = authSession?.refresh_token || '';
+  if (!accessToken || !refreshToken) return false;
+
+  localStorage.setItem('sb-access-token', accessToken);
+  sessionStorage.setItem('sb-access-token', accessToken);
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
+  return true;
+};
+
+const OtpSecurityAnimation = () => (
+  <div className="mx-auto flex w-full max-w-xs items-center justify-center py-2" aria-hidden="true">
+    <div className="relative flex h-36 w-36 items-center justify-center rounded-full bg-white">
+      <div className="absolute inset-0 rounded-full border border-orange-100" />
+      <div className="absolute inset-3 rounded-full border border-dashed border-[#FF6B00]/40 [animation:spin_14s_linear_infinite]" />
+      <div className="absolute h-24 w-24 rounded-full bg-[#111827] shadow-2xl shadow-orange-100" />
+      <div className="absolute h-20 w-20 rounded-full border border-white/10 bg-[#111827]" />
+      <div className="absolute top-8 h-8 w-12 rounded-t-2xl border-[5px] border-[#FF6B00] border-b-0" />
+      <div className="absolute top-[3.7rem] flex h-12 w-16 items-center justify-center rounded-xl bg-white shadow-lg">
+        <div className="h-3 w-3 rounded-full bg-[#FF6B00] shadow-[0_0_18px_rgba(255,107,0,0.75)]" />
+      </div>
+      <div className="absolute left-5 top-10 h-2 w-2 rounded-full bg-[#FF6B00] [animation:pulse_1.8s_ease-in-out_infinite]" />
+      <div className="absolute bottom-8 right-6 h-2 w-2 rounded-full bg-[#FF6B00] [animation:pulse_2.2s_ease-in-out_infinite]" />
+    </div>
+  </div>
+);
+
 const Login = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [showDoctorSplash, setShowDoctorSplash] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
@@ -197,7 +227,18 @@ const Login = () => {
             access_token: authSession.access_token,
             refresh_token: authSession.refresh_token,
           });
+
+          if (!persistFreshAuthTokens(authSession)) {
+            throw new Error('Fresh auth token was not issued after OTP verification.');
+          }
+
+          const { data: verifiedSessionData, error: verifiedSessionError } = await supabase.auth.getUser();
+          if (verifiedSessionError || !verifiedSessionData?.user?.id) {
+            throw verifiedSessionError || new Error('Fresh auth session could not be verified.');
+          }
         }
+
+        setShowDoctorSplash(true);
         // 🔐 Update device fingerprint in metadata for future session validation
         await supabase.auth.updateUser({
           data: { last_fingerprint: navigator.userAgent }
@@ -237,15 +278,7 @@ const Login = () => {
         navigate(redirectTo, { replace: true });
     } catch (error) {
         console.error("Session LocalStorage Save Error", error);
-        if (supabaseUser?.id) {
-          persistSupabaseSession(supabaseUser);
-          localStorage.setItem('user_subscription_status', 'active');
-          sessionStorage.setItem('user_id', supabaseUser.id);
-          sessionStorage.setItem('user_email', supabaseUser.email || '');
-          sessionStorage.removeItem('token');
-          navigate(localStorage.getItem('user_role') === 'STAFF' ? '/staff/dashboard' : '/dashboard', { replace: true });
-          return;
-        }
+        setShowDoctorSplash(false);
         alert("Unable to complete login session. Please try again.");
     }
   };
@@ -313,6 +346,7 @@ const Login = () => {
     } catch (error) {
       console.error(error);
       if (step === 'login' || step === 'otp') await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      setShowDoctorSplash(false);
       alert(error.message || "Invalid Email or Password");
     } finally {
       setLoading(false);
@@ -321,7 +355,7 @@ const Login = () => {
 
   return (
     <div className="relative flex min-h-dvh w-full flex-col overflow-x-hidden overflow-y-auto bg-[#05070b] font-sans md:flex-row lg:overflow-hidden">
-      {loading && <AuthLoadingScreen message={step === 'otp' ? 'Verifying your secure login code...' : 'Securing your doctor workspace...'} />}
+      {showDoctorSplash && <AuthLoadingScreen message="Opening your secure doctor workspace..." />}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,107,0,0.18)_0%,transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_78%_16%,rgba(37,99,235,0.14),transparent_30%),linear-gradient(135deg,rgba(8,16,31,0.98),rgba(3,6,12,0.99)_54%,rgba(5,7,11,1))]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(148,163,184,0.2)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.2)_1px,transparent_1px)] [background-size:44px_44px]" />
@@ -448,6 +482,7 @@ const Login = () => {
           {/* 🔴 STEP 2: OTP COMPONENT FALLBACK */}
           {step === 'otp' && (
             <MotionForm initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} onSubmit={handleSubmit} className="space-y-6">
+               <OtpSecurityAnimation />
                <div className="flex gap-2 justify-center">
                   {otp.map((data, index) => (
                     <input

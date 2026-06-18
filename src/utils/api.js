@@ -42,8 +42,28 @@ const api = axios.create({
   }
 });
 
+const AUTH_LIFECYCLE_PUBLIC_PATHS = new Set([
+  '/auth/request-email-otp',
+  '/auth/verify-email-otp',
+  '/auth/verify-phone-otp',
+  '/auth/verify-login',
+  '/auth/login',
+]);
+
+const normalizeRequestPath = (config = {}) => {
+  const rawUrl = String(config.url || '');
+  const rawPath = rawUrl.startsWith('http')
+    ? new URL(rawUrl).pathname
+    : rawUrl.split('?')[0];
+
+  return rawPath
+    .replace(/^\/api(?=\/|$)/, '')
+    .replace(/\/+$/, '') || '/';
+};
+
 const readStoredSessionToken = () => {
-  return readTokenFromStorageValue(localStorage.getItem('sb-access-token'));
+  return readTokenFromStorageValue(localStorage.getItem('sb-access-token'))
+    || readTokenFromStorageValue(sessionStorage.getItem('sb-access-token'));
 };
 
 const clearStaleSupabaseSession = () => {
@@ -67,13 +87,19 @@ const clearStaleSupabaseSession = () => {
 // Add request interceptor to include auth token
 api.interceptors.request.use(
   async (config) => {
+    if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
+      config.url = config.url.replace(/^\/api(?=\/|$)/, '');
+    }
+
+    if (AUTH_LIFECYCLE_PUBLIC_PATHS.has(normalizeRequestPath(config))) {
+      if (config.headers?.Authorization) delete config.headers.Authorization;
+      return config;
+    }
+
     const { data } = await supabase.auth.getSession();
     const token = readStoredSessionToken()
       || data?.session?.access_token;
 
-    if (typeof config.url === 'string' && trimTrailingSlashes(config.baseURL).endsWith('/api')) {
-      config.url = config.url.replace(/^\/api(?=\/|$)/, '');
-    }
     if (isJwtSegmentToken(token)) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;

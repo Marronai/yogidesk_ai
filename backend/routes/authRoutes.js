@@ -90,6 +90,39 @@ try {
   logOptionalAuthWarning('[YogiDesk Auth] Optional auth middleware failed to load. /check-session is disabled until auth dependencies are restored.');
 }
 
+const validateSupabaseSession = async (req, res, next) => {
+  try {
+    const token = getBearerToken(req);
+    if (!token) {
+      return res.status(401).json({ success: false, code: 'SESSION_EXPIRED', msg: 'Session token is required.' });
+    }
+    if (!isJwtSegmentToken(token)) {
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_MALFORMED',
+        msg: 'Access token is malformed',
+        details: 'Invalid segment layout detected'
+      });
+    }
+
+    const client = supabaseAdmin || supabase;
+    if (!client?.auth?.getUser) {
+      return protect(req, res, next);
+    }
+
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data?.user?.id) {
+      return res.status(401).json({ success: false, code: 'SESSION_EXPIRED', msg: 'Session token is expired or invalid.' });
+    }
+
+    req.user = data.user;
+    return next();
+  } catch (error) {
+    console.error('[YogiDesk Auth] Supabase session validation failed:', error.message || error);
+    return res.status(401).json({ success: false, code: 'SESSION_EXPIRED', msg: 'Session token is expired or invalid.' });
+  }
+};
+
 // 🛠️ DEVELOPER TIP: Abhi ke liye Rate Limiters ko hata dete hain 
 // kyunki testing mein ye bar-bar block kar dete hain (405/429 error)
 // const loginLimiter = rateLimit({ ... }); 
@@ -276,7 +309,7 @@ router.get('/google/callback',
 );
 
 // --- PROTECTED ROUTES ---
-router.get('/check-session', protect, (req, res) => {
+router.get('/check-session', validateSupabaseSession, (req, res) => {
   res.status(200).json({ status: 'active', user: req.user });
 });
 
