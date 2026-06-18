@@ -1,20 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Activity,
   ArrowRight,
   BarChart3,
   CheckCircle2,
   Database,
-  FileSpreadsheet,
-  LockKeyhole,
   MessageSquareText,
-  MonitorCheck,
-  ShieldCheck,
   Sparkles,
-  Stethoscope,
-  UploadCloud,
-  UserCog,
   UsersRound,
 } from 'lucide-react';
 import PublicNavbar from '../components/PublicNavbar';
@@ -32,6 +24,12 @@ const heroMetrics = [
   { label: 'WhatsApp API readiness', value: 'Meta' },
 ];
 
+const heroImage = {
+  src: '/assets/features/features-hero.png',
+  alt: 'YogiDesk AI healthcare WhatsApp CRM dashboard',
+  label: 'Put hero image here: public/assets/features/features-hero.png',
+};
+
 const featureBlocks = [
   {
     id: 'staff-setup',
@@ -41,9 +39,9 @@ const featureBlocks = [
       "Streamline your medical workspace operations using YogiDesk's advanced clinic team setup panel. This feature allows doctors and practice administrators to seamlessly onboard healthcare staff, receptionists, and nursing team members onto a unified platform. Once added, your designated team can log in independently to trigger pre-approved WhatsApp message templates, automate patient updates, and handle daily practice inquiries efficiently.",
     detail:
       'To maintain strict compliance and clinical security, YogiDesk provides robust role-based access control (RBAC). As the super-admin, the doctor can precisely decide and assign exact operational permissions for each receptionist or staff member. Furthermore, the master dashboard offers comprehensive real-time team chat monitoring, allowing the admin doctor to audit all patient communication, view active chat logs in flight, and maintain total quality control over the clinic digital interactions from a single secure console.',
-    imageSrc: '',
+    imageSrc: '/assets/features/staff-setup.png',
     imageAlt: 'Staff setup and multi-agent communication dashboard',
-    imageNote: 'Add your staff setup dashboard image here by filling imageSrc for staff-setup.',
+    imageNote: 'Put image here: public/assets/features/staff-setup.png',
     icon: UsersRound,
     accent: BRAND.orange,
     reverse: false,
@@ -63,9 +61,9 @@ const featureBlocks = [
       "Eliminate tedious manual record-keeping with YogiDesk's frictionless patient data adder framework, designed to build a structured, actionable healthcare contact database. Doctors, receptionists, and practice managers can ingest patient details into the system using multiple flexible channels. For instant entries between consultations, the quick adder tool allows immediate input, while the robust bulk-upload engine supports native medical CSV and Excel (.xlsx) data sheet imports to migrate thousands of patient profiles effortlessly.",
     detail:
       'Once processed, the records populate cleanly into a dynamic, filterable electronic patient directory displayed directly on the screen. This centralized data matrix serves as the launchpad for your entire WhatsApp patient communication strategy. Your authorized clinic team can utilize this verified database to instantly deploy operational notification templates, broadcast automation flows, and critical medical alerts, ensuring a personalized and responsive healthcare experience for every patient.',
-    imageSrc: '',
+    imageSrc: '/assets/features/patient-directory.png',
     imageAlt: 'Patient data ingestion and contact directory dashboard',
-    imageNote: 'Add your patient directory or upload dashboard image here by filling imageSrc for patient-directory.',
+    imageNote: 'Put image here: public/assets/features/patient-directory.png',
     icon: Database,
     accent: BRAND.blue,
     reverse: true,
@@ -85,9 +83,9 @@ const featureBlocks = [
       'INSERT DESCRIPTION PARAGRAPH HERE for automated clinic broadcast streams, patient recall reminders, follow-up journeys, and approved Meta template delivery across verified healthcare contact cohorts.',
     detail:
       'INSERT SUPPORTING DETAIL PARAGRAPH HERE explaining segmentation, scheduling, campaign safety, delivery feedback loops, and operational value for clinic management workflows.',
-    imageSrc: '',
+    imageSrc: '/assets/features/broadcast-streams.png',
     imageAlt: 'Automated WhatsApp broadcast stream dashboard',
-    imageNote: 'Add your broadcast automation image here by filling imageSrc for broadcast-streams.',
+    imageNote: 'Put image here: public/assets/features/broadcast-streams.png',
     icon: MessageSquareText,
     accent: BRAND.orange,
     reverse: false,
@@ -107,9 +105,9 @@ const featureBlocks = [
       'INSERT DESCRIPTION PARAGRAPH HERE for live AI balance visibility, credit movement tracking, and usage intelligence across patient support, broadcasts, and automated response workflows.',
     detail:
       'INSERT SUPPORTING DETAIL PARAGRAPH HERE explaining how doctors can inspect wallet health, recharge readiness, consumption patterns, and team-level automation accountability.',
-    imageSrc: '',
+    imageSrc: '/assets/features/ai-balance.png',
     imageAlt: 'AI balance and usage tracking dashboard',
-    imageNote: 'Add your AI balance tracking image here by filling imageSrc for ai-balance.',
+    imageNote: 'Put image here: public/assets/features/ai-balance.png',
     icon: BarChart3,
     accent: BRAND.blue,
     reverse: true,
@@ -140,64 +138,25 @@ const ImageDepth = ({ accent }) => (
   </div>
 );
 
-const DashboardPlaceholder = ({ feature }) => {
-  const Icon = feature.icon;
-
+const ImageSlot = ({ src, alt, note, accent }) => {
   return (
     <div className="relative mx-auto w-full max-w-xl">
-      <ImageDepth accent={feature.accent} />
-      <div className="relative overflow-hidden rounded-[1.75rem] border border-white/15 bg-white shadow-2xl shadow-slate-950/30">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
-          <div className="flex items-center gap-2">
-            <span className="h-3 w-3 rounded-full bg-red-400" />
-            <span className="h-3 w-3 rounded-full bg-amber-400" />
-            <span className="h-3 w-3 rounded-full bg-emerald-400" />
+      <ImageDepth accent={accent} />
+      <div className="relative overflow-hidden rounded-[1.75rem] border border-white/20 bg-white p-3 shadow-2xl shadow-slate-950/25">
+        <div className="aspect-[4/3] overflow-hidden rounded-[1.35rem] bg-slate-100">
+          <img
+            src={src}
+            alt={alt}
+            className="h-full w-full object-cover"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none';
+              event.currentTarget.nextElementSibling.style.display = 'flex';
+            }}
+          />
+          <div className="hidden h-full w-full flex-col items-center justify-center border border-dashed border-slate-300 bg-white p-6 text-center">
+            <p className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">Image missing</p>
+            <p className="mt-3 max-w-sm text-sm font-bold leading-6 text-slate-700">{note}</p>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
-            Image Slot
-          </span>
-        </div>
-
-        <div className="relative min-h-[320px] bg-slate-50 p-4 sm:min-h-[390px] sm:p-6">
-          {feature.imageSrc ? (
-            <img
-              src={feature.imageSrc}
-              alt={feature.imageAlt}
-              className="h-full min-h-[280px] w-full rounded-2xl object-cover shadow-inner"
-            />
-          ) : (
-            <div className="flex min-h-[280px] flex-col justify-between rounded-2xl border border-dashed border-slate-300 bg-white p-5 sm:min-h-[335px]">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div
-                    className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl text-white shadow-lg"
-                    style={{ backgroundColor: feature.accent }}
-                  >
-                    <Icon size={24} />
-                  </div>
-                  <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-400">
-                    Add image path in Features.jsx
-                  </p>
-                  <h3 className="mt-3 max-w-sm text-xl font-black leading-tight text-slate-950">
-                    {feature.imageAlt}
-                  </h3>
-                  <p className="mt-3 max-w-sm text-sm font-medium leading-6 text-slate-500">
-                    {feature.imageNote}
-                  </p>
-                </div>
-                <MonitorCheck className="hidden text-slate-300 sm:block" size={34} />
-              </div>
-
-              <div className="mt-8 grid grid-cols-3 gap-3">
-                {feature.metrics.map((metric) => (
-                  <div key={metric} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-                    <div className="h-1.5 w-10 rounded-full" style={{ backgroundColor: feature.accent }} />
-                    <p className="mt-3 text-[11px] font-black uppercase tracking-wider text-slate-600">{metric}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -237,7 +196,7 @@ const FeatureSection = ({ feature }) => {
           </div>
         </div>
 
-        <DashboardPlaceholder feature={feature} />
+        <ImageSlot src={feature.imageSrc} alt={feature.imageAlt} note={feature.imageNote} accent={feature.accent} />
       </div>
     </section>
   );
@@ -256,10 +215,11 @@ const Features = () => {
               <Sparkles size={14} color={BRAND.orange} />
               Healthcare WhatsApp CRM Showcase
             </div>
-            <h1 className="text-4xl font-black leading-[1.02] tracking-tight sm:text-5xl lg:text-6xl">
-              Advanced WhatsApp CRM Features Engineered for Healthcare Scaling
+            <h1 className="text-4xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.2rem]">
+              <span className="text-[#FF6B00]">Advanced WhatsApp CRM Features</span>{' '}
+              <span className="text-[#93C5FD]">Engineered for Healthcare Scaling</span>
             </h1>
-            <p className="mt-6 max-w-2xl text-base font-medium leading-8 text-slate-300 sm:text-lg">
+            <p className="mt-6 max-w-2xl text-base font-medium leading-8 text-white sm:text-lg">
               A premium feature portal for clinic teams that need structured patient data, compliant staff operations, Meta API messaging control, and clear growth visibility from one secure command center.
             </p>
 
@@ -288,63 +248,7 @@ const Features = () => {
             </div>
           </div>
 
-          <div className="relative">
-            <ImageDepth accent={BRAND.orange} />
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white p-4 shadow-2xl shadow-black/30 sm:p-5">
-              <div className="rounded-[1.5rem] bg-slate-50 p-4 sm:p-5">
-                <div className="mb-5 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-[0.24em] text-slate-400">Dashboard Wireframe</p>
-                    <h2 className="mt-1 text-xl font-black text-slate-950">Clinic Command Center</h2>
-                  </div>
-                  <div className="rounded-2xl bg-[#2563EB] p-3 text-white">
-                    <Stethoscope size={22} />
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-[0.9fr_1.1fr]">
-                  <div className="space-y-3">
-                    {[UserCog, ShieldCheck, UploadCloud].map((Icon, index) => (
-                      <div key={index} className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                        <Icon size={20} color={index === 1 ? BRAND.orange : BRAND.blue} />
-                        <div className="mt-4 h-2 w-20 rounded-full bg-slate-200" />
-                        <div className="mt-2 h-2 w-28 rounded-full bg-slate-100" />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="rounded-3xl bg-[#111827] p-4 text-white">
-                    <div className="mb-4 flex items-center justify-between">
-                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">Live Care Thread</span>
-                      <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-[10px] font-black text-emerald-300">Active</span>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="mr-8 rounded-2xl rounded-tl-sm bg-white/10 p-3 text-xs font-semibold leading-5 text-slate-200">
-                        Patient imported from OPD sheet. Reminder template ready.
-                      </div>
-                      <div className="ml-8 rounded-2xl rounded-tr-sm bg-[#2563EB] p-3 text-xs font-semibold leading-5 text-white">
-                        Staff can send after doctor approval.
-                      </div>
-                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                        <div className="flex items-center gap-3">
-                          <Activity size={18} color={BRAND.orange} />
-                          <div className="h-2 flex-1 rounded-full bg-white/10">
-                            <div className="h-2 w-2/3 rounded-full bg-[#FF6B00]" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-white p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.22em] text-slate-400">Hero image location</p>
-                  <p className="mt-2 text-sm font-bold text-slate-600">
-                    Replace this mockup in <span className="text-slate-950">src/pages/Features.jsx</span> hero right column when your premium dashboard illustration is ready.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ImageSlot src={heroImage.src} alt={heroImage.alt} note={heroImage.label} accent={BRAND.orange} />
         </div>
       </header>
 
@@ -358,7 +262,7 @@ const Features = () => {
               Built as modular capability blocks for every clinic workflow.
             </h2>
             <p className="mt-5 text-base font-medium leading-8 text-slate-600">
-              Use the `imageSrc` fields inside each feature object to add final screenshots. Until then, the page renders polished dashboard placeholders that keep the layout production-ready.
+              Put your downloaded screenshots inside public/assets/features using the file names shown in each image slot. The page will render those real images directly.
             </p>
           </div>
 
@@ -370,28 +274,6 @@ const Features = () => {
         </div>
       </main>
 
-      <section className="bg-[#111827] px-4 py-16 text-white sm:px-6">
-        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 lg:flex-row lg:items-center">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.28em] text-[#FF6B00]">Ready for production copy</p>
-            <h2 className="mt-3 max-w-3xl text-3xl font-black leading-tight sm:text-4xl">
-              Add your screenshots, refine the placeholder blocks, and launch the Features showcase.
-            </h2>
-          </div>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            {[
-              { icon: FileSpreadsheet, label: 'Imports' },
-              { icon: LockKeyhole, label: 'Security' },
-              { icon: CheckCircle2, label: 'Templates' },
-            ].map(({ icon: Icon, label }) => (
-              <div key={label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <Icon className="mx-auto" size={22} color={BRAND.orange} />
-                <p className="mt-2 text-xs font-black uppercase tracking-wider text-slate-300">{label}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
     </div>
   );
 };

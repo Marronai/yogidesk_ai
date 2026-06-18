@@ -3,8 +3,12 @@ import { Link } from 'react-router-dom';
 import { Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
 
 const Footer = () => {
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  };
+
   return (
-    <footer className="bg-slate-900 text-white pt-20 pb-12 md:pt-24 md:pb-16">
+    <footer className="mt-16 border-t border-slate-800 bg-slate-900 text-white pt-20 pb-12 md:mt-20 md:pt-24 md:pb-16">
       <div className="max-w-7xl mx-auto px-6">
         <div className="grid gap-y-12 gap-x-8 md:grid-cols-4 md:gap-x-12">
           {/* Company Info */}
@@ -28,10 +32,10 @@ const Footer = () => {
           <div>
             <h3 className="font-bold text-lg mb-4">Product</h3>
             <ul className="space-y-2 text-slate-400">
-              <li><Link to="/features" className="hover:text-[#FF6B00] transition">Features</Link></li>
-              <li><Link to="/pricing" className="hover:text-[#FF6B00] transition">Pricing</Link></li>
-              <li><Link to="/integrations" className="hover:text-[#FF6B00] transition">Integrations</Link></li>
-              <li><Link to="/api-docs" className="hover:text-[#FF6B00] transition">API Docs</Link></li>
+              <li><Link to="/features" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Features</Link></li>
+              <li><Link to="/pricing" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Pricing</Link></li>
+              <li><Link to="/integrations" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Integrations</Link></li>
+              <li><Link to="/api-docs" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">API Docs</Link></li>
             </ul>
           </div>
 
@@ -39,10 +43,10 @@ const Footer = () => {
           <div>
             <h3 className="font-bold text-lg mb-4">Support</h3>
             <ul className="space-y-2 text-slate-400">
-              <li><Link to="/help" className="hover:text-[#FF6B00] transition">Help Center</Link></li>
-              <li><Link to="/contact" className="hover:text-[#FF6B00] transition">Contact Us</Link></li>
-              <li><Link to="/status" className="hover:text-[#FF6B00] transition">System Status</Link></li>
-              <li><Link to="/community" className="hover:text-[#FF6B00] transition">Community</Link></li>
+              <li><Link to="/help" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Help Center</Link></li>
+              <li><Link to="/contact" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Contact Us</Link></li>
+              <li><Link to="/status" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">System Status</Link></li>
+              <li><Link to="/community" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Community</Link></li>
             </ul>
           </div>
 
@@ -50,11 +54,11 @@ const Footer = () => {
           <div>
             <h3 className="font-bold text-lg mb-4">Legal</h3>
             <ul className="space-y-2 text-slate-400">
-              <li><Link to="/privacy-policy" className="hover:text-[#FF6B00] transition">Privacy Policy</Link></li>
-              <li><Link to="/terms-and-conditions" className="hover:text-[#FF6B00] transition">Terms & Conditions</Link></li>
-              <li><Link to="/terms" className="hover:text-[#FF6B00] transition">Terms of Service</Link></li>
-              <li><Link to="/cookies" className="hover:text-[#FF6B00] transition">Cookie Policy</Link></li>
-              <li><Link to="/gdpr" className="hover:text-[#FF6B00] transition">GDPR</Link></li>
+              <li><Link to="/privacy-policy" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Privacy Policy</Link></li>
+              <li><Link to="/terms-and-conditions" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Terms & Conditions</Link></li>
+              <li><Link to="/terms" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Terms of Service</Link></li>
+              <li><Link to="/cookies" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">Cookie Policy</Link></li>
+              <li><Link to="/gdpr" onClick={scrollToTop} className="hover:text-[#FF6B00] transition">GDPR</Link></li>
             </ul>
           </div>
         </div>

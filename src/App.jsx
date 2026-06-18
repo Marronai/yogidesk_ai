@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 // Layouts & Guards
@@ -52,6 +52,23 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 
 const ROOT_ROUTE_FALLBACK = '/';
 
+const ScrollToTop = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.hash) {
+      window.setTimeout(() => {
+        document.querySelector(location.hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 0);
+      return;
+    }
+
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname, location.hash]);
+
+  return null;
+};
+
 const AppContent = () => {
   const location = useLocation();
   const { isMetaReviewSession } = useAuth();
@@ -64,6 +81,7 @@ const AppContent = () => {
 
   return (
       <>
+        <ScrollToTop />
         <Routes>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<Terms />} />

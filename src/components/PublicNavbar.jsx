@@ -32,7 +32,7 @@ const PublicNavbar = () => {
   };
 
   return (
-    <nav className="fixed w-full z-50 bg-white/95 backdrop-blur-md border-b border-gray-100">
+    <nav className="fixed w-full z-50 bg-white border-b border-gray-100 shadow-sm shadow-slate-200/40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-24 flex justify-between items-center">
         <Link to="/" className="flex h-14 sm:h-14 md:h-16 lg:h-20 items-center shrink-0" aria-label="Yogi Desk AI home">
           <img
