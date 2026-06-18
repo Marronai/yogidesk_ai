@@ -36,9 +36,22 @@ const featureBlocks = [
     eyebrow: 'Feature 01',
     title: 'Empower Your Clinic Team with Smart Staff Setup & Multi-Agent Communication',
     description:
-      "Streamline your medical workspace operations using YogiDesk's advanced clinic team setup panel. This feature allows doctors and practice administrators to seamlessly onboard healthcare staff, receptionists, and nursing team members onto a unified platform. Once added, your designated team can log in independently to trigger pre-approved WhatsApp message templates, automate patient updates, and handle daily practice inquiries efficiently.",
-    detail:
-      'To maintain strict compliance and clinical security, YogiDesk provides robust role-based access control (RBAC). As the super-admin, the doctor can precisely decide and assign exact operational permissions for each receptionist or staff member. Furthermore, the master dashboard offers comprehensive real-time team chat monitoring, allowing the admin doctor to audit all patient communication, view active chat logs in flight, and maintain total quality control over the clinic digital interactions from a single secure console.',
+      "Streamline your medical workspace operations using YogiDesk's advanced clinic team setup panel.",
+    detail: '',
+    points: [
+      {
+        title: 'Unified Staff Onboarding & Communication',
+        body: 'Allow doctors and practice administrators to seamlessly onboard healthcare staff, receptionists, and nursing team members. Once added, your designated team can log in independently to trigger pre-approved WhatsApp message templates, automate patient updates, and handle daily practice inquiries efficiently.',
+      },
+      {
+        title: 'Role-Based Access Control (RBAC)',
+        body: 'Maintain strict compliance and clinical security within your practice. As the super-admin, the doctor can precisely decide and assign exact operational permissions for each receptionist or staff member, ensuring data privacy and restricted access.',
+      },
+      {
+        title: 'Real-Time Team Chat Monitoring',
+        body: "Maintain total quality control over the clinic's digital interactions from a single secure console. The master dashboard offers comprehensive real-time tracking, allowing the admin doctor to audit all patient communication and view active chat logs in flight.",
+      },
+    ],
     imageSrc: '/assets/features/staff-setup.png',
     imageAlt: 'Staff setup and multi-agent communication dashboard',
     imageNote: 'Put image here: public/assets/features/staff-setup.png',
@@ -183,17 +196,31 @@ const FeatureSection = ({ feature }) => {
           <div>
             <h2 className="text-3xl font-black leading-tight text-slate-950 sm:text-4xl">{feature.title}</h2>
             <p className="mt-5 text-base font-medium leading-8 text-slate-600">{feature.description}</p>
-            <p className="mt-4 text-base font-medium leading-8 text-slate-600">{feature.detail}</p>
+            {feature.detail && <p className="mt-4 text-base font-medium leading-8 text-slate-600">{feature.detail}</p>}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {feature.bullets.map((item) => (
-              <div key={item} className="flex gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                <CheckCircle2 className="mt-0.5 shrink-0" size={18} color={feature.accent} />
-                <span className="text-sm font-bold leading-6 text-slate-700">{item}</span>
-              </div>
-            ))}
-          </div>
+          {feature.points ? (
+            <ul className="space-y-6">
+              {feature.points.map((point) => (
+                <li key={point.title} className="flex gap-4">
+                  <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-slate-950" />
+                  <div>
+                    <h3 className="text-lg font-extrabold leading-7 text-slate-950">{point.title}</h3>
+                    <p className="mt-1 text-base font-normal leading-8 text-slate-700">{point.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {feature.bullets.map((item) => (
+                <div key={item} className="flex gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                  <CheckCircle2 className="mt-0.5 shrink-0" size={18} color={feature.accent} />
+                  <span className="text-sm font-bold leading-6 text-slate-700">{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <ImageSlot src={feature.imageSrc} alt={feature.imageAlt} note={feature.imageNote} accent={feature.accent} />
@@ -252,7 +279,7 @@ const Features = () => {
         </div>
       </header>
 
-      <main id="feature-matrix" className="bg-slate-50 px-4 py-20 sm:px-6 sm:py-24">
+      <main id="feature-matrix" className="bg-white px-4 py-20 sm:px-6 sm:py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-16 max-w-3xl">
             <span className="rounded-full bg-blue-50 px-4 py-2 text-xs font-black uppercase tracking-[0.24em] text-[#2563EB]">
