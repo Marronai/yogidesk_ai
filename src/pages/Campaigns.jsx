@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CalendarClock, Eye, RefreshCw, Send, Sparkles, User, Users, Wallet, X } from 'lucide-react';
+import { AlertCircle, CalendarClock, Check, Eye, Plus, RefreshCw, Send, Sparkles, User, Users, Wallet, X } from 'lucide-react';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
 import { calculateMessageCost } from '../utils/wallet';
@@ -13,6 +13,7 @@ const Campaigns = () => {
   const userId = localStorage.getItem('user_id');
   const [loading, setLoading] = useState(false);
   const [patients, setPatients] = useState([]);
+  const [ledgerPatients, setLedgerPatients] = useState([]);
   const [ledgerMatches, setLedgerMatches] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
@@ -22,6 +23,8 @@ const Campaigns = () => {
   const [toast, setToast] = useState('');
   const [walletBalance, setWalletBalance] = useState(0);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showPhonebookModal, setShowPhonebookModal] = useState(false);
+  const [phonebookSearch, setPhonebookSearch] = useState('');
   const [senderPhoneId, setSenderPhoneId] = useState('');
 
   const selectedTemplate = templates.find((t) => String(t.id) === String(selectedTemplateId));
@@ -85,9 +88,32 @@ const Campaigns = () => {
   const remainingBalance = Number((walletBalance - totalCost).toFixed(2));
   const hasCredits = walletBalance >= totalCost && totalCost > 0;
   const missingVariableKeys = variableKeys.filter((key) => !String(templateVariables[key] || '').trim());
-  const sortedPatients = useMemo(() => (
-    [...patients].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
+  const selectedRecipientKeys = useMemo(() => (
+    new Set(patients.map((patient) => String(patient.id || patient.phone)))
   ), [patients]);
+  const sortedLedgerPatients = useMemo(() => (
+    [...ledgerPatients].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }))
+  ), [ledgerPatients]);
+  const phonebookPatients = useMemo(() => {
+    const q = phonebookSearch.trim().toLowerCase();
+    if (!q) return sortedLedgerPatients;
+    return sortedLedgerPatients.filter((patient) => (
+      String(patient.name || '').toLowerCase().includes(q) || String(patient.phone || '').includes(q)
+    ));
+  }, [phonebookSearch, sortedLedgerPatients]);
+
+  const groupedPhonebookPatients = useMemo(() => (
+    phonebookPatients.reduce((groups, patient) => {
+      const first = String(patient.name || '').trim().charAt(0).toUpperCase();
+      const letter = /^[A-Z]$/.test(first) ? first : '#';
+      if (!groups[letter]) groups[letter] = [];
+      groups[letter].push(patient);
+      return groups;
+    }, {})
+  ), [phonebookPatients]);
+  const phonebookLetters = useMemo(() => (
+    Object.keys(groupedPhonebookPatients).sort((a, b) => (a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b)))
+  ), [groupedPhonebookPatients]);
 
   const refreshWallet = async () => {
     try {
@@ -101,6 +127,15 @@ const Campaigns = () => {
   };
 
   const notify = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2400); };
+
+  const fetchLedgerPatients = async () => {
+    if (!userId) return [];
+    const { data } = await supabase
+      .from('patients_ledger')
+      .select('*')
+      .eq('user_id', userId);
+    return Array.isArray(data) ? data : [];
+  };
 
   const lookupLedger = async (query = '') => {
     const q = query.trim();
@@ -130,11 +165,13 @@ const Campaigns = () => {
     } catch (syncError) {
       console.warn('Campaign template sync skipped:', syncError?.response?.data || syncError.message || syncError);
     }
-    const [{ data: approvedTemplates }, { data: profile }] = await Promise.all([
+    const [{ data: approvedTemplates }, { data: profile }, ledgerRows] = await Promise.all([
       supabase.from('whatsapp_templates').select('id, template_name, category, language, body_content').eq('user_id', userId).eq('status', 'APPROVED').order('created_at', { ascending: false }),
-      supabase.from('doctor_profiles').select('*').eq('id', userId).maybeSingle()
+      supabase.from('doctor_profiles').select('*').eq('id', userId).maybeSingle(),
+      fetchLedgerPatients()
     ]);
     setPatients([]);
+    setLedgerPatients(ledgerRows);
     setLedgerMatches([]);
     setTemplates(Array.isArray(approvedTemplates) ? approvedTemplates : []);
     const phoneId = profile?.meta_phone_number_id || profile?.whatsapp_phone_number_id || '';
@@ -145,6 +182,7 @@ const Campaigns = () => {
 
   useEffect(() => {
     setPatients([]);
+    setLedgerPatients([]);
     setLedgerMatches([]);
     fetchCampaignData();
     refreshWallet();
@@ -170,6 +208,16 @@ const Campaigns = () => {
       const exists = current.some((item) => (item.id && item.id === patient.id) || item.phone === patient.phone);
       return exists ? current : [...current, patient];
     });
+  };
+
+  const removeRecipient = (patient) => {
+    setPatients((current) => current.filter((item) => !((item.id && patient.id && item.id === patient.id) || item.phone === patient.phone)));
+  };
+
+  const toggleRecipient = (patient) => {
+    const selected = selectedRecipientKeys.has(String(patient.id || patient.phone));
+    if (selected) removeRecipient(patient);
+    else addRecipient(patient);
   };
 
   const startCampaign = async () => {
@@ -284,6 +332,73 @@ const Campaigns = () => {
               >
                 {loading ? 'Sending...' : `Confirm & Deduct Wallet Balance (Rs. ${totalCost.toFixed(2)})`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPhonebookModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 p-5 sm:p-6">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.24em] text-orange-600">Phonebook</p>
+                <h2 className="mt-2 text-2xl font-black text-slate-950">Add Patients</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPhonebookModal(false)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 sm:p-6">
+              <input
+                value={phonebookSearch}
+                onChange={(event) => setPhonebookSearch(event.target.value)}
+                placeholder="Search patient name or phone..."
+                className="mb-4 w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm font-bold outline-none focus:border-[#FF6B00]"
+              />
+              <div className="max-h-[60vh] overflow-y-auto pr-1">
+                {phonebookLetters.length === 0 ? (
+                  <div className="p-12 text-center text-slate-300 font-black uppercase tracking-widest">No synced patients found</div>
+                ) : (
+                  <div className="space-y-5">
+                    {phonebookLetters.map((letter) => (
+                      <div key={letter}>
+                        <div className="sticky top-0 z-10 mb-2 flex items-center gap-3 bg-white py-2">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-xs font-black text-white">{letter}</span>
+                          <div className="h-px flex-1 bg-slate-100" />
+                        </div>
+                        <div className="space-y-2">
+                          {groupedPhonebookPatients[letter].map((patient) => {
+                            const selected = selectedRecipientKeys.has(String(patient.id || patient.phone));
+                            return (
+                              <button
+                                key={patient.id || patient.phone}
+                                type="button"
+                                onClick={() => toggleRecipient(patient)}
+                                className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm transition-all ${selected ? 'border-orange-200 bg-orange-50' : 'border-slate-100 bg-slate-50 hover:border-orange-200 hover:bg-orange-50'}`}
+                              >
+                                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${selected ? 'border-[#FF6B00] bg-[#FF6B00] text-white' : 'border-slate-200 bg-white text-transparent'}`}>
+                                  <Check size={13} />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate font-black text-slate-800">{patient.name}</span>
+                                  <span className="block truncate text-xs font-semibold text-slate-500">{patient.phone}</span>
+                                </span>
+                                <span className="shrink-0 text-xs font-bold text-slate-400">{patient.appointment_time || '-'}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -429,27 +544,49 @@ const Campaigns = () => {
         </div>
 
         <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-gray-50 bg-slate-50/30 font-black text-xs uppercase tracking-widest">SELECTED RECIPIENTS</div>
-          <div className="p-0 overflow-x-auto">
+          <div className="flex flex-col gap-3 border-b border-gray-50 bg-slate-50/30 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="font-black text-xs uppercase tracking-widest">SELECTED RECIPIENTS</div>
+            <button
+              type="button"
+              onClick={() => setShowPhonebookModal(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#FF6B00] px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-orange-600"
+            >
+              <Plus size={14} /> Add Patient
+            </button>
+          </div>
+          <div className="max-h-[620px] overflow-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-400 font-bold">
                 <tr>
+                  <th className="p-4 w-12"></th>
                   <th className="p-4">Patient</th>
                   <th className="p-4">Phone</th>
                   <th className="p-4">Appointment</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedPatients.map((p) => (
-                  <tr key={p.id || p.phone} className="border-t border-gray-50">
-                    <td className="p-4 font-bold">{p.name}</td>
-                    <td className="p-4 text-gray-500">{p.phone}</td>
-                    <td className="p-4 text-gray-500">{p.appointment_time || '-'}</td>
-                  </tr>
-                ))}
+                {sortedLedgerPatients.map((p) => {
+                  const selected = selectedRecipientKeys.has(String(p.id || p.phone));
+                  return (
+                    <tr
+                      key={p.id || p.phone}
+                      onClick={() => toggleRecipient(p)}
+                      className={`cursor-pointer border-t border-gray-50 transition-all ${selected ? 'bg-orange-50/70' : 'hover:bg-slate-50/70'}`}
+                    >
+                      <td className="p-4">
+                        <span className={`flex h-5 w-5 items-center justify-center rounded-md border ${selected ? 'border-[#FF6B00] bg-[#FF6B00] text-white' : 'border-slate-200 bg-white text-transparent'}`}>
+                          <Check size={13} />
+                        </span>
+                      </td>
+                      <td className="p-4 font-bold">{p.name}</td>
+                      <td className="p-4 text-gray-500">{p.phone}</td>
+                      <td className="p-4 text-gray-500">{p.appointment_time || '-'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-            {!loading && patients.length === 0 && <div className="p-16 text-center text-slate-300 font-black uppercase tracking-widest">NO SYNCED PATIENTS FOUND</div>}
+            {!loading && ledgerPatients.length === 0 && <div className="p-16 text-center text-slate-300 font-black uppercase tracking-widest">NO SYNCED PATIENTS FOUND</div>}
           </div>
 
           {ledgerMatches.length > 0 && (
