@@ -102,6 +102,7 @@ const AppContent = () => {
           <Route path="/signup" element={<SignUp />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/superadmin" element={<Navigate to="/superadmin/login" replace />} />
           <Route path="/superadmin/login" element={<SuperAdminLogin />} />
           
           <Route path="/auth-success" element={<AuthSuccess />} />  
