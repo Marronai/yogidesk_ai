@@ -80,7 +80,7 @@ const AppContent = () => {
   const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
 
   return (
-      <>
+      <div className={isInternalRoute ? undefined : 'public-website'}>
         <ScrollToTop />
         <Routes>
           <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -169,7 +169,7 @@ const AppContent = () => {
         </Routes>
         {/* Render footer ONLY on public marketing pages */}
         {!isInternalRoute && <Footer />}
-      </>
+      </div>
   );
 };
 

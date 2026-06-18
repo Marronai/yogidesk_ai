@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=Urbanist:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Poppins:wght@400;500;600;700;800;900&family=Urbanist:wght@400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -13,4 +13,36 @@ body {
 /* Utility class for white cards with soft shadow */
 .white-card {
   @apply bg-white rounded-2xl shadow-card border border-gray-100;
+}
+
+.public-website {
+  font-family: 'Inter', 'Urbanist', 'Poppins', sans-serif;
+}
+
+.public-website h1,
+.public-website h2,
+.public-website h3,
+.public-website h4,
+.public-website h5,
+.public-website h6 {
+  font-family: 'Inter', 'Urbanist', 'Poppins', sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.public-website p,
+.public-website li,
+.public-website span,
+.public-website a,
+.public-website button,
+.public-website label,
+.public-website input,
+.public-website textarea {
+  font-family: 'Inter', 'Urbanist', 'Poppins', sans-serif;
+}
+
+.public-website p,
+.public-website li {
+  font-weight: 400;
+  letter-spacing: 0;
 }
