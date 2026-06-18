@@ -9,8 +9,6 @@ import { blockLiveSupportWidgetsForMetaReview } from '../utils/metaReviewSession
 
 const TAWK_SCRIPT_ID = 'yogidesk-tawk-widget';
 const TAWK_EMBED_URL = 'https://embed.tawk.to/6a2bfd7374b4d41c29150020/1jqttc32p';
-const WELCOME_ANIMATION_MS = 4000;
-const WELCOME_REVEAL_MS = 3200;
 
 const removeTawkWidget = () => {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -39,7 +37,7 @@ const MainLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, isMetaReviewSession, user, userProfile } = useAuth();
-  const [isWelcomeActive, setIsWelcomeActive] = useState(true);
+  const [isWelcomeActive, setIsWelcomeActive] = useState(false);
   const [isWelcomeRevealing, setIsWelcomeRevealing] = useState(false);
 
   // 🔥 AUTO LOGOUT LOGIC (Session Polling)
@@ -76,35 +74,9 @@ const MainLayout = () => {
   const [lowBalanceDismissed, setLowBalanceDismissed] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
-    if (!isAuthenticated || !user?.id || isMetaReviewSession) {
-      setIsWelcomeActive(false);
-      return undefined;
-    }
-
-    const storageKey = `yogidesk-welcome-seen:${user.id}`;
-    if (sessionStorage.getItem(storageKey) === 'true') {
-      setIsWelcomeActive(false);
-      return undefined;
-    }
-
-    setIsWelcomeActive(true);
+    setIsWelcomeActive(false);
     setIsWelcomeRevealing(false);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const revealTimer = window.setTimeout(() => setIsWelcomeRevealing(true), WELCOME_REVEAL_MS);
-    const doneTimer = window.setTimeout(() => {
-      sessionStorage.setItem(storageKey, 'true');
-      setIsWelcomeActive(false);
-      document.body.style.overflow = previousOverflow;
-    }, WELCOME_ANIMATION_MS);
-
-    return () => {
-      window.clearTimeout(revealTimer);
-      window.clearTimeout(doneTimer);
-      document.body.style.overflow = previousOverflow;
-    };
+    return undefined;
   }, [isAuthenticated, isMetaReviewSession, user?.id]);
 
   useEffect(() => {

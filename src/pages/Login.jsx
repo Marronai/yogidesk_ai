@@ -253,9 +253,6 @@ const Login = () => {
           sessionStorage.setItem('user_id', supabaseUser.id);
           sessionStorage.setItem('user_email', supabaseUser.email || '');
           sessionStorage.removeItem('token');
-          
-          // Remove from local storage if rememberMe is false to ensure session ends with tab
-          localStorage.removeItem('sb-' + import.meta.env.VITE_SUPABASE_URL.split('//')[1].split('.')[0] + '-auth-token');
         } else {
           // Persistence explicitly in localStorage handled by default Supabase config, 
           // but we ensure our custom keys follow suit.

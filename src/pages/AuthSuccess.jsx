@@ -58,13 +58,6 @@ const clearGoogleAuthFlow = () => {
   localStorage.removeItem('yogidesk_google_auth_flow');
 };
 
-const MIN_AUTH_SUCCESS_LOADER_MS = 10000;
-
-const waitForMinimumLoader = (startedAt) => {
-  const remaining = MIN_AUTH_SUCCESS_LOADER_MS - (Date.now() - startedAt);
-  return remaining > 0 ? new Promise((resolve) => window.setTimeout(resolve, remaining)) : Promise.resolve();
-};
-
 const AuthSuccess = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
@@ -85,7 +78,6 @@ const AuthSuccess = () => {
     let active = true;
 
     const completeSupabaseOAuth = async () => {
-      const loaderStartedAt = Date.now();
       try {
         const { accessToken, refreshToken, legacyToken, code, flow } = readOAuthCallbackParams();
         const authFlow = String(flow || '').trim().toLowerCase();
@@ -129,6 +121,11 @@ const AuthSuccess = () => {
         if (!sessionUser) throw new Error('Supabase session missing after OAuth redirect');
         if (!active) return;
 
+        if (data.session?.access_token) {
+          localStorage.setItem('sb-access-token', data.session.access_token);
+          sessionStorage.setItem('sb-access-token', data.session.access_token);
+        }
+
         setUser(sessionUser);
         persistSupabaseSession(sessionUser, { welcomeGift: true });
         localStorage.setItem('user_subscription_status', 'active');
@@ -144,7 +141,6 @@ const AuthSuccess = () => {
 
         if (authFlow !== 'signup' && hasCompletedDoctorProfile(profileRow)) {
           console.log('[YogiDesk Auth] Completed doctor profile found after Google OAuth. Routing to dashboard.');
-          await waitForMinimumLoader(loaderStartedAt);
           if (!active) return;
           clearGoogleAuthFlow();
           navigate('/dashboard', { replace: true });
@@ -158,7 +154,6 @@ const AuthSuccess = () => {
           mobile_number: readProfileMobile(profileRow) || sessionUser.user_metadata?.phone || '',
           specialization: profileRow?.specialization || profileRow?.business_category || profileRow?.clinic_category || sessionUser.user_metadata?.specialization || sessionUser.user_metadata?.business_category || '',
         }));
-        await waitForMinimumLoader(loaderStartedAt);
         if (!active) return;
         setNeedsOnboarding(true);
         setLoading(false);

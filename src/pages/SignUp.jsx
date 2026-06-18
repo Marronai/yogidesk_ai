@@ -35,9 +35,39 @@ const upsertProfileSafely = async (payload) => {
   return { error: new Error('Profile seed retry limit reached.') };
 };
 
+const persistFreshAuthTokens = (authSession) => {
+  const accessToken = authSession?.access_token || '';
+  const refreshToken = authSession?.refresh_token || '';
+  if (!accessToken || !refreshToken) return false;
+
+  localStorage.setItem('sb-access-token', accessToken);
+  sessionStorage.setItem('sb-access-token', accessToken);
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
+  return true;
+};
+
+const OtpSecurityAnimation = () => (
+  <div className="mx-auto flex w-full max-w-xs items-center justify-center py-2" aria-hidden="true">
+    <div className="relative flex h-36 w-36 items-center justify-center rounded-full bg-white">
+      <div className="absolute inset-0 rounded-full border border-orange-100" />
+      <div className="absolute inset-3 rounded-full border border-dashed border-[#FF6B00]/40 [animation:spin_14s_linear_infinite]" />
+      <div className="absolute h-24 w-24 rounded-full bg-[#111827] shadow-2xl shadow-orange-100" />
+      <div className="absolute h-20 w-20 rounded-full border border-white/10 bg-[#111827]" />
+      <div className="absolute top-8 h-8 w-12 rounded-t-2xl border-[5px] border-[#FF6B00] border-b-0" />
+      <div className="absolute top-[3.7rem] flex h-12 w-16 items-center justify-center rounded-xl bg-white shadow-lg">
+        <div className="h-3 w-3 rounded-full bg-[#FF6B00] shadow-[0_0_18px_rgba(255,107,0,0.75)]" />
+      </div>
+      <div className="absolute left-5 top-10 h-2 w-2 rounded-full bg-[#FF6B00] [animation:pulse_1.8s_ease-in-out_infinite]" />
+      <div className="absolute bottom-8 right-6 h-2 w-2 rounded-full bg-[#FF6B00] [animation:pulse_2.2s_ease-in-out_infinite]" />
+    </div>
+  </div>
+);
+
 const SignUp = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [showDoctorSplash, setShowDoctorSplash] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [pendingUser, setPendingUser] = useState(null);
   const [smsOtp, setSmsOtp] = useState(["", "", "", "", "", ""]);
@@ -204,9 +234,26 @@ const SignUp = () => {
   };
 
   // ✅ HELPER: LocalStorage token configuration dashboard navigation ke liye
-  const handleAuthSuccess = (supabaseUser) => {
+  const handleAuthSuccess = async (supabaseUser, authSession = null) => {
     try {
       if (supabaseUser) {
+        if (authSession?.access_token && authSession?.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: authSession.access_token,
+            refresh_token: authSession.refresh_token,
+          });
+
+          if (!persistFreshAuthTokens(authSession)) {
+            throw new Error('Fresh signup session was not issued.');
+          }
+        }
+
+        const { data: verifiedUserData, error: verifiedUserError } = await supabase.auth.getUser();
+        if (verifiedUserError || !verifiedUserData?.user?.id) {
+          throw verifiedUserError || new Error('Signup session could not be verified.');
+        }
+
+        setShowDoctorSplash(true);
         persistSupabaseSession(supabaseUser, {
           name: formData.name,
           businessName: formData.businessName,
@@ -220,10 +267,12 @@ const SignUp = () => {
         });
         
         // 🚀 Seedha Dashboard!
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       }
     } catch (error) {
       console.error("Local Storage Token Save Error", error);
+      setShowDoctorSplash(false);
+      alert("Unable to complete signup session. Please try again.");
     }
   };
 
@@ -231,7 +280,6 @@ const SignUp = () => {
   const handleGoogleLogin = async () => {
     try {
       setLoading(true);
-      setStep(4);
       sessionStorage.setItem('yogidesk_google_auth_flow', 'signup');
       localStorage.setItem('yogidesk_google_auth_flow', 'signup');
       const { error } = await handleGoogleSignIn(getOAuthRedirectUrl('/auth-success?flow=signup'));
@@ -260,7 +308,6 @@ const SignUp = () => {
     try {
       if (step === 1) {
         await startSignupEmailVerification(null, cleanEmail);
-        alert(`OTP sent to ${cleanEmail}. Enter the email OTP to finish activation.`);
       } else if (step === 4) {
         const { data: sessionData } = await supabase.auth.getSession();
         const googleUser = sessionData?.session?.user || pendingUser;
@@ -305,7 +352,8 @@ const SignUp = () => {
           await ensureSignupWallet(pendingUser.id);
           await ensurePremiumTrialProfile(pendingUser.id, otpEmail);
           triggerWelcomeEmail(otpEmail, pendingUser.id);
-          handleAuthSuccess(pendingUser);
+          const { data: sessionData } = await supabase.auth.getSession();
+          await handleAuthSuccess(pendingUser, sessionData?.session);
           return;
         }
 
@@ -335,7 +383,7 @@ const SignUp = () => {
         }
 
         if (data?.session?.user) {
-          handleAuthSuccess(data.session.user);
+          await handleAuthSuccess(data.session.user, data.session);
           return;
         }
 
@@ -350,7 +398,7 @@ const SignUp = () => {
           return;
         }
 
-        handleAuthSuccess(signInData.user);
+        await handleAuthSuccess(signInData.user, signInData.session);
       } else {
         // --- STEP 2: BYPASS/MANUAL SIGNIN FROM COOLDOWN SCREEN ---
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
@@ -361,7 +409,7 @@ const SignUp = () => {
         if (signInError) {
           alert("Account is waiting for verification link or password incorrect.");
         } else {
-          handleAuthSuccess(signInData.user);
+          await handleAuthSuccess(signInData.user, signInData.session);
         }
       }
     } catch (error) {
@@ -373,9 +421,9 @@ const SignUp = () => {
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row w-full bg-white font-sans overflow-hidden">
-      {loading && (
+      {showDoctorSplash && (
         <AuthLoadingScreen
-          message={step === 3 ? 'Verifying your clinic signup code...' : 'Preparing your YogiDesk clinic workspace...'}
+          message="Opening your secure doctor workspace..."
         />
       )}
       
@@ -531,6 +579,7 @@ const SignUp = () => {
               </>
             ) : step === 3 ? (
               <>
+                <OtpSecurityAnimation />
                 <div className="text-center p-6 bg-orange-50 border border-orange-100 rounded-xl mb-4">
                    <p className="text-sm text-orange-700 font-medium">
                      Enter the secure OTP code sent to your email.
