@@ -1,12 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Facebook, Twitter, Instagram, Linkedin, Mail, Phone, MapPin } from 'lucide-react';
+import { Facebook, Twitter, Instagram, Linkedin } from 'lucide-react';
 
 const Footer = () => {
   return (
-    <footer className="bg-slate-900 text-white py-16">
+    <footer className="bg-slate-900 text-white pt-20 pb-12 md:pt-24 md:pb-16">
       <div className="max-w-7xl mx-auto px-6">
-        <div className="grid md:grid-cols-4 gap-8">
+        <div className="grid gap-y-12 gap-x-8 md:grid-cols-4 md:gap-x-12">
           {/* Company Info */}
           <div className="md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
@@ -60,9 +60,9 @@ const Footer = () => {
         </div>
 
         {/* Bottom Section */}
-        <div className="border-t border-slate-800 mt-12 pt-8 text-center">
+        <div className="border-t border-slate-800 mt-14 pt-8 text-center">
           <p className="text-slate-400 text-sm">© 2026 Yogi Desk AI. All rights reserved.</p>
-          <p className="text-slate-500 text-xs mt-2">A product of Yogi Desk</p>
+          <p className="mt-2 text-xs font-medium tracking-wide text-slate-500">A product of Vyapar Wallah</p>
         </div>
       </div>
     </footer>

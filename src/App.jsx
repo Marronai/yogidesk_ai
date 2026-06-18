@@ -12,6 +12,7 @@ import DashboardHome from './pages/DashboardHome';
 import LeadsCRM from './pages/LeadsCRM';
 import Team from './pages/Team';
 import Pricing from './pages/Pricing';
+import Features from './pages/Features';
 import Subscription from './pages/Subscription';
 import YogiWallet from './pages/YogiWallet';
 import LandingPage from './pages/LandingPage';
@@ -72,6 +73,7 @@ const AppContent = () => {
           {/* ============================== */}
           
           <Route path="/" element={<LandingPage />} />
+          <Route path="/features" element={<Features />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />

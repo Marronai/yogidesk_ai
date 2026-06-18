@@ -9,10 +9,10 @@ const navLinks = [
 ];
 
 const featureLinks = [
-  { label: 'WhatsApp Automation', desc: 'Automated patient alerts & logs', to: '/#features' },
-  { label: 'OPD Smart Queue', desc: 'Live token tracking for clinics', to: '/#features' },
-  { label: 'Quick Invoicing', desc: '1-Click payment links via WhatsApp', to: '/#features' },
-  { label: 'Growth Analytics', desc: 'Track retention & clinic revenue leakage', to: '/#features' },
+  { label: 'WhatsApp Automation', desc: 'Automated patient alerts & logs', to: '/features' },
+  { label: 'Staff Setup', desc: 'RBAC roles for clinic teams', to: '/features#staff-setup' },
+  { label: 'Patient Directory', desc: 'CSV and Excel data ingestion', to: '/features#patient-directory' },
+  { label: 'Growth Analytics', desc: 'Track retention & clinic revenue leakage', to: '/features#ai-balance' },
 ];
 
 const PublicNavbar = () => {
@@ -21,7 +21,7 @@ const PublicNavbar = () => {
   const { pathname, hash } = useLocation();
 
   const isActive = (to) => {
-    if (to === '/#features') return pathname === '/' && hash === '#features';
+    if (to.startsWith('/features')) return pathname === '/features';
     if (to === '/') return pathname === '/' && hash !== '#features';
     return pathname === to;
   };
@@ -56,7 +56,7 @@ const PublicNavbar = () => {
           >
             <button
               type="button"
-              className={`${isActive('/#features') ? 'text-[#FF6B00]' : 'hover:text-[#FF6B00]'} flex items-center gap-1 py-9 transition`}
+              className={`${isActive('/features') ? 'text-[#FF6B00]' : 'hover:text-[#FF6B00]'} flex items-center gap-1 py-9 transition`}
               onClick={() => setIsFeaturesOpen((open) => !open)}
               aria-expanded={isFeaturesOpen}
             >
@@ -116,9 +116,9 @@ const PublicNavbar = () => {
           </Link>
           <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-2">
             <Link
-              to="/#features"
+              to="/features"
               onClick={closeMenu}
-              className={`${isActive('/#features') ? 'text-[#FF6B00]' : 'text-slate-700'} block px-2 py-2 font-black`}
+              className={`${isActive('/features') ? 'text-[#FF6B00]' : 'text-slate-700'} block px-2 py-2 font-black`}
             >
               Features
             </Link>
