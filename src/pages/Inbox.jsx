@@ -54,6 +54,45 @@ const resolveDeliveryStatus = (...statuses) => statuses
   .filter(Boolean)
   .sort((a, b) => deliveryStatusRank(b) - deliveryStatusRank(a))[0] || '';
 const normalizeMessageText = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+const stringifyFailureReason = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map(stringifyFailureReason).filter(Boolean).join(' ');
+  if (typeof value === 'object') {
+    return value.message ||
+      value.error_message ||
+      value.error?.message ||
+      value.title ||
+      value.error_title ||
+      value.details ||
+      value.reason ||
+      value.code ||
+      '';
+  }
+  return '';
+};
+const resolveFailureReason = (source = {}) => {
+  const metadata = source.metadata || {};
+  const lastTemplate = metadata.last_template || {};
+  const candidates = [
+    source.send_error,
+    source.delivery_error,
+    source.error_message,
+    source.error,
+    metadata.send_error,
+    metadata.delivery_error,
+    metadata.error_message,
+    metadata.error,
+    metadata.meta_result?.error,
+    metadata.meta_result?.response?.error,
+    lastTemplate.send_error,
+    lastTemplate.delivery_error,
+    lastTemplate.error_message,
+    lastTemplate.error,
+  ];
+  return candidates.map(stringifyFailureReason).find(Boolean) || 'Message failed. No detailed reason was received from Meta.';
+};
 const mapStoredMessage = (item = {}) => ({
   id: item.id || item.created_at || `${Date.now()}-${Math.random()}`,
   meta_message_id: item.meta_message_id || item.metadata?.meta_message_id || '',
@@ -588,13 +627,23 @@ const InboxContent = () => {
     return `Sending in ${minutes}:${seconds}`;
   };
 
-  const renderStatusBadge = (status) => {
+  const renderStatusBadge = (status, source = {}) => {
     const normalized = normalizeDeliveryStatus(status);
     if (normalized === 'SENDING') return <Loader size={12} className="animate-spin text-slate-400" />;
     if (normalized === 'SENT') return <Check size={13} className="text-slate-400" />;
     if (normalized === 'DELIVERED') return <CheckCheck size={14} className="text-slate-400" />;
     if (normalized === 'READ') return <CheckCheck size={14} className="text-sky-400" style={{ color: '#34B7F1' }} />;
-    if (normalized === 'FAILED') return <AlertCircle size={13} className="text-rose-500" />;
+    if (normalized === 'FAILED') {
+      return (
+        <span
+          className="inline-flex cursor-help"
+          title={`Message failed: ${resolveFailureReason(source)}`}
+          aria-label={`Message failed: ${resolveFailureReason(source)}`}
+        >
+          <AlertCircle size={13} className="text-rose-500" />
+        </span>
+      );
+    }
     return null;
   };
 
@@ -1268,7 +1317,7 @@ const InboxContent = () => {
                   <h3 className="truncate text-sm font-bold text-slate-800">{sanitizeTextInput(chat.name)}</h3>
                   <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-slate-400">
                     {chat.time}
-                    {renderStatusBadge(chat.deliveryStatus || chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status)}
+                    {renderStatusBadge(chat.deliveryStatus || chat.metadata?.delivery_status || chat.metadata?.last_template?.delivery_status, chat)}
                   </span>
                 </div>
                 {String(chat.status || '').toUpperCase() === 'QUEUED' ? (
@@ -1356,7 +1405,7 @@ const InboxContent = () => {
                     <p className="text-[13.5px] font-medium leading-relaxed">{messageText}</p>
                     <div className="mt-1 flex items-center justify-end gap-1">
                       <span className="text-[9px] font-medium opacity-60">{msg.time}</span>
-                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && (renderStatusBadge(msg.status || msg.metadata?.delivery_status) || <Check size={12} className="text-slate-400" />)}
+                      {isSentByMe && !(msg.is_private_note || msg.type === 'private') && (renderStatusBadge(msg.status || msg.metadata?.delivery_status, msg) || <Check size={12} className="text-slate-400" />)}
                     </div>
                   </div>
                 </div>
