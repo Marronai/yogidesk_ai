@@ -2,6 +2,8 @@ import api from './api';
 
 const META_SDK_ID = 'facebook-jssdk';
 const META_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
+const DEFAULT_META_APP_ID = '27549095528015936';
+const DEFAULT_META_EMBEDDED_SIGNUP_CONFIG_ID = '1679017086475517';
 
 const loadMetaSdk = () => new Promise((resolve, reject) => {
   if (window.FB) {
@@ -61,6 +63,10 @@ export const normalizeMetaEmbeddedSignupConfigId = (value) => {
 };
 
 export const getMetaEmbeddedSignupConfig = async () => {
+  const fallbackConfig = {
+    appId: DEFAULT_META_APP_ID,
+    configId: DEFAULT_META_EMBEDDED_SIGNUP_CONFIG_ID,
+  };
   const localConfig = {
     appId: String(import.meta.env.VITE_META_APP_ID || '').trim(),
     configId: normalizeMetaEmbeddedSignupConfigId(import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID),
@@ -68,14 +74,21 @@ export const getMetaEmbeddedSignupConfig = async () => {
 
   if (localConfig.appId && localConfig.configId) return localConfig;
 
-  const response = await api.get('/settings/meta-embedded-signup/config');
-  const data = response.data?.data || {};
-  const remoteConfig = {
-    appId: String(data.appId || data.app_id || '').trim(),
-    configId: normalizeMetaEmbeddedSignupConfigId(data.configId || data.config_id || ''),
-  };
+  try {
+    const response = await api.get('/settings/meta-embedded-signup/config');
+    const data = response.data?.data || {};
+    const remoteConfig = {
+      appId: String(data.appId || data.app_id || '').trim(),
+      configId: normalizeMetaEmbeddedSignupConfigId(data.configId || data.config_id || ''),
+    };
 
-  if (remoteConfig.appId && remoteConfig.configId) return remoteConfig;
+    if (remoteConfig.appId && remoteConfig.configId) return remoteConfig;
+  } catch (error) {
+    const status = Number(error?.response?.status || 0);
+    if (status && status !== 404) throw error;
+  }
+
+  if (fallbackConfig.appId && fallbackConfig.configId) return fallbackConfig;
   throw new Error('Meta Embedded Signup is not configured.');
 };
 
