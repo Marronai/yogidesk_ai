@@ -45,6 +45,12 @@ const {
     startTrialReminderJob
 } = require('./services/trialService');
 const { ensureMetaReviewerAccount, isMetaReviewerEmail } = require('./services/metaReviewerAccountService');
+const {
+    applyCorsHeaders,
+    buildCorsOptions,
+    createApiRateLimiter,
+    securityHeaders
+} = require('./utils/httpSecurity');
 
 const app = express();
 const frontendBuildDir = path.resolve(__dirname, '..', 'dist');
@@ -83,41 +89,18 @@ const isRazorpayWebhookBodyRoute = (req = {}) => {
     return originalUrl.startsWith('/api/payments/razorpay-webhook');
 };
 
-const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
-const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-YogiDesk-User-Email, X-Hub-Signature-256, X-Requested-With';
-const CORS_ALLOWED_ORIGINS = new Set([
-    'https://yogidesk-ai.com',
-    'https://www.yogidesk-ai.com',
-    'http://yogidesk-ai.com',
-    'http://www.yogidesk-ai.com',
-    'http://localhost:5173'
-]);
-const resolveCorsOrigin = (origin) => (
-    origin && CORS_ALLOWED_ORIGINS.has(origin)
-        ? origin
-        : 'https://yogidesk-ai.com'
-);
-const corsOptions = {
-    origin: (origin, callback) => callback(null, resolveCorsOrigin(origin)),
-    methods: CORS_ALLOWED_METHODS,
-    allowedHeaders: CORS_ALLOWED_HEADERS,
-    credentials: true,
-    optionsSuccessStatus: 204
-};
+const corsOptions = buildCorsOptions();
 
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(req.headers.origin));
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS);
-    res.setHeader('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-});
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(securityHeaders);
+app.use(applyCorsHeaders);
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+app.use('/api', createApiRateLimiter());
 
 app.use(express.json({
+    limit: process.env.JSON_BODY_LIMIT || '5mb',
     type: (req) => (
         isWhatsAppWebhookBodyRoute(req) ||
         isRazorpayWebhookBodyRoute(req) ||
@@ -129,7 +112,7 @@ app.use(express.json({
         }
     }
 }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: process.env.URLENCODED_BODY_LIMIT || '1mb' }));
 
 const getMetaReviewBearerToken = (req) => {
     const header = String(req.headers.authorization || '');
@@ -191,6 +174,9 @@ const emptyMetaReviewPayloadForPath = (path) => {
     if (path.startsWith('/api/settings/knowledge-base') || path.startsWith('/settings/knowledge-base')) {
         return { status: 200, body: { success: true, data: {} } };
     }
+    if (path.startsWith('/api/settings/meta-embedded-signup') || path.startsWith('/settings/meta-embedded-signup')) {
+        return { status: 200, body: { success: true, skipped: true, data: { meta_configured: false } } };
+    }
     if (path.startsWith('/api/chat/toggle-ai')) {
         return { status: 200, body: { success: true, skipped: true } };
     }
@@ -217,13 +203,6 @@ const metaReviewIsolationGate = async (req, res, next) => {
 
 app.use(metaReviewIsolationGate);
 
-app.use((req, res, next) => {
-    if (req.url.includes('request-email-otp')) {
-        console.log("[YogiDesk Critical Debug] Caught target route! Method:", req.method, "URL:", req.url);
-    }
-    next();
-});
-
 app.use('/api/auth', authRoutes);
 
 app.get('/', (req, res) => {
@@ -242,6 +221,69 @@ const TEAM_INVITE_EXPIRY_DAYS = 3;
 const TEAM_SLOT_SWAP_COOLDOWN_DAYS = 5;
 const STAFF_MEMBERS_TABLE = 'staff_members';
 const RATE_CARD = { UTILITY: 0.20, MARKETING: 1.30, AUTHENTICATION: 0.20 };
+const getInviteSigningSecret = () => (
+    process.env.TEAM_INVITE_SECRET ||
+    process.env.JWT_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    'yogidesk-dev-team-invite-secret'
+);
+const signTeamInvitePayload = (payload = {}) => {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = crypto
+        .createHmac('sha256', getInviteSigningSecret())
+        .update(body)
+        .digest('base64url');
+    return `${body}.${signature}`;
+};
+const verifyTeamInviteToken = (token = '') => {
+    const [body, signature] = String(token || '').trim().split('.');
+    if (!body || !signature) return null;
+
+    const expectedSignature = crypto
+        .createHmac('sha256', getInviteSigningSecret())
+        .update(body)
+        .digest('base64url');
+    const expectedBuffer = Buffer.from(expectedSignature);
+    const signatureBuffer = Buffer.from(signature);
+    if (expectedBuffer.length !== signatureBuffer.length || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)) return null;
+
+    try {
+        const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+        if (!payload?.member_id || !payload?.email || !payload?.exp || Number(payload.exp) * 1000 <= Date.now()) return null;
+        return payload;
+    } catch {
+        return null;
+    }
+};
+const buildSignedTeamInviteLink = ({ inviteLink, member }) => {
+    const fallbackOrigin = String(process.env.FRONTEND_URL || 'https://yogidesk-ai.com').replace(/\/+$/, '');
+    let url;
+    try {
+        url = new URL(inviteLink || '/accept-invite', fallbackOrigin);
+    } catch {
+        url = new URL('/accept-invite', fallbackOrigin);
+    }
+    const allowedInviteHosts = new Set([
+        'yogidesk-ai.com',
+        'www.yogidesk-ai.com',
+        'localhost',
+        '127.0.0.1'
+    ]);
+    if (!allowedInviteHosts.has(url.hostname)) {
+        url = new URL('/accept-invite', fallbackOrigin);
+    }
+    url.pathname = '/accept-invite';
+    url.hash = '';
+    const token = signTeamInvitePayload({
+        member_id: member.id,
+        admin_id: member.admin_id,
+        email: normalizeEmail(member.email),
+        exp: Math.floor(new Date(member.invite_expires_at).getTime() / 1000)
+    });
+    url.searchParams.set('email', normalizeEmail(member.email));
+    url.searchParams.set('token', token);
+    return url.toString();
+};
 const normalizeTier = (tier = 'starter') => String(tier).toLowerCase().split(' ')[0];
 const normalizePhone = (phone) => String(phone || '').replace(/[^\d+]/g, '');
 const phoneDigitsOnly = (value) => String(value || '').replace(/\D/g, '');
@@ -644,6 +686,7 @@ const shouldCheckDoctorSuspension = (req = {}) => {
         '/api/messages/send',
         '/api/whatsapp',
         '/api/templates',
+        '/api/settings/meta-embedded-signup',
         '/api/payments/meta-connection'
     ].some((prefix) => path.startsWith(prefix));
 };
@@ -961,36 +1004,36 @@ app.post('/api/auth/request-email-otp', requestHybridEmailOtp);
 app.post('/api/auth/verify-email-otp', verifyHybridEmailOtp);
 app.post('/api/auth/verify-phone-otp', verifyHybridPhoneOtp);
 
-app.post('/api/team/dispatch-invite-email', async (req, res) => {
+app.post('/api/team/dispatch-invite-email', attachDoctorSession, async (req, res) => {
     try {
-        const { email, name, inviteLink } = req.body || {};
+        const db = supabaseAdmin || supabase;
+        const doctorId = req.user?.id;
+        const email = normalizeEmail(req.body?.email);
+        const inviteLink = String(req.body?.inviteLink || '').trim();
+        if (!db?.from || !doctorId) return res.status(401).json({ success: false, msg: 'Authenticated doctor session is required.' });
         if (!email || !inviteLink) return res.status(400).json({ success: false, msg: 'Email and invite link are required' });
+
+        const { data: member, error: memberError } = await db
+            .from(STAFF_MEMBERS_TABLE)
+            .select('id, admin_id, name, email, status, invite_expires_at')
+            .eq('admin_id', doctorId)
+            .eq('email', email)
+            .eq('status', 'PENDING')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (memberError) throw memberError;
+        if (!member?.id) return res.status(404).json({ success: false, msg: 'Pending invite not found.' });
+        if (member.invite_expires_at && new Date(member.invite_expires_at).getTime() <= Date.now()) {
+            await db.from(STAFF_MEMBERS_TABLE).update({ status: 'EXPIRED' }).eq('id', member.id);
+            return res.status(410).json({ success: false, msg: 'Invite has expired.' });
+        }
+
+        const signedInviteLink = buildSignedTeamInviteLink({ inviteLink, member });
         const sent = await sendDirectEmail(
             email,
             'Welcome! You have been invited to YogiDesk AI',
-            `
-              <div style="font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-                    <div style="background-color: #ff6b00; padding: 20px; text-align: center;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold; letter-spacing: 1px;">YogiDesk AI</h1>
-                    </div>
-                    <div style="padding: 30px; text-align: center;">
-                        <h2 style="color: #111827; margin-top: 0;">You've Been Invited!</h2>
-                        <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Hi ${name || 'there'},</p>
-                        <p style="color: #4b5563; font-size: 16px; line-height: 1.6; text-align: left;">Your clinic administrator has invited you to join their secure workspace on <strong>YogiDesk AI</strong>.</p>
-                        <div style="margin: 40px 0;">
-                            <a href="${inviteLink}" style="display: inline-block; background-color: #ff6b00; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: bold; box-shadow: 0 4px 6px rgba(255,107,0,0.3);">Accept Invite & Create Password</a>
-                        </div>
-                        <p style="color: #4b5563; font-size: 14px; line-height: 1.6; text-align: left;">If the button doesn't work, copy and paste this link into your browser:<br>
-                        <a href="${inviteLink}" style="color: #ff6b00; word-break: break-all;">${inviteLink}</a></p>
-                    </div>
-                    <div style="background-color: #f1f1f1; padding: 15px; text-align: center; border-top: 1px solid #e0e0e0;">
-                        <p style="margin: 0; font-size: 12px; color: #666;">&copy; ${new Date().getFullYear()} YogiDesk AI. All rights reserved.</p>
-                        <p style="margin: 5px 0 0 0; font-size: 10px; color: #999;">A product by Vyapar Wallah</p>
-                    </div>
-                </div>
-              </div>
-            `,
+            buildTeamInviteEmail({ email, name: member.name || 'there', inviteLink: signedInviteLink }),
             'system'
         );
 
@@ -1299,11 +1342,12 @@ app.post('/api/team/invite', attachDoctorSession, async (req, res) => {
                 is_active: true,
                 invite_expires_at: addDaysIso(new Date(), TEAM_INVITE_EXPIRY_DAYS)
             }])
-            .select('id, name, email, status, created_at, invite_expires_at, deleted_at, is_active')
+            .select('id, admin_id, clinic_id, name, email, status, created_at, invite_expires_at, deleted_at, is_active')
             .single();
         if (error) throw error;
 
-        const sent = await sendDirectEmail(email, 'Welcome! You have been invited to YogiDesk AI', buildTeamInviteEmail({ email, name, inviteLink }), 'system');
+        const signedInviteLink = buildSignedTeamInviteLink({ inviteLink, member: data });
+        const sent = await sendDirectEmail(email, 'Welcome! You have been invited to YogiDesk AI', buildTeamInviteEmail({ email, name, inviteLink: signedInviteLink }), 'system');
         return res.status(201).json({ success: true, member: data, emailSent: sent });
     } catch (error) {
         console.error('Team invite failed:', error.message || error, error.details || '');
@@ -1407,6 +1451,7 @@ app.post('/api/team/setup-password', async (req, res) => {
 
         const email = normalizeEmail(req.body?.email);
         const password = String(req.body?.password || '');
+        const inviteToken = String(req.body?.token || req.body?.inviteToken || '').trim();
 
         if (!email) return res.status(400).json({ success: false, message: 'Invite email is required.' });
         if (password.length < 8) return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
@@ -1421,6 +1466,19 @@ app.post('/api/team/setup-password', async (req, res) => {
 
         if (memberError) throw memberError;
         if (!member) return res.status(404).json({ success: false, message: 'Invite not found for this email.' });
+
+        const invitePayload = verifyTeamInviteToken(inviteToken);
+        const allowLegacyInviteSetup = String(process.env.ALLOW_LEGACY_INVITE_SETUP || '').toLowerCase() === 'true';
+        if (!invitePayload && !allowLegacyInviteSetup) {
+            return res.status(403).json({ success: false, message: 'Invite link is invalid or missing. Please ask your admin to resend the invite.' });
+        }
+        if (invitePayload && (
+            invitePayload.member_id !== member.id ||
+            normalizeEmail(invitePayload.email) !== email ||
+            invitePayload.admin_id !== member.admin_id
+        )) {
+            return res.status(403).json({ success: false, message: 'Invite link does not match this staff invitation.' });
+        }
 
         if (String(member.status || '').toUpperCase() !== 'PENDING') {
             return res.status(409).json({ success: false, message: 'This invite is no longer pending.' });
@@ -4049,8 +4107,6 @@ app.get('/api/templates/dashboard', async (req, res) => {
         const sessionUser = await getSupabaseSessionUser(req);
         const userId = sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const profile = await getDoctorTemplateProfile(userId);
         const specializationQuery = normalizeSpecializationSlug(profile.specialization);
@@ -4149,8 +4205,6 @@ app.get('/api/profile/context', async (req, res) => {
         const sessionUser = await getSupabaseSessionUser(req);
         const userId = sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-        if (!userId) return res.status(401).json({ success: false, message: 'Authenticated doctor session is required.' });
-        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const profile = await getDoctorTemplateProfile(userId);
         const metaConfig = await getMetaConfigForUser(userId);
@@ -4722,6 +4776,147 @@ const handleMetaConnectionFetch = async (req, res) => {
     }
 };
 
+const extractMissingPayloadColumn = (error) => {
+    const text = String(`${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`);
+    const quoted = text.match(/'([^']+)'\s+column/i);
+    if (quoted?.[1]) return quoted[1];
+    const doubleQuoted = text.match(/column\s+"([^"]+)"/i);
+    if (doubleQuoted?.[1]) return doubleQuoted[1];
+    const cache = text.match(/schema cache.*?['"]([^'"]+)['"]/i);
+    return cache?.[1] || '';
+};
+
+const upsertDoctorMetaConnectionSafely = async ({ userId, payload }) => {
+    const db = supabaseAdmin || supabase;
+    let safePayload = { id: userId, ...payload };
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+        const { error } = await db.from('doctor_profiles').upsert(safePayload, { onConflict: 'id' });
+        if (!error) return;
+
+        const missingColumn = extractMissingPayloadColumn(error);
+        if (!isMissingColumnError(error) || !missingColumn || !Object.prototype.hasOwnProperty.call(safePayload, missingColumn)) {
+            throw error;
+        }
+
+        const { [missingColumn]: _removed, ...nextPayload } = safePayload;
+        safePayload = nextPayload;
+    }
+
+    throw new Error('Meta connection save retry limit reached.');
+};
+
+const exchangeEmbeddedSignupCode = async (code) => {
+    const appId = String(process.env.META_APP_ID || '').trim();
+    const appSecret = String(process.env.META_APP_SECRET || '').trim();
+    if (!appId || !appSecret) throw new Error('Meta app credentials are not configured on the server.');
+
+    const response = await axios.get('https://graph.facebook.com/v21.0/oauth/access_token', {
+        params: {
+            client_id: appId,
+            client_secret: appSecret,
+            code
+        },
+        timeout: 15000,
+        validateStatus: (status) => status >= 200 && status < 300
+    });
+
+    const accessToken = String(response.data?.access_token || '').trim();
+    if (!accessToken) throw new Error('Meta did not return a system user access token.');
+    return accessToken;
+};
+
+const subscribeEmbeddedSignupWaba = async ({ businessAccountId, accessToken }) => {
+    if (process.env.META_EMBEDDED_SIGNUP_SUBSCRIBE_APP === 'false') return;
+    try {
+        await axios.post(`https://graph.facebook.com/v21.0/${businessAccountId}/subscribed_apps`, null, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 10000,
+            validateStatus: (status) => status >= 200 && status < 300
+        });
+    } catch (error) {
+        console.warn('Meta embedded signup subscribed_apps step skipped:', error.response?.data || error.message || error);
+    }
+};
+
+const handleMetaEmbeddedSignupComplete = async (req, res) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+        const code = String(req.body?.code || '').trim();
+        const phoneNumberId = sanitizeMetaId(req.body?.phoneNumberId || req.body?.phone_number_id);
+        const businessAccountId = sanitizeMetaId(
+            req.body?.businessAccountId ||
+            req.body?.wabaId ||
+            req.body?.waba_id ||
+            req.body?.whatsapp_business_account_id
+        );
+        const businessId = sanitizeMetaId(req.body?.businessId || req.body?.business_id);
+
+        if (!code) {
+            return res.status(400).json({ success: false, message: 'Meta authorization code is required.' });
+        }
+        if (!phoneNumberId || !businessAccountId) {
+            return res.status(400).json({ success: false, message: 'Meta signup did not return phone number ID and WABA ID.' });
+        }
+
+        const existingMetaConfig = await getMetaConfigForUser(sessionUser.id);
+        if (existingMetaConfig.meta_configured || existingMetaConfig.meta_locked) {
+            return res.status(403).json({
+                success: false,
+                message: META_CONFIGURATION_LOCKED_MESSAGE,
+                is_locked: true
+            });
+        }
+
+        const accessToken = await exchangeEmbeddedSignupCode(code);
+        const isValid = await validateMetaCredentials({ phoneNumberId, businessAccountId, accessToken });
+        if (!isValid) {
+            return res.status(400).json({ success: false, message: 'Meta connection could not be verified.' });
+        }
+
+        await subscribeEmbeddedSignupWaba({ businessAccountId, accessToken });
+
+        await upsertDoctorMetaConnectionSafely({
+            userId: sessionUser.id,
+            payload: {
+                email: sessionUser.email || null,
+                meta_phone_number_id: phoneNumberId,
+                meta_waba_id: businessAccountId,
+                system_user_token: accessToken,
+                whatsapp_phone_number_id: phoneNumberId,
+                whatsapp_business_account_id: businessAccountId,
+                whatsapp_access_token: accessToken,
+                meta_business_manager_id: businessId || null,
+                whatsapp_business_id: businessId || null,
+                meta_configured: true,
+                meta_connection_source: 'embedded_signup',
+                meta_embedded_signup_connected_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'WhatsApp connected successfully.',
+            data: {
+                meta_phone_number_id: phoneNumberId,
+                meta_waba_id: businessAccountId,
+                meta_business_manager_id: businessId,
+                meta_configured: true,
+                is_locked: true
+            }
+        });
+    } catch (error) {
+        console.error('Meta embedded signup completion failed:', error.response?.data || error.message || error);
+        return res.status(500).json({
+            success: false,
+            message: error.response?.data?.error?.message || error.message || 'Unable to complete WhatsApp connection.'
+        });
+    }
+};
+
 const attachSessionUserForMetaConnection = async (req, res, next) => {
     const sessionUser = await getSupabaseSessionUser(req);
     if (!sessionUser) return res.status(401).json({ success: false, message: "Unauthorized" });
@@ -4832,6 +5027,8 @@ app.get('/settings/meta-connection', handleMetaConnectionFetch);
 
 app.post('/api/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
 app.post('/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
+app.post('/api/settings/meta-embedded-signup/complete', handleMetaEmbeddedSignupComplete);
+app.post('/settings/meta-embedded-signup/complete', handleMetaEmbeddedSignupComplete);
 
 app.get('/api/settings/knowledge-base', handleKnowledgeBaseFetch);
 app.get('/settings/knowledge-base', handleKnowledgeBaseFetch);
@@ -5374,6 +5571,7 @@ app.post('/api/inbox/upload-media', async (req, res) => {
         const sessionUser = await getSupabaseSessionUser(req);
         const userId = requestBody.userId || sessionUser?.id;
         if (!userId) return res.status(401).json({ success: false, message: 'Authenticated user is required.' });
+        if (!sessionUser?.id || sessionUser.id !== userId) return res.status(403).json({ success: false, message: 'Forbidden' });
 
         const uploaded = await uploadInboxMedia({ db, userId, file: mediaFile });
         if (!uploaded.url) throw new Error('Unable to generate a public media URL.');
@@ -5966,7 +6164,7 @@ const isPlaceholderMetaToken = (token) => {
 
 const safeDecryptMetaToken = (token) => {
     const value = String(token || '').trim();
-    if (!value || !/^[a-f0-9]{32,}$/i.test(value) || value.length % 2 !== 0) return '';
+    if (!value || (value.startsWith('v2:') ? false : (!/^[a-f0-9]{32,}$/i.test(value) || value.length % 2 !== 0))) return '';
     try {
         const decrypted = decryptCredentialValue(value);
         return String(decrypted || '').trim();

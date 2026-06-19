@@ -300,7 +300,7 @@ router.get('/google/callback',
             );
 
             // ✅ Frontend redirect
-            res.redirect(`https://yogidesk-ai.com/auth-success?token=${token}`);
+            res.redirect(`https://yogidesk-ai.com/auth-success#token=${encodeURIComponent(token)}`);
         } catch (error) {
             console.error('❌ Google callback error:', error);
             res.redirect('https://yogidesk-ai.com/login?error=auth_failed');

@@ -156,8 +156,8 @@ exports.loginSuperadmin = async (req, res) => {
         role: owner ? normalizeRole(
           data.user.app_metadata?.role ||
           data.user.app_metadata?.user_role ||
-          data.user.user_metadata?.role ||
-          data.user.user_metadata?.user_role
+          data.user.app_metadata?.account_role ||
+          'superadmin'
         ).replace('_', '') : 'superadmin_staff',
         staffId: staff?.id || null,
         permissions: owner ? fullPermissions() : rowPermissions(staff),

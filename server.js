@@ -6,16 +6,17 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, 'backend', '.env') });
 const paymentRoutes = require('./backend/routes/paymentRoutes');
 const authRoutes = require('./backend/routes/authRoutes');
+const {
+    applyCorsHeaders,
+    buildCorsOptions,
+    createApiRateLimiter,
+    securityHeaders
+} = require('./backend/utils/httpSecurity');
 
 // Port automatic Hostinger decide karega, local par 5000
 const PORT = process.env.PORT || 5000;
 
-const corsOptions = {
-    origin: ['https://yogidesk-ai.com', 'https://www.yogidesk-ai.com', 'http://yogidesk-ai.com', 'http://www.yogidesk-ai.com', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-YogiDesk-User-Email', 'X-Hub-Signature-256', 'X-Requested-With'],
-    credentials: true
-};
+const corsOptions = buildCorsOptions();
 const isWhatsAppWebhookBodyRoute = (req = {}) => {
     const originalUrl = String(req.originalUrl || req.url || '');
     return originalUrl.startsWith('/api/webhooks/whatsapp') ||
@@ -24,9 +25,15 @@ const isWhatsAppWebhookBodyRoute = (req = {}) => {
 };
 
 // Body parser jisse Meta aur Supabase ka data read ho sake
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(securityHeaders);
+app.use(applyCorsHeaders);
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+app.use('/api', createApiRateLimiter());
 app.use(express.json({
+    limit: process.env.JSON_BODY_LIMIT || '5mb',
     type: (req) => (
         isWhatsAppWebhookBodyRoute(req) ||
         Boolean(req.is(['application/json', 'application/*+json']))
@@ -37,14 +44,7 @@ app.use(express.json({
         }
     }
 }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use((req, res, next) => {
-    if (req.url.includes('request-email-otp')) {
-        console.log("[YogiDesk Critical Debug] Caught target route! Method:", req.method, "URL:", req.url);
-    }
-    next();
-});
+app.use(express.urlencoded({ extended: true, limit: process.env.URLENCODED_BODY_LIMIT || '1mb' }));
 
 app.use('/api/auth', authRoutes);
 

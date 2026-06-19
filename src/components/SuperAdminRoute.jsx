@@ -9,13 +9,6 @@ const getSuperadminRole = (user, profile) => String(
   user?.app_metadata?.role ||
   user?.app_metadata?.user_role ||
   user?.app_metadata?.account_role ||
-  user?.user_metadata?.role ||
-  user?.user_metadata?.user_role ||
-  user?.user_metadata?.account_role ||
-  profile?.custom_profile?.role ||
-  profile?.custom_profile?.user_role ||
-  profile?.user_role ||
-  profile?.role ||
   ''
 ).trim().toLowerCase();
 

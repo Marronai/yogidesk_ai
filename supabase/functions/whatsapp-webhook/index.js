@@ -6,6 +6,49 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-hub-signature-256',
 };
 
+const getWebhookVerifyToken = () => Deno.env.get('WHATSAPP_VERIFY_TOKEN') || Deno.env.get('META_VERIFY_TOKEN') || '';
+const getWebhookAppSecret = () => Deno.env.get('WHATSAPP_APP_SECRET') || Deno.env.get('META_APP_SECRET') || '';
+
+const constantTimeEqual = (left = '', right = '') => {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  if (leftBytes.length !== rightBytes.length) return false;
+  let diff = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= leftBytes[index] ^ rightBytes[index];
+  }
+  return diff === 0;
+};
+
+const hmacSha256Hex = async (secret, body) => {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  return Array.from(new Uint8Array(signature)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+const verifyMetaSignature = async (req, rawBody) => {
+  const appSecret = getWebhookAppSecret();
+  const signature = String(req.headers.get('x-hub-signature-256') || '').trim();
+  if (!appSecret || !rawBody || !/^sha256=[a-f0-9]{64}$/i.test(signature)) return false;
+  const expected = `sha256=${await hmacSha256Hex(appSecret, rawBody)}`;
+  return constantTimeEqual(signature.toLowerCase(), expected.toLowerCase());
+};
+
+const hasValidWhatsAppPayloadShape = (payload) => (
+  payload?.object === 'whatsapp_business_account' &&
+  Array.isArray(payload?.entry) &&
+  payload.entry.some((entry) => (
+    Array.isArray(entry?.changes) &&
+    entry.changes.some((change) => change?.field && change?.value && typeof change.value === 'object')
+  ))
+);
+
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') || '',
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
@@ -287,19 +330,6 @@ const resolveWorkspaceId = async (clinicMetaId, fallbackId, patientPhone, busine
     if (data?.id) return data.id;
   }
 
-  if (patientPhone) {
-    const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], patientPhone);
-    const { data } = await supabase
-      .from('inbox_chats')
-      .select('user_id, doctor_id')
-      .or(phoneFilter)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    return data?.user_id || data?.doctor_id || null;
-  }
-
   return null;
 };
 
@@ -342,6 +372,7 @@ const processWebhookPayload = async (payload, preExtractedStatuses = null) => {
   const { data: existingPatient } = await supabase
     .from('patients_ledger')
     .select('id')
+    .eq('user_id', workspaceId)
     .or(patientPhoneFilter)
     .limit(1)
     .maybeSingle();
@@ -357,13 +388,25 @@ const processWebhookPayload = async (payload, preExtractedStatuses = null) => {
 
   let chatId = null;
   const phoneFilter = buildPhoneOrFilter(['phone', 'patient_phone'], fromPhone);
-  const { data: existingChat } = await supabase
+  let { data: existingChat } = await supabase
     .from('inbox_chats')
     .select('id, unread_count, metadata')
+    .eq('user_id', workspaceId)
     .or(phoneFilter)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (!existingChat) {
+    const { data: doctorScopedChat } = await supabase
+      .from('inbox_chats')
+      .select('id, unread_count, metadata')
+      .eq('doctor_id', workspaceId)
+      .or(phoneFilter)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingChat = doctorScopedChat || null;
+  }
 
   if (existingChat?.id) {
     chatId = existingChat.id;
@@ -456,14 +499,34 @@ serve((req) => {
     const mode = url.searchParams.get('hub.mode');
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
-    if (mode === 'subscribe' && token === 'YogiDesk_Doctor_Secure_2026') return new Response(challenge || '', { status: 200 });
+    const verifyToken = getWebhookVerifyToken();
+    if (verifyToken && mode === 'subscribe' && constantTimeEqual(token || '', verifyToken)) return new Response(challenge || '', { status: 200 });
     return new Response('Forbidden', { status: 403 });
   }
 
   if (req.method !== 'POST') return json({ ok: false, error: 'Method not allowed' }, 405);
 
   try {
-    const payload = await req.json();
+    const rawBody = await req.text();
+    if (!await verifyMetaSignature(req, rawBody)) {
+      console.warn('WhatsApp Edge webhook signature rejected.', {
+        hasSignature: Boolean(String(req.headers.get('x-hub-signature-256') || '').trim()),
+        hasAppSecret: Boolean(getWebhookAppSecret()),
+      });
+      return new Response('EVENT_RECEIVED', {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+      });
+    }
+
+    const payload = JSON.parse(rawBody);
+    if (!hasValidWhatsAppPayloadShape(payload)) {
+      console.warn('WhatsApp Edge webhook ignored invalid payload shape.');
+      return new Response('EVENT_RECEIVED', {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
+      });
+    }
     const statuses = extractStatuses(payload);
     console.log('WhatsApp Edge webhook POST hit:', {
       object: payload?.object || null,

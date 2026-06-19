@@ -17,6 +17,7 @@ const AcceptInvite = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const invitedEmail = useMemo(() => String(searchParams.get('email') || '').trim().toLowerCase(), [searchParams]);
+  const inviteToken = useMemo(() => String(searchParams.get('token') || '').trim(), [searchParams]);
   const [form, setForm] = useState({ password: '', confirmPassword: '' });
   const [notice, setNotice] = useState('');
   const [success, setSuccess] = useState(false);
@@ -36,6 +37,10 @@ const AcceptInvite = () => {
       setNotice('Invite email is missing. Please open the link from your invitation email.');
       return;
     }
+    if (!inviteToken) {
+      setNotice('Invite token is missing. Please ask your clinic admin to resend the invitation.');
+      return;
+    }
     if (passwordError) {
       setNotice(passwordError);
       return;
@@ -50,6 +55,7 @@ const AcceptInvite = () => {
       const setupResponse = await api.post('/team/setup-password', {
         email: invitedEmail,
         password: form.password,
+        token: inviteToken,
       });
 
       if (setupResponse.data?.existingAccount) {
@@ -153,7 +159,7 @@ const AcceptInvite = () => {
 
           <button
             type="submit"
-            disabled={loading || !invitedEmail || Boolean(passwordError) || form.password !== form.confirmPassword}
+            disabled={loading || !invitedEmail || !inviteToken || Boolean(passwordError) || form.password !== form.confirmPassword}
             className="w-full rounded-2xl bg-orange-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none"
           >
             {loading ? 'Setting Password...' : 'Set Password & Complete Setup'}

@@ -9,6 +9,12 @@ const toMoneyNumber = (value) => {
   return Number.isFinite(amount) ? amount : 0;
 };
 
+const sanitizePostgrestSearch = (value) => String(value || '')
+  .replace(/[,%()"]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .slice(0, 80);
+
 const Campaigns = () => {
   const userId = localStorage.getItem('user_id');
   const [loading, setLoading] = useState(false);
@@ -138,7 +144,7 @@ const Campaigns = () => {
   };
 
   const lookupLedger = async (query = '') => {
-    const q = query.trim();
+    const q = sanitizePostgrestSearch(query);
     if (!q) {
       setLedgerMatches([]);
       return;

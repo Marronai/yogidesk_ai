@@ -70,6 +70,26 @@ const timingSafeEqualHex = (left, right) => {
   return safeLeft.length === safeRight.length && crypto.timingSafeEqual(safeLeft, safeRight);
 };
 
+const claimRazorpayPayment = async ({ userId, orderId, paymentId, purpose }) => {
+  if (!db?.from || !paymentId) return { claimed: true, unavailable: true };
+  const { error } = await db.from('payment_processing_locks').insert([{
+    provider: 'razorpay',
+    payment_id: paymentId,
+    order_id: orderId || null,
+    user_id: userId || null,
+    purpose: purpose || null,
+  }]);
+  if (!error) return { claimed: true };
+  if (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate')) {
+    return { claimed: false, duplicate: true };
+  }
+  if (isSchemaCacheError(error)) {
+    console.warn('Payment processing lock table unavailable; falling back to transaction duplicate checks.');
+    return { claimed: true, unavailable: true };
+  }
+  throw error;
+};
+
 const createAiReceipt = () => `ai_${Date.now()}_${Math.floor(Math.random() * 100)}`.slice(0, 39);
 
 const createShortReceipt = () => `rcpt_${Date.now()}_${Math.floor(Math.random() * 1000)}`.slice(0, 39);
@@ -889,6 +909,16 @@ router.post('/verify-ai-payment', async (req, res) => {
       return res.status(200).json({ success: true, message: 'Payment already processed.' });
     }
 
+    const claim = await claimRazorpayPayment({
+      userId,
+      orderId: razorpayOrderId,
+      paymentId: razorpayPaymentId,
+      purpose: 'ai_message_recharge',
+    });
+    if (!claim.claimed) {
+      return res.status(200).json({ success: true, message: 'Payment already processed.' });
+    }
+
     const { currentBalance, nextBalance, clinicId } = await creditAiMessagesAtomically({
       userId,
       aiMessages,
@@ -1014,6 +1044,14 @@ router.post('/razorpay-webhook', async (req, res) => {
       if (existingTransactionError) console.error('Subscription webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
       if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
 
+      const claim = await claimRazorpayPayment({
+        userId,
+        orderId,
+        paymentId,
+        purpose: 'subscription',
+      });
+      if (!claim.claimed) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
       const paymentReference = `${orderId}:${paymentId}`;
       await activateSubscriptionTier({ db, userId, tier: plan.tier || payment?.notes?.tier || 'GROWTH', paymentReference });
 
@@ -1059,6 +1097,14 @@ router.post('/razorpay-webhook', async (req, res) => {
 
       if (existingTransactionError) console.error('Wallet webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
       if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
+      const claim = await claimRazorpayPayment({
+        userId,
+        orderId,
+        paymentId,
+        purpose: 'wallet_recharge',
+      });
+      if (!claim.claimed) return res.status(200).json({ success: true, message: 'Payment already processed.' });
 
       const { currentBalance, nextBalance, currentWhatsappBalance, nextWhatsappCreditBalance } = await creditWalletRecharge({ userId, amount });
 
@@ -1108,6 +1154,14 @@ router.post('/razorpay-webhook', async (req, res) => {
 
     if (existingTransactionError) console.error('AI webhook duplicate check failed:', existingTransactionError.message || existingTransactionError);
     if (existingTransaction?.id) return res.status(200).json({ success: true, message: 'Payment already processed.' });
+
+    const claim = await claimRazorpayPayment({
+      userId,
+      orderId,
+      paymentId,
+      purpose: 'ai_message_recharge',
+    });
+    if (!claim.claimed) return res.status(200).json({ success: true, message: 'Payment already processed.' });
 
     const { currentBalance, nextBalance, clinicId } = await creditAiMessagesAtomically({
       userId,

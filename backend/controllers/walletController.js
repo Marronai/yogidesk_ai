@@ -106,6 +106,26 @@ const assertWalletOwner = async (userId) => {
   return !result.error && result.data?.user_id === userId;
 };
 
+const claimRazorpayPayment = async ({ userId, orderId, paymentId, purpose }) => {
+  if (!db?.from || !paymentId) return { claimed: true, unavailable: true };
+  const { error } = await db.from('payment_processing_locks').insert([{
+    provider: 'razorpay',
+    payment_id: paymentId,
+    order_id: orderId || null,
+    user_id: userId || null,
+    purpose: purpose || null,
+  }]);
+  if (!error) return { claimed: true };
+  if (error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate')) {
+    return { claimed: false, duplicate: true };
+  }
+  if (isSchemaCacheError(error)) {
+    console.warn('[YogiDesk Wallet] Payment processing lock table unavailable; falling back to transaction duplicate checks.');
+    return { claimed: true, unavailable: true };
+  }
+  throw error;
+};
+
 const upsertWalletCreditBalance = async ({ userId, walletRow, amount }) => {
   const currentBalance = Number(walletRow?.balance || 0);
   const currentWhatsappBalance = Number(walletRow?.whatsapp_credit_balance ?? currentBalance);
@@ -354,6 +374,19 @@ const verifyWalletPayment = async (req, res) => {
     }
 
     if (existingTransaction?.id) {
+      return res.status(200).json({
+        success: true,
+        message: 'Payment already processed.',
+      });
+    }
+
+    const claim = await claimRazorpayPayment({
+      userId,
+      orderId: razorpayOrderId,
+      paymentId: razorpayPaymentId,
+      purpose: 'wallet_recharge',
+    });
+    if (!claim.claimed) {
       return res.status(200).json({
         success: true,
         message: 'Payment already processed.',

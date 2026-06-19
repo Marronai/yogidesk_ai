@@ -275,6 +275,8 @@ const SignUp = () => {
         });
         
         // 🚀 Seedha Dashboard!
+        localStorage.setItem('yogidesk_whatsapp_onboarding_prompt', 'true');
+        localStorage.removeItem('yogidesk_whatsapp_onboarding_dismissed');
         navigate('/dashboard', { replace: true });
       }
     } catch (error) {

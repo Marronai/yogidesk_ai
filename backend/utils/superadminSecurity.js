@@ -30,16 +30,18 @@ const normalizeRole = (value) => String(value || '').trim().toLowerCase().replac
 
 const isSuperAdminRole = (value) => ['superadmin', 'super_admin'].includes(normalizeRole(value));
 
+const getSuperadminEmailAllowlist = () => new Set(
+  String(process.env.SUPERADMIN_EMAILS || '')
+    .split(',')
+    .map((email) => cleanEmail(email))
+    .filter(Boolean)
+);
+
 const isSuperAdminUser = (user = {}) => [
   user?.app_metadata?.role,
   user?.app_metadata?.user_role,
   user?.app_metadata?.account_role,
-  user?.user_metadata?.role,
-  user?.user_metadata?.user_role,
-  user?.user_metadata?.account_role,
-  user?.role,
-  user?.user_role,
-].some(isSuperAdminRole);
+].some(isSuperAdminRole) || getSuperadminEmailAllowlist().has(cleanEmail(user?.email));
 
 const createLocalRateLimiter = ({ windowMs = 15 * 60 * 1000, max = 8 } = {}) => {
   const buckets = new Map();
@@ -68,6 +70,7 @@ module.exports = {
   cleanText,
   cleanUuid,
   createLocalRateLimiter,
+  getSuperadminEmailAllowlist,
   isSuperAdminRole,
   isSuperAdminUser,
   normalizeRole,

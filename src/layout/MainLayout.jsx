@@ -40,34 +40,6 @@ const MainLayout = () => {
   const [isWelcomeActive, setIsWelcomeActive] = useState(false);
   const [isWelcomeRevealing, setIsWelcomeRevealing] = useState(false);
 
-  // 🔥 AUTO LOGOUT LOGIC (Session Polling)
-  useEffect(() => {
-    const checkSession = async () => {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      if (token.startsWith('superadmin-shadow-token-')) return;
-
-      try {
-        await api.get('/auth/check-session');
-        // Agar success hai to kuch mat karo, sab sahi hai
-      } catch (error) {
-        const status = Number(error.response?.status);
-        if (status === 401 || status === 403) {
-          console.log("Session expired or invalid");
-          localStorage.clear();
-          alert("You have been logged out because you logged in on another device.");
-          window.location.href = '/login';
-        } else {
-          console.warn('Session check failed but not logging out:', error.message || error);
-        }
-      }
-    };
-
-    const intervalId = setInterval(checkSession, 3000); // 3 Seconds interval
-
-    return () => clearInterval(intervalId); // Cleanup
-  }, [navigate]);
-
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [trialAlert, setTrialAlert] = useState(null);
   const [lowBalanceAlert, setLowBalanceAlert] = useState(null);

@@ -10,7 +10,6 @@ module.exports = function(passport) {
     },
     async (accessToken, refreshToken, profile, done) => {
         try {
-            console.log('🔍 Google Profile:', profile.emails[0].value); // ✅ Debug log
 
             const newUser = {
                 googleId: profile.id,

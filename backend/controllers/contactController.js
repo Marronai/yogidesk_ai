@@ -26,11 +26,17 @@ exports.uploadCSV = async (req, res) => {
   }
 
   const results = [];
+  const maxRows = Number(process.env.CONTACT_CSV_MAX_ROWS || 5000);
+  const cleanupUploadedFile = () => {
+    if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+  };
+  let rejected = false;
   
   // CSV Read Stream shuru
-  fs.createReadStream(req.file.path)
+  const parser = fs.createReadStream(req.file.path)
     .pipe(csv())
     .on('data', (data) => {
+      if (rejected) return;
       // 🛠️ MAGIC LOGIC: Keys ko lowercase aur trim karo
       // Taaki 'Name ' aur 'name' ek hi baat ho
       const normalizedData = {};
@@ -52,12 +58,18 @@ exports.uploadCSV = async (req, res) => {
           createdAt: new Date()
         });
       }
+
+      if (results.length > maxRows) {
+        rejected = true;
+        parser.destroy(new Error('CSV row limit exceeded.'));
+      }
     })
     .on('end', async () => {
       try {
+        if (rejected) return;
         if (results.length === 0) {
           // File delete karo taaki server full na ho
-          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          cleanupUploadedFile();
           return res.json({ msg: '0 contacts processed! Check CSV Headers (name, phone).' });
         }
 
@@ -66,22 +78,34 @@ exports.uploadCSV = async (req, res) => {
         await Contact.insertMany(results, { ordered: false });
         
         // File delete karo
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        cleanupUploadedFile();
 
         res.json({ msg: `${results.length} Contacts Imported Successfully!` });
       } catch (err) {
         console.error(err);
         // Duplicate key error handle karne ke liye (agar same phone number pehle se hai)
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        cleanupUploadedFile();
         res.json({ msg: "Import Complete (Duplicates skipped)" });
       }
+    })
+    .on('error', (err) => {
+      cleanupUploadedFile();
+      if (!res.headersSent) {
+        return res.status(400).json({ msg: err.message || 'Unable to parse CSV file.' });
+      }
+      return undefined;
     });
 };
 
 // --- 3. ADD SINGLE CONTACT ---
 exports.addContact = async (req, res) => {
-  const { name, phone, tags } = req.body;
+  const name = String(req.body?.name || '').replace(/[<>`]/g, '').trim().slice(0, 120);
+  const phone = String(req.body?.phone || '').replace(/\D/g, '').slice(-15);
+  const tags = Array.isArray(req.body?.tags)
+    ? req.body.tags.map((tag) => String(tag || '').replace(/[<>`]/g, '').trim().slice(0, 40)).filter(Boolean).slice(0, 20)
+    : [];
   try {
+    if (!name || phone.length < 8) return res.status(400).json({ msg: 'Valid name and phone are required' });
     let contact = await Contact.findOne({ user: req.user.id, phone });
     if (contact) return res.status(400).json({ msg: 'Contact already exists' });
 

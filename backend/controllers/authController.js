@@ -302,7 +302,13 @@ const dispatchFirebasePhoneOtp = async ({ phone, purpose, email, recaptchaToken 
 
 const verifyStoredPhoneOtp = ({ phone, purpose, otp, firebaseIdToken }) => {
   clearExpiredPhoneOtps();
-  if (firebaseIdToken) return { ok: true, provider: 'firebase_id_token' };
+  if (firebaseIdToken) {
+    return {
+      ok: false,
+      status: 400,
+      message: 'Firebase phone verification is not available. Please use the OTP code.'
+    };
+  }
 
   const safePhone = normalizePhoneE164(phone);
   const key = buildPhoneOtpKey(safePhone, purpose);
@@ -335,19 +341,32 @@ const readDoctorProfileByIdentifier = async (identifier) => {
   const email = normalizeEmail(raw);
   const phoneDigits = normalizePhoneDigits(raw);
   const phoneE164 = normalizePhoneE164(raw);
-  const filters = [];
-  if (email.includes('@')) filters.push(`email.eq.${email}`);
+  const lookups = [];
+  if (/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(email)) lookups.push(['email', email]);
   if (phoneDigits) {
-    filters.push(`phone.eq.${phoneDigits}`, `phone_number.eq.${phoneDigits}`, `phone_number.eq.${phoneE164}`, `mobile.eq.${phoneDigits}`);
+    lookups.push(
+      ['phone', phoneDigits],
+      ['phone_number', phoneDigits],
+      ['phone_number', phoneE164],
+      ['mobile', phoneDigits]
+    );
   }
 
-  if (!filters.length) return null;
-  const { data, error } = await db.from('doctor_profiles').select('*').or(filters.join(',')).limit(1).maybeSingle();
-  if (error) {
-    console.error('[HybridAuth] Supabase profile lookup failed:', error.message || error);
-    return null;
+  for (const [column, value] of lookups) {
+    const { data, error } = await db
+      .from('doctor_profiles')
+      .select('*')
+      .eq(column, value)
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('[HybridAuth] Supabase profile lookup failed:', error.message || error);
+      continue;
+    }
+    if (data) return data;
   }
-  return data || null;
+
+  return null;
 };
 
 const incrementMonthlyOtpCount = async (profile) => {

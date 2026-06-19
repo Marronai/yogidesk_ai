@@ -245,6 +245,8 @@ const AuthSuccess = () => {
         throw new Error(response.data?.message || 'Profile was not saved. Please try again.');
       }
       clearGoogleAuthFlow();
+      localStorage.setItem('yogidesk_whatsapp_onboarding_prompt', 'true');
+      localStorage.removeItem('yogidesk_whatsapp_onboarding_dismissed');
       navigate('/dashboard', { replace: true });
     } catch (error) {
       setMessage(error?.response?.data?.message || error.message || 'Unable to save onboarding details.');

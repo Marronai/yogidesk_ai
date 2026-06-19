@@ -29,10 +29,13 @@ import {
 import { ensureWallet, MESSAGE_RATES, saveWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
+import { startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_BASELINE_BALANCE = 1000;
 const STARTER_LIMIT = 500;
+const META_ONBOARDING_PROMPT_KEY = 'yogidesk_whatsapp_onboarding_prompt';
+const META_ONBOARDING_DISMISSED_KEY = 'yogidesk_whatsapp_onboarding_dismissed';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const normalizeSupabaseId = (value) => {
@@ -186,6 +189,12 @@ const DashboardHome = () => {
   const [messageHistory, setMessageHistory] = useState(() => buildSevenDayWindow());
   const [guidedTour, setGuidedTour] = useState({ open: false, step: 0 });
   const [trialState, setTrialState] = useState({ active: false, daysRemaining: 7 });
+  const [whatsappOnboarding, setWhatsappOnboarding] = useState({
+    open: false,
+    loading: false,
+    error: '',
+    connected: false,
+  });
 
   useEffect(() => {
     const storageKey = 'dashboard_greeting_shown';
@@ -339,6 +348,19 @@ const DashboardHome = () => {
         setWalletBalance(toMoneyNumber(savedWallet.balance));
       }
 
+      const metaConnectionResult = await safeFetch(
+        () => api.get(backendPath('/api/settings/meta-connection')),
+        { data: { data: {} } }
+      );
+      const metaConnection = metaConnectionResult?.data?.data || {};
+      const hasMetaConnection = Boolean(
+        metaConnection.meta_configured ||
+        metaConnection.is_locked ||
+        metaConnection.meta_phone_number_id ||
+        metaConnection.meta_waba_id
+      );
+      setWhatsappOnboarding((current) => ({ ...current, connected: hasMetaConnection }));
+
       const tourCompleted = trialProfileResult?.data?.profile?.onboarding_tour_completed;
       const remainingHours = Number(trialProfileResult?.data?.remainingHours ?? 168);
       const subscriptionStatus = String(trialProfileResult?.data?.profile?.subscription_status || '').toLowerCase();
@@ -352,6 +374,17 @@ const DashboardHome = () => {
       const localTourCompleted = localStorage.getItem(`onboarding_tour_completed_${userId}`) === 'true';
       if (!globalTourCompleted && !localTourCompleted && tourCompleted !== true) {
         setGuidedTour({ open: true, step: 0 });
+      }
+
+      const shouldPromptWhatsApp = (
+        localStorage.getItem(META_ONBOARDING_PROMPT_KEY) === 'true' &&
+        localStorage.getItem(META_ONBOARDING_DISMISSED_KEY) !== 'true' &&
+        !hasMetaConnection
+      );
+      if (shouldPromptWhatsApp) {
+        window.setTimeout(() => {
+          setWhatsappOnboarding((current) => current.connected ? current : { ...current, open: true, error: '' });
+        }, 500);
       }
 
       const currentRows = Array.isArray(currentCampaignRows?.data) ? currentCampaignRows.data : [];
@@ -448,8 +481,78 @@ const DashboardHome = () => {
     setGuidedTour({ open: false, step: 0 });
   };
 
+  const closeWhatsappOnboarding = () => {
+    localStorage.setItem(META_ONBOARDING_DISMISSED_KEY, 'true');
+    setWhatsappOnboarding((current) => ({ ...current, open: false, error: '' }));
+  };
+
+  const connectWhatsApp = async () => {
+    setWhatsappOnboarding((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const signupResult = await startMetaEmbeddedSignup({
+        appId: import.meta.env.VITE_META_APP_ID,
+        configId: import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID,
+      });
+      const response = await api.post('/settings/meta-embedded-signup/complete', signupResult);
+      if (!response.data?.success) throw new Error(response.data?.message || 'Unable to save Meta connection.');
+      localStorage.removeItem(META_ONBOARDING_PROMPT_KEY);
+      localStorage.removeItem(META_ONBOARDING_DISMISSED_KEY);
+      setWhatsappOnboarding({ open: false, loading: false, error: '', connected: true });
+    } catch (error) {
+      setWhatsappOnboarding((current) => ({
+        ...current,
+        loading: false,
+        error: error?.response?.data?.message || error.message || 'WhatsApp connection failed.',
+      }));
+    }
+  };
+
   return (
     <div className="space-y-8 pb-10">
+      {whatsappOnboarding.open && !isStaff && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-6">
+          <div className="w-full max-w-lg rounded-t-2xl border border-emerald-100 bg-white p-6 shadow-2xl sm:rounded-2xl">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white">
+                <Facebook size={24} />
+              </div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-emerald-700">WhatsApp setup</p>
+                <h2 className="mt-2 text-2xl font-black leading-tight text-slate-950">Connect your clinic WhatsApp</h2>
+                <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
+                  Connect from Meta's secure flow. We will save your WABA and phone number automatically, so you do not need to copy IDs from Facebook Developers.
+                </p>
+              </div>
+            </div>
+
+            {whatsappOnboarding.error && (
+              <div className="mt-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                {whatsappOnboarding.error}
+              </div>
+            )}
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={connectWhatsApp}
+                disabled={whatsappOnboarding.loading}
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-black text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {whatsappOnboarding.loading ? 'Connecting...' : 'Connect WhatsApp'}
+              </button>
+              <button
+                type="button"
+                onClick={closeWhatsappOnboarding}
+                disabled={whatsappOnboarding.loading}
+                className="inline-flex min-h-12 items-center justify-center rounded-md border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showWelcome && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl ring-1 ring-slate-200">

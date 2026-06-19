@@ -66,6 +66,33 @@ const readStoredSessionToken = () => {
     || readTokenFromStorageValue(sessionStorage.getItem('sb-access-token'));
 };
 
+const persistCurrentAccessToken = (token) => {
+  if (!isJwtSegmentToken(token)) return;
+  localStorage.setItem('sb-access-token', token);
+  sessionStorage.setItem('sb-access-token', token);
+};
+
+const getFreshSupabaseSession = async () => {
+  const { data } = await supabase.auth.getSession();
+  const session = data?.session;
+  const expiresAtMs = Number(session?.expires_at || 0) * 1000;
+
+  if (session?.access_token && (!expiresAtMs || expiresAtMs > Date.now() + 60000)) {
+    persistCurrentAccessToken(session.access_token);
+    return session;
+  }
+
+  if (session?.refresh_token || session?.access_token) {
+    const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && refreshedData?.session?.access_token) {
+      persistCurrentAccessToken(refreshedData.session.access_token);
+      return refreshedData.session;
+    }
+  }
+
+  return session || null;
+};
+
 const clearStaleSupabaseSession = () => {
   localStorage.removeItem('sb-access-token');
   sessionStorage.removeItem('sb-access-token');
@@ -96,9 +123,9 @@ api.interceptors.request.use(
       return config;
     }
 
-    const { data } = await supabase.auth.getSession();
-    const token = readStoredSessionToken()
-      || data?.session?.access_token;
+    const currentSession = await getFreshSupabaseSession();
+    const token = currentSession?.access_token
+      || readStoredSessionToken();
 
     if (isJwtSegmentToken(token)) {
       config.headers = config.headers || {};
@@ -122,7 +149,7 @@ api.interceptors.request.use(
 // Add response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = Number(error.response?.status);
     const payload = error.response?.data || {};
     const serializedPayload = JSON.stringify(payload).toUpperCase();
@@ -130,6 +157,21 @@ api.interceptors.response.use(
     const isSessionExpired = status === 401 || errorCode === 'SESSION_EXPIRED' || serializedPayload.includes('SESSION_EXPIRED');
     const requestUrl = String(error.config?.url || '');
     const isSessionValidationRequest = requestUrl.includes('/auth/check-session');
+    if (isSessionExpired && !(error.config?._yogideskRetriedAfterRefresh)) {
+      const refreshedSession = await getFreshSupabaseSession().catch(() => null);
+      if (refreshedSession?.access_token) {
+        const retryConfig = {
+          ...error.config,
+          _yogideskRetriedAfterRefresh: true,
+          headers: {
+            ...(error.config?.headers || {}),
+            Authorization: `Bearer ${refreshedSession.access_token}`,
+          },
+        };
+        return api.request(retryConfig);
+      }
+    }
+
     if (isSessionExpired && !sessionExpiryRedirecting && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
       sessionExpiryRedirecting = true;
       clearStaleSupabaseSession();

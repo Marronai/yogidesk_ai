@@ -38,6 +38,21 @@ const isSupabaseSessionActive = (session) => {
   return Number(session.expires_at) * 1000 > Date.now() + 5000;
 };
 
+const getRefreshableSession = async () => {
+  const { data } = await supabase.auth.getSession();
+  const currentSession = data?.session;
+  if (isSupabaseSessionActive(currentSession)) return currentSession;
+
+  if (currentSession?.refresh_token || currentSession?.access_token) {
+    const { data: refreshedData, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && isSupabaseSessionActive(refreshedData?.session)) {
+      return refreshedData.session;
+    }
+  }
+
+  return currentSession || null;
+};
+
 const getNormalizedRole = (user, profile) => String(
   user?.user_metadata?.role ||
   user?.user_metadata?.user_role ||
@@ -92,8 +107,7 @@ export const AuthProvider = ({ children }) => {
   const restoreSession = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const currentSession = data?.session;
+      const currentSession = await getRefreshableSession();
 
       if (isSupabaseSessionActive(currentSession)) {
         const { data: userData, error: userError } = await supabase.auth.getUser();
