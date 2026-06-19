@@ -12,6 +12,7 @@ import {
   validateQuickReplyRecord,
   writeQuickReplies,
 } from '../utils/quickReplies';
+import { startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
 
 const emptyForm = {
   name: '',
@@ -191,6 +192,7 @@ const Settings = () => {
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
+  const [connectingEmbeddedSignup, setConnectingEmbeddedSignup] = useState(false);
   const [loadingKnowledgeBase, setLoadingKnowledgeBase] = useState(true);
   const [savingKnowledgeBase, setSavingKnowledgeBase] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState('account');
@@ -719,6 +721,48 @@ const Settings = () => {
     }
   };
 
+  const handleEmbeddedSignupConnection = async () => {
+    if (isConfigured) {
+      showToast('success', 'WhatsApp is already connected.');
+      return;
+    }
+
+    setConnectingEmbeddedSignup(true);
+    setMetaValidationError('');
+
+    try {
+      const signupResult = await startMetaEmbeddedSignup({
+        appId: import.meta.env.VITE_META_APP_ID,
+        configId: import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID,
+      });
+      const res = await api.post('/settings/meta-embedded-signup/complete', signupResult);
+      if (!res.data?.success) throw new Error(res.data?.message || 'Unable to save WhatsApp connection.');
+
+      const data = res.data?.data || {};
+      const savedMeta = {
+        whatsappPhoneNumberId: data.meta_phone_number_id || signupResult.phoneNumberId || '',
+        whatsappBusinessAccountId: data.meta_waba_id || signupResult.businessAccountId || '',
+        whatsappAccessToken: 'CONFIGURED',
+        isConnected: true,
+      };
+      lastSavedMetaRef.current = savedMeta;
+      const { userId: activeUserId } = await getActiveAccount();
+      writeCachedMetaConnection(activeUserId, savedMeta);
+      localStorage.removeItem('yogidesk_whatsapp_onboarding_prompt');
+      setConnectionStatus('connected');
+      setHasExistingConnection(true);
+      playConnectionAnimation('success');
+      await hydrateProfile({ force: true });
+      showToast('success', 'WhatsApp connected successfully.');
+    } catch (error) {
+      playConnectionAnimation('error');
+      setMetaValidationError(error?.response?.data?.message || error.message || 'WhatsApp connection failed.');
+      showToast('error', error?.response?.data?.message || error.message || 'WhatsApp connection failed.');
+    } finally {
+      setConnectingEmbeddedSignup(false);
+    }
+  };
+
   const isConnected = connectionStatus === 'connected';
 
   return (
@@ -924,7 +968,7 @@ const Settings = () => {
             </section>
           )}
 
-          <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-8">
+          <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-4">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
@@ -933,7 +977,7 @@ const Settings = () => {
                 <div>
                   <h2 className="text-xl font-black text-slate-950">Official Business Messaging Connection</h2>
                   <p className="mt-1 text-sm font-medium text-slate-500">
-                    Add your clinic's verified WhatsApp connection credentials here.
+                    Connect through Meta's secure embedded signup. No manual IDs or tokens are required.
                   </p>
                 </div>
               </div>
@@ -950,10 +994,10 @@ const Settings = () => {
             </div>
 
             {isConfigured && (
-              <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-sm font-black text-emerald-800">Credentials loaded from database</p>
-                  <p className="mt-1 text-xs font-semibold text-emerald-700/80">
+                  <p className="text-sm font-black text-[#111827]">WhatsApp is connected</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-600">
                     Locked for safety. Contact Customer Support for changes.
                   </p>
                 </div>
@@ -962,11 +1006,11 @@ const Settings = () => {
                     type="button"
                     onClick={refreshMetaConnection}
                     disabled={loadingProfile}
-                    className="inline-flex w-full items-center justify-center rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60 sm:w-auto"
+                    className="inline-flex w-full items-center justify-center rounded-xl border border-orange-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#FF6B00] transition hover:bg-orange-50 disabled:opacity-60 sm:w-auto"
                   >
                     Refresh from DB
                   </button>
-                  <div className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 sm:w-auto">
+                  <div className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-[#111827] sm:w-auto">
                     <Lock size={14} />
                     Locked
                   </div>
@@ -974,62 +1018,31 @@ const Settings = () => {
               </div>
             )}
 
-            <div className="relative">
-              <div className={`grid gap-5 lg:grid-cols-2 ${metaInputsLocked ? 'pointer-events-none blur-[2px] select-none' : ''}`}>
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Phone Number ID</label>
-                  <div className="relative">
-                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={formData.whatsappPhoneNumberId}
-                      onChange={(event) => updateField('whatsappPhoneNumberId', event.target.value)}
-                      disabled={metaInputsLocked}
-                      placeholder="Enter your WhatsApp Phone Number ID"
-                      className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-                  </div>
+            <div className="rounded-2xl border border-slate-100 bg-[#111827] p-5 text-white">
+              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="max-w-2xl">
+                  <p className="text-xs font-black uppercase tracking-widest text-orange-300">
+                    {isConfigured ? 'Secure connection active' : 'Action required'}
+                  </p>
+                  <h3 className="mt-2 text-lg font-black">
+                    {isConfigured ? 'Your clinic WhatsApp is ready for Yogi Desk.' : 'Connect WhatsApp to activate campaigns, templates, and inbox automation.'}
+                  </h3>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-300">
+                    Meta opens in a secure popup and returns the connection to Yogi Desk automatically.
+                  </p>
                 </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">WhatsApp Business Account ID</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={formData.whatsappBusinessAccountId}
-                    onChange={(event) => updateField('whatsappBusinessAccountId', event.target.value)}
-                    disabled={metaInputsLocked}
-                    placeholder="Enter your WABA ID"
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                  />
-                </div>
-
-                <div className="space-y-2 lg:col-span-2">
-                  <label className="text-xs font-black uppercase tracking-widest text-slate-400">System User Access Token</label>
-                  <input
-                    type="password"
-                    value={formData.whatsappAccessToken}
-                    onChange={(event) => updateField('whatsappAccessToken', event.target.value)}
-                    disabled={metaInputsLocked}
-                    placeholder="EAAMz..."
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm font-bold text-slate-800 outline-none transition focus:border-orange-500 focus:ring-4 focus:ring-orange-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                  />
-                </div>
+                {!isConfigured && (
+                  <button
+                    type="button"
+                    onClick={handleEmbeddedSignupConnection}
+                    disabled={connectingEmbeddedSignup || loadingProfile}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#FF6B00] px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-950/30 transition hover:bg-orange-600 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+                  >
+                    {connectingEmbeddedSignup ? <Loader2 className="animate-spin" size={18} /> : <Smartphone size={18} />}
+                    {connectingEmbeddedSignup ? 'Connecting...' : 'Connect WhatsApp'}
+                  </button>
+                )}
               </div>
-
-              {metaInputsLocked && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-white/45 backdrop-blur-[1px]">
-                  <div className="rounded-3xl border border-emerald-200 bg-white/95 px-6 py-5 text-center shadow-xl shadow-emerald-100">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
-                      <Lock size={28} />
-                    </div>
-                    <p className="mt-3 text-sm font-black text-slate-900">Meta credentials locked</p>
-                  </div>
-                </div>
-              )}
             </div>
 
             {metaValidationError && (
@@ -1040,20 +1053,8 @@ const Settings = () => {
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="w-full rounded-2xl border border-orange-100 bg-orange-50 p-4 text-sm font-semibold text-orange-800 sm:flex-1">
-                Your WhatsApp credentials are used for authenticated business messaging across campaigns and templates.
+                Your connection is stored securely. Raw Meta IDs and tokens are hidden from dashboard users.
               </div>
-
-              {!metaInputsLocked && (
-                <button
-                  type="button"
-                  onClick={handleSaveConnection}
-                  disabled={savingConnection || loadingProfile}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-200 transition hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
-                >
-                  {savingConnection ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                  {savingConnection ? 'Saving...' : 'Save Connection'}
-                </button>
-              )}
             </div>
           </section>
 

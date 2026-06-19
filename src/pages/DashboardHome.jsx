@@ -35,7 +35,6 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_BASELINE_BALANCE = 1000;
 const STARTER_LIMIT = 500;
 const META_ONBOARDING_PROMPT_KEY = 'yogidesk_whatsapp_onboarding_prompt';
-const META_ONBOARDING_DISMISSED_KEY = 'yogidesk_whatsapp_onboarding_dismissed';
 
 const normalizeRole = (role) => (role || localStorage.getItem('user_role') || 'STAFF').toUpperCase();
 const normalizeSupabaseId = (value) => {
@@ -377,8 +376,6 @@ const DashboardHome = () => {
       }
 
       const shouldPromptWhatsApp = (
-        localStorage.getItem(META_ONBOARDING_PROMPT_KEY) === 'true' &&
-        localStorage.getItem(META_ONBOARDING_DISMISSED_KEY) !== 'true' &&
         !hasMetaConnection
       );
       if (shouldPromptWhatsApp) {
@@ -482,7 +479,6 @@ const DashboardHome = () => {
   };
 
   const closeWhatsappOnboarding = () => {
-    localStorage.setItem(META_ONBOARDING_DISMISSED_KEY, 'true');
     setWhatsappOnboarding((current) => ({ ...current, open: false, error: '' }));
   };
 
@@ -496,7 +492,6 @@ const DashboardHome = () => {
       const response = await api.post('/settings/meta-embedded-signup/complete', signupResult);
       if (!response.data?.success) throw new Error(response.data?.message || 'Unable to save Meta connection.');
       localStorage.removeItem(META_ONBOARDING_PROMPT_KEY);
-      localStorage.removeItem(META_ONBOARDING_DISMISSED_KEY);
       setWhatsappOnboarding({ open: false, loading: false, error: '', connected: true });
     } catch (error) {
       setWhatsappOnboarding((current) => ({
@@ -511,13 +506,13 @@ const DashboardHome = () => {
     <div className="space-y-8 pb-10">
       {whatsappOnboarding.open && !isStaff && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-6">
-          <div className="w-full max-w-lg rounded-t-2xl border border-emerald-100 bg-white p-6 shadow-2xl sm:rounded-2xl">
+          <div className="w-full max-w-lg rounded-t-2xl border border-orange-100 bg-white p-6 shadow-2xl shadow-slate-950/20 sm:rounded-2xl">
             <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-[#FF6B00] text-white">
                 <Facebook size={24} />
               </div>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-emerald-700">WhatsApp setup</p>
+                <p className="text-xs font-black uppercase tracking-widest text-[#FF6B00]">WhatsApp setup</p>
                 <h2 className="mt-2 text-2xl font-black leading-tight text-slate-950">Connect your clinic WhatsApp</h2>
                 <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">
                   Connect from Meta's secure flow. We will save your WABA and phone number automatically, so you do not need to copy IDs from Facebook Developers.
@@ -536,7 +531,7 @@ const DashboardHome = () => {
                 type="button"
                 onClick={connectWhatsApp}
                 disabled={whatsappOnboarding.loading}
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-black text-white shadow-lg shadow-emerald-100 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#FF6B00] px-5 text-sm font-black text-white shadow-lg shadow-orange-100 transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {whatsappOnboarding.loading ? 'Connecting...' : 'Connect WhatsApp'}
               </button>
@@ -544,7 +539,7 @@ const DashboardHome = () => {
                 type="button"
                 onClick={closeWhatsappOnboarding}
                 disabled={whatsappOnboarding.loading}
-                className="inline-flex min-h-12 items-center justify-center rounded-md border border-slate-200 bg-white px-5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                className="inline-flex min-h-12 items-center justify-center rounded-md border border-[#111827] bg-white px-5 text-sm font-black text-[#111827] transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 Later
               </button>
