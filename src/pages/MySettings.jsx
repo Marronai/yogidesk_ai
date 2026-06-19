@@ -12,7 +12,7 @@ import {
   validateQuickReplyRecord,
   writeQuickReplies,
 } from '../utils/quickReplies';
-import { startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
+import { getMetaEmbeddedSignupConfig, startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
 
 const emptyForm = {
   name: '',
@@ -731,10 +731,8 @@ const Settings = () => {
     setMetaValidationError('');
 
     try {
-      const signupResult = await startMetaEmbeddedSignup({
-        appId: import.meta.env.VITE_META_APP_ID,
-        configId: import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID,
-      });
+      const metaSignupConfig = await getMetaEmbeddedSignupConfig();
+      const signupResult = await startMetaEmbeddedSignup(metaSignupConfig);
       const res = await api.post('/settings/meta-embedded-signup/complete', signupResult);
       if (!res.data?.success) throw new Error(res.data?.message || 'Unable to save WhatsApp connection.');
 

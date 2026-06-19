@@ -4826,6 +4826,51 @@ const exchangeEmbeddedSignupCode = async (code) => {
     return accessToken;
 };
 
+const normalizeEmbeddedSignupConfigId = (value) => {
+    const rawValue = String(value || '').trim();
+    if (!rawValue) return '';
+    if (/^\d+$/.test(rawValue)) return rawValue;
+
+    try {
+        const url = new URL(rawValue);
+        const configId = url.searchParams.get('config_id') || url.searchParams.get('configuration_id');
+        return /^\d+$/.test(String(configId || '')) ? configId : '';
+    } catch {
+        const match = rawValue.match(/[?&](?:config_id|configuration_id)=(\d+)/i);
+        return match?.[1] || '';
+    }
+};
+
+const handleMetaEmbeddedSignupConfig = async (req, res) => {
+    try {
+        const sessionUser = await getSupabaseSessionUser(req);
+        if (!sessionUser?.id) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+        const appId = String(process.env.META_APP_ID || process.env.VITE_META_APP_ID || '').trim();
+        const configId = normalizeEmbeddedSignupConfigId(
+            process.env.META_EMBEDDED_SIGNUP_CONFIG_ID ||
+            process.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID ||
+            process.env.META_EMBEDDED_SIGNUP_URL ||
+            ''
+        );
+
+        if (!appId || !configId) {
+            return res.status(500).json({
+                success: false,
+                message: 'Meta Embedded Signup is not configured on the server.'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: { appId, configId }
+        });
+    } catch (error) {
+        console.error('Meta embedded signup config fetch failed:', error.message || error);
+        return res.status(500).json({ success: false, message: 'Unable to load Meta Embedded Signup configuration.' });
+    }
+};
+
 const subscribeEmbeddedSignupWaba = async ({ businessAccountId, accessToken }) => {
     if (process.env.META_EMBEDDED_SIGNUP_SUBSCRIBE_APP === 'false') return;
     try {
@@ -5027,6 +5072,8 @@ app.get('/settings/meta-connection', handleMetaConnectionFetch);
 
 app.post('/api/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
 app.post('/settings/meta-connection', attachSessionUserForMetaConnection, saveMetaConnection);
+app.get('/api/settings/meta-embedded-signup/config', handleMetaEmbeddedSignupConfig);
+app.get('/settings/meta-embedded-signup/config', handleMetaEmbeddedSignupConfig);
 app.post('/api/settings/meta-embedded-signup/complete', handleMetaEmbeddedSignupComplete);
 app.post('/settings/meta-embedded-signup/complete', handleMetaEmbeddedSignupComplete);
 

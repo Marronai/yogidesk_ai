@@ -29,7 +29,7 @@ import {
 import { ensureWallet, MESSAGE_RATES, saveWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
-import { startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
+import { getMetaEmbeddedSignupConfig, startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
 import { useAuth } from '../context/AuthContext';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -488,10 +488,8 @@ const DashboardHome = () => {
   const connectWhatsApp = async () => {
     setWhatsappOnboarding((current) => ({ ...current, loading: true, error: '' }));
     try {
-      const signupResult = await startMetaEmbeddedSignup({
-        appId: import.meta.env.VITE_META_APP_ID,
-        configId: import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID,
-      });
+      const metaSignupConfig = await getMetaEmbeddedSignupConfig();
+      const signupResult = await startMetaEmbeddedSignup(metaSignupConfig);
       const response = await api.post('/settings/meta-embedded-signup/complete', signupResult);
       if (!response.data?.success) throw new Error(response.data?.message || 'Unable to save Meta connection.');
       localStorage.removeItem(META_ONBOARDING_PROMPT_KEY);

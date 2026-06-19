@@ -1,3 +1,5 @@
+import api from './api';
+
 const META_SDK_ID = 'facebook-jssdk';
 const META_SDK_URL = 'https://connect.facebook.net/en_US/sdk.js';
 
@@ -56,6 +58,25 @@ export const normalizeMetaEmbeddedSignupConfigId = (value) => {
     const match = rawValue.match(/[?&](?:config_id|configuration_id)=(\d+)/i);
     return match?.[1] || '';
   }
+};
+
+export const getMetaEmbeddedSignupConfig = async () => {
+  const localConfig = {
+    appId: String(import.meta.env.VITE_META_APP_ID || '').trim(),
+    configId: normalizeMetaEmbeddedSignupConfigId(import.meta.env.VITE_META_EMBEDDED_SIGNUP_CONFIG_ID),
+  };
+
+  if (localConfig.appId && localConfig.configId) return localConfig;
+
+  const response = await api.get('/settings/meta-embedded-signup/config');
+  const data = response.data?.data || {};
+  const remoteConfig = {
+    appId: String(data.appId || data.app_id || '').trim(),
+    configId: normalizeMetaEmbeddedSignupConfigId(data.configId || data.config_id || ''),
+  };
+
+  if (remoteConfig.appId && remoteConfig.configId) return remoteConfig;
+  throw new Error('Meta Embedded Signup is not configured.');
 };
 
 export const startMetaEmbeddedSignup = async ({ appId, configId }) => {
