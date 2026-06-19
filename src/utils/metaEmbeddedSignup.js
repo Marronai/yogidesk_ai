@@ -43,14 +43,32 @@ const readEmbeddedSignupMessage = (event) => {
   return payload;
 };
 
+export const normalizeMetaEmbeddedSignupConfigId = (value) => {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+  if (/^\d+$/.test(rawValue)) return rawValue;
+
+  try {
+    const url = new URL(rawValue);
+    const configId = url.searchParams.get('config_id') || url.searchParams.get('configuration_id');
+    return /^\d+$/.test(String(configId || '')) ? configId : '';
+  } catch {
+    const match = rawValue.match(/[?&](?:config_id|configuration_id)=(\d+)/i);
+    return match?.[1] || '';
+  }
+};
+
 export const startMetaEmbeddedSignup = async ({ appId, configId }) => {
-  if (!appId || !configId) {
+  const safeAppId = String(appId || '').trim();
+  const safeConfigId = normalizeMetaEmbeddedSignupConfigId(configId);
+
+  if (!safeAppId || !safeConfigId) {
     throw new Error('Meta Embedded Signup is not configured.');
   }
 
   const FB = await loadMetaSdk();
   FB.init({
-    appId,
+    appId: safeAppId,
     cookie: true,
     xfbml: true,
     version: 'v21.0',
@@ -71,7 +89,7 @@ export const startMetaEmbeddedSignup = async ({ appId, configId }) => {
 
   const loginPromise = new Promise((resolve) => {
     FB.login((response) => resolve(response), {
-      config_id: configId,
+      config_id: safeConfigId,
       response_type: 'code',
       override_default_response_type: true,
       extras: {

@@ -968,6 +968,7 @@ const Settings = () => {
             </section>
           )}
 
+          {!isMetaReviewSession && (
           <section className="rounded-3xl border border-orange-100 bg-white p-5 shadow-sm sm:p-8">
             <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-4">
@@ -1057,6 +1058,7 @@ const Settings = () => {
               </div>
             </div>
           </section>
+          )}
 
           <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/60 sm:p-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

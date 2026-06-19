@@ -30,6 +30,7 @@ import { ensureWallet, MESSAGE_RATES, saveWallet } from '../utils/wallet';
 import { supabase } from '../config/supabaseClient';
 import api from '../utils/api';
 import { startMetaEmbeddedSignup } from '../utils/metaEmbeddedSignup';
+import { useAuth } from '../context/AuthContext';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const WEEK_BASELINE_BALANCE = 1000;
@@ -165,6 +166,7 @@ const TemplateStatusRing = ({ approved, pending, rejected }) => {
 
 const DashboardHome = () => {
   const navigate = useNavigate();
+  const { isMetaReviewSession } = useAuth();
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
   const [walletBalance, setWalletBalance] = useState(0);
@@ -376,6 +378,7 @@ const DashboardHome = () => {
       }
 
       const shouldPromptWhatsApp = (
+        !isMetaReviewSession &&
         !hasMetaConnection
       );
       if (shouldPromptWhatsApp) {
@@ -504,7 +507,7 @@ const DashboardHome = () => {
 
   return (
     <div className="space-y-8 pb-10">
-      {whatsappOnboarding.open && !isStaff && (
+      {whatsappOnboarding.open && !isStaff && !isMetaReviewSession && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-6">
           <div className="w-full max-w-lg rounded-t-2xl border border-orange-100 bg-white p-6 shadow-2xl shadow-slate-950/20 sm:rounded-2xl">
             <div className="flex items-start gap-4">
