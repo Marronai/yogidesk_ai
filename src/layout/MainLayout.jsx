@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import ErrorBoundary from '../components/ErrorBoundary';
+import VideoHelpGuide from '../components/VideoHelpGuide';
 import api from '../utils/api';
 import { supabase } from '../config/supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -379,6 +380,8 @@ const MainLayout = () => {
           </div>
         </div>
       )}
+
+      {!isMetaReviewSession && <VideoHelpGuide />}
     </div>
   );
 };
