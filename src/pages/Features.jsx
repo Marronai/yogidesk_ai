@@ -5,6 +5,8 @@ import {
   BarChart3,
   CheckCircle2,
   Database,
+  FileText,
+  Megaphone,
   MessageSquareText,
   Sparkles,
   UsersRound,
@@ -105,45 +107,121 @@ const featureBlocks = [
     id: 'broadcast-streams',
     eyebrow: 'Feature 03',
     title: 'Automated Broadcast Streams for Appointment, Recall, and Care Campaigns',
+    headline: 'Scale Patient Engagement Without Wasting Manual Hours',
     description:
-      'INSERT DESCRIPTION PARAGRAPH HERE for automated clinic broadcast streams, patient recall reminders, follow-up journeys, and approved Meta template delivery across verified healthcare contact cohorts.',
-    detail:
-      'INSERT SUPPORTING DETAIL PARAGRAPH HERE explaining segmentation, scheduling, campaign safety, delivery feedback loops, and operational value for clinic management workflows.',
+      'YogiDesk ka smart automated messaging engine clinic staff ka load 80% tak kam kar deta hai aur patient retention badhata hai.',
+    detail: '',
+    points: [
+      {
+        title: 'Automated Patient Messaging Streams',
+        body: 'Apne patients ko automated appointment reminders, follow-ups, aur health campaigns bina kisi manual touch ke direct WhatsApp par bhejein.',
+      },
+      {
+        title: 'Shared Team Inbox Setup',
+        body: 'Poori team ya clinic staff ek hi WhatsApp Number se multiple devices par patient queries ko reply kar sakte hain, jisse patient management super fast ho jata hai.',
+      },
+      {
+        title: 'Private Staff Notes for Internal Chat',
+        body: 'Admin ya senior doctor patient chat ke andar hi apne staff ko Hidden Private Notes bhej sakte hain, jo sirf staff ko dikhenge, patient ko nahi—perfect for team synchronization.',
+      },
+    ],
     imageSrc: '/assets/features/broadcast-streams.png',
     imageAlt: 'Automated WhatsApp broadcast stream dashboard',
     imageNote: 'Put image here: public/assets/features/broadcast-streams.png',
     icon: MessageSquareText,
     accent: BRAND.orange,
     reverse: false,
-    bullets: [
-      'INSERT METRIC BULLET HERE',
-      'INSERT TEMPLATE CATEGORY BULLET HERE',
-      'INSERT DELIVERY CONTROL BULLET HERE',
-      'INSERT CLINIC OUTCOME BULLET HERE',
-    ],
     metrics: ['Templates', 'Segments', 'Delivery'],
   },
   {
     id: 'ai-balance',
     eyebrow: 'Feature 04',
     title: 'Live AI Balance Tracking Loops with Usage Transparency',
+    headline: '100% Billing Transparency with Real-Time Credit Intelligence',
     description:
-      'INSERT DESCRIPTION PARAGRAPH HERE for live AI balance visibility, credit movement tracking, and usage intelligence across patient support, broadcasts, and automated response workflows.',
-    detail:
-      'INSERT SUPPORTING DETAIL PARAGRAPH HERE explaining how doctors can inspect wallet health, recharge readiness, consumption patterns, and team-level automation accountability.',
+      'Bina kisi hidden charge ke apne clinic marketing budget ko smartly track karein aur har ek paise ka real-time analytics dekhein.',
+    detail: '',
+    points: [
+      {
+        title: 'Real-Time AI Credit Intelligence',
+        body: 'Apne dashboard par live check karein ki kitne AI credits baki hain, taaki aapka healthcare marketing campaign kabhi beech mein na ruke.',
+      },
+      {
+        title: 'Complete Usage Transparency Visuals',
+        body: 'Ek-ek paise ka hisab aapke samne hota hai; kis campaign mein, kis patient ke liye kitna balance use hua, sab transparently dikhta hai.',
+      },
+      {
+        title: 'Granular Cost Audit Logs',
+        body: 'Har ek message delivery aur consumption ka deeper record track karein taaki aap apne clinic ya hospital ka ROI (Return on Investment) aasan bhasha mein samajh sakein.',
+      },
+    ],
     imageSrc: '/assets/features/ai-balance.png',
     imageAlt: 'AI balance and usage tracking dashboard',
     imageNote: 'Put image here: public/assets/features/ai-balance.png',
     icon: BarChart3,
     accent: BRAND.blue,
     reverse: true,
-    bullets: [
-      'INSERT BALANCE MONITORING BULLET HERE',
-      'INSERT RECHARGE ALERT BULLET HERE',
-      'INSERT STAFF USAGE BULLET HERE',
-      'INSERT REPORTING BULLET HERE',
-    ],
     metrics: ['Credits', 'Usage', 'Reports'],
+  },
+  {
+    id: 'campaign-manager',
+    eyebrow: 'Feature 05',
+    title: 'Smart Campaign Manager for Healthcare Marketing',
+    headline: 'Blast High-Converting Bulk WhatsApp Messages Without Number Ban',
+    description:
+      'Apne hazaro patients ko ek click mein personal touch ke sath approach karein, bina kisi standard text limits ya blockage ke.',
+    detail: '',
+    points: [
+      {
+        title: '100% Secure Bulk WhatsApp Blaster',
+        body: 'Meta API ke official framework ke sath unlimited patients ko ek sath messages bhejein, bina kisi temporary or permanent WhatsApp Number Ban ke risk ke.',
+      },
+      {
+        title: 'Hyper-Personalized Patient Dynamic Fields',
+        body: 'Har patient ko unke real name, appointment date, aur doctor ke naam ke sath tailored message bhejein, jisse patient trust 10X badh jata hai.',
+      },
+      {
+        title: 'Advanced Dynamic Template Editor',
+        body: 'Apne healthcare templates ko real-time par customize aur edit karein, aur pichle campaigns ka conversion response data dekh kar messaging strategy optimize karein.',
+      },
+    ],
+    imageSrc: '/assets/features/campaign-manager.png',
+    imageAlt: 'Healthcare WhatsApp campaign manager dashboard',
+    imageNote: 'Put image here: public/assets/features/campaign-manager.png',
+    icon: Megaphone,
+    accent: BRAND.orange,
+    reverse: false,
+    metrics: ['Bulk messaging', 'Dynamic fields', 'Templates'],
+  },
+  {
+    id: 'template-creation',
+    eyebrow: 'Feature 06',
+    title: '20-Second Doctor-Centric Template Creation System',
+    headline: 'Craft High-Quality Meta Approved WhatsApp Templates Instantly',
+    description:
+      'Doctors aur hospital owners ke busy schedule ko dhyan mein rakh kar banaya gaya ek super-fast interactive template builder.',
+    detail: '',
+    points: [
+      {
+        title: '20-Second High-Quality Drafting Engine',
+        body: 'Doctors aur clinic managers ke liye pre-designed structure, jisse sirf 20 seconds ke andar super-premium aur clinical-grade templates ready ho jaate hain.',
+      },
+      {
+        title: 'Rich Multimedia Attachment Support',
+        body: 'Apne templates mein clickable buttons ke sath high-resolution images, explainer videos, patient prescription sheets, aur clinic brochures (PDF) aaram se attach karein.',
+      },
+      {
+        title: 'Instant Meta Approval Compliance',
+        body: 'YogiDesk ka system Meta API ke internal validation guidelines ko follow karta hai, jisse aapke custom templates ko instant approval milta hai aur campaigns turant live ho jaate hain.',
+      },
+    ],
+    imageSrc: '/assets/features/template-creation.png',
+    imageAlt: 'Doctor-centric WhatsApp template creation system',
+    imageNote: 'Put image here: public/assets/features/template-creation.png',
+    icon: FileText,
+    accent: BRAND.blue,
+    reverse: true,
+    metrics: ['20-second drafts', 'Rich media', 'Meta ready'],
   },
 ];
 
@@ -208,6 +286,11 @@ const FeatureSection = ({ feature }) => {
 
           <div>
             <h2 className="text-3xl font-black leading-tight text-slate-950 sm:text-4xl">{feature.title}</h2>
+            {feature.headline && (
+              <h3 className="mt-4 text-xl font-extrabold leading-8" style={{ color: feature.accent }}>
+                {feature.headline}
+              </h3>
+            )}
             <p className="mt-5 text-base font-medium leading-8 text-[#1D1D1B]">{feature.description}</p>
             {feature.detail && <p className="mt-4 text-base font-medium leading-8 text-[#1D1D1B]">{feature.detail}</p>}
           </div>
