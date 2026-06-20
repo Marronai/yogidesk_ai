@@ -10,11 +10,15 @@ const VideoHelpGuide = () => {
   const currentVideoId = useMemo(() => getVideoHelpId(pathname), [pathname]);
 
   useEffect(() => {
-    setShowHint(true);
-    setIsModalOpen(false);
-
+    const resetTimer = window.setTimeout(() => {
+      setShowHint(true);
+      setIsModalOpen(false);
+    }, 0);
     const hintTimer = window.setTimeout(() => setShowHint(false), 4000);
-    return () => window.clearTimeout(hintTimer);
+    return () => {
+      window.clearTimeout(resetTimer);
+      window.clearTimeout(hintTimer);
+    };
   }, [pathname]);
 
   useEffect(() => {
@@ -36,26 +40,27 @@ const VideoHelpGuide = () => {
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-3 sm:bottom-6 sm:right-6">
+      <div className="fixed right-0 top-20 z-50 flex items-center md:top-6">
         <div
           role="status"
           aria-live="polite"
-          className={`relative max-w-[calc(100vw-2rem)] rounded-2xl border border-orange-100 bg-white px-4 py-3 text-xs font-bold text-[#111827] shadow-xl shadow-slate-950/10 transition-all duration-300 sm:text-sm ${
-            showHint ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'
+          className={`absolute right-full mr-3 whitespace-nowrap rounded-xl border border-[#FF6B00]/20 bg-[#FFFFFF] px-3 py-2 text-xs font-extrabold text-[#111827] shadow-xl shadow-slate-950/10 transition-all duration-300 ${
+            showHint ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-2 opacity-0'
           }`}
         >
           💡 Need help? Watch a 1-minute tutorial!
-          <span className="absolute -bottom-1.5 right-5 h-3 w-3 rotate-45 border-b border-r border-orange-100 bg-white" />
+          <span className="absolute -right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-45 border-r border-t border-[#FF6B00]/20 bg-[#FFFFFF]" />
         </div>
 
         <button
           type="button"
           onClick={() => setIsModalOpen(true)}
-          className="group flex h-12 w-12 touch-manipulation items-center justify-center rounded-2xl border-2 border-[#FF6B00] bg-[#111827] text-[#FF6B00] shadow-xl shadow-slate-950/25 transition duration-200 hover:scale-105 hover:bg-[#FF6B00] hover:text-white focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-200 active:scale-95 sm:h-14 sm:w-14"
+          className="group flex h-12 w-12 touch-manipulation items-center justify-center rounded-l-2xl border-2 border-r-0 border-[#FF6B00] bg-[#111827] text-[#FFFFFF] shadow-xl shadow-slate-950/25 transition duration-200 hover:w-14 hover:bg-[#FF6B00] focus:outline-none focus-visible:ring-4 focus-visible:ring-[#FF6B00]/30 active:scale-95 sm:h-14 sm:w-14 sm:hover:w-16"
           aria-label="Open page tutorial video"
           aria-haspopup="dialog"
+          title="Open video help"
         >
-          <Video size={24} strokeWidth={2.5} className="sm:h-7 sm:w-7" />
+          <Video size={24} strokeWidth={2.5} className="transition-transform group-hover:scale-110 sm:h-7 sm:w-7" />
         </button>
       </div>
 
