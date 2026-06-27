@@ -5425,7 +5425,11 @@ app.get('/api/inbox/chats', async (req, res) => {
             const aTime = a?.updated_at ? new Date(a.updated_at).getTime() : 0;
             const bTime = b?.updated_at ? new Date(b.updated_at).getTime() : 0;
             return bTime - aTime;
-        });
+        }).map((chat) => ({
+            ...chat,
+            ai_reply_active: chat.ai_reply_active ?? chat.metadata?.ai_reply_active ?? !chat.metadata?.ai_paused,
+            assigned_staff_id: chat.assigned_staff_id ?? chat.assigned_agent_id ?? null
+        }));
 
         return res.status(200).json({
             success: true,
@@ -5436,6 +5440,102 @@ app.get('/api/inbox/chats', async (req, res) => {
         const statusCode = error.statusCode || 500;
         console.error('Inbox chat API failed:', error.message || error);
         return res.status(statusCode).json({ success: false, message: error.message || 'Unable to load inbox.' });
+    }
+});
+
+const findOwnedInboxChat = async ({ db, chatId, userId }) => {
+    if (!isUuid(chatId)) return null;
+    const { data, error } = await db
+        .from('inbox_chats')
+        .select('id, user_id, doctor_id, assigned_agent_id, metadata')
+        .eq('id', chatId)
+        .or(`user_id.eq.${userId},doctor_id.eq.${userId}`)
+        .maybeSingle();
+    if (error) throw error;
+    return data || null;
+};
+
+app.patch('/api/inbox/chats/:chatId/ai-reply', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+        const userId = await resolveInboxRequestUserId(req);
+        const chatId = String(req.params.chatId || '').trim();
+        const aiReplyActive = req.body?.ai_reply_active;
+        if (typeof aiReplyActive !== 'boolean') {
+            return res.status(400).json({ success: false, message: 'ai_reply_active must be a boolean.' });
+        }
+
+        const chat = await findOwnedInboxChat({ db, chatId, userId });
+        if (!chat) return res.status(404).json({ success: false, message: 'Chat not found.' });
+        const metadata = { ...(chat.metadata || {}), ai_reply_active: aiReplyActive, ai_paused: !aiReplyActive };
+
+        let result = await db
+            .from('inbox_chats')
+            .update({ ai_reply_active: aiReplyActive, metadata })
+            .eq('id', chat.id)
+            .select('id, ai_reply_active, metadata')
+            .maybeSingle();
+        if (result.error && getMissingSchemaColumn(result.error)) {
+            result = await db.from('inbox_chats').update({ metadata }).eq('id', chat.id).select('id, metadata').maybeSingle();
+        }
+        if (result.error) throw result.error;
+
+        return res.status(200).json({
+            success: true,
+            chat: { ...result.data, ai_reply_active: aiReplyActive }
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('Inbox AI state update failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to update AI reply state.' });
+    }
+});
+
+app.patch('/api/inbox/chats/:chatId/assignment', async (req, res) => {
+    try {
+        const db = supabaseAdmin || supabase;
+        if (!db?.from) return res.status(500).json({ success: false, message: 'Database connection unavailable' });
+        const userId = await resolveInboxRequestUserId(req);
+        const chatId = String(req.params.chatId || '').trim();
+        const assignedStaffId = req.body?.assigned_staff_id == null ? null : String(req.body.assigned_staff_id).trim();
+        if (assignedStaffId && !isUuid(assignedStaffId)) {
+            return res.status(400).json({ success: false, message: 'assigned_staff_id must be a valid staff ID or null.' });
+        }
+
+        const chat = await findOwnedInboxChat({ db, chatId, userId });
+        if (!chat) return res.status(404).json({ success: false, message: 'Chat not found.' });
+        if (assignedStaffId) {
+            const { data: staff, error: staffError } = await db
+                .from(STAFF_MEMBERS_TABLE)
+                .select('id')
+                .eq('id', assignedStaffId)
+                .eq('admin_id', userId)
+                .in('status', ['ACTIVE', 'INVITED'])
+                .maybeSingle();
+            if (staffError) throw staffError;
+            if (!staff?.id) return res.status(400).json({ success: false, message: 'Staff member is not available in this workspace.' });
+        }
+
+        let result = await db
+            .from('inbox_chats')
+            .update({ assigned_staff_id: assignedStaffId, assigned_agent_id: assignedStaffId })
+            .eq('id', chat.id)
+            .select('id, assigned_staff_id, assigned_agent_id')
+            .maybeSingle();
+        if (result.error && getMissingSchemaColumn(result.error)) {
+            result = await db.from('inbox_chats').update({ assigned_agent_id: assignedStaffId }).eq('id', chat.id).select('id, assigned_agent_id').maybeSingle();
+        }
+        if (result.error) throw result.error;
+
+        return res.status(200).json({
+            success: true,
+            chat: { ...result.data, assigned_staff_id: assignedStaffId }
+        });
+    } catch (error) {
+        const statusCode = error.statusCode || 500;
+        console.error('Inbox staff assignment failed:', error.message || error);
+        return res.status(statusCode).json({ success: false, message: error.message || 'Unable to assign staff.' });
     }
 });
 

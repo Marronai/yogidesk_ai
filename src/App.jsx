@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 
 // Layouts & Guards
 import MainLayout from './layout/MainLayout';
@@ -48,9 +49,15 @@ import SuperAdminLogin from './components/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from './components/superadmin/SuperAdminDashboard';
 import { WalletProvider } from './context/WalletContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+
  // Agar navbar bhi global hai
 
 const ROOT_ROUTE_FALLBACK = '/';
+
+// Capacitor reports `web` in ordinary browsers and the native platform inside
+// the packaged Android/iOS shell. Viewport width is intentionally not used:
+// mobile visitors to yogidesk-ai.com should still receive the public website.
+const isNativeAppRuntime = () => Capacitor.isNativePlatform();
 
 const ScrollToTop = () => {
   const location = useLocation();
@@ -72,12 +79,13 @@ const ScrollToTop = () => {
 const AppContent = () => {
   const location = useLocation();
   const { isMetaReviewSession } = useAuth();
+  const shouldRedirectNativeRoot = location.pathname === '/' && isNativeAppRuntime();
   
   // Comprehensive internal route exclusion array
   const internalDashboardPaths = ['/login', '/signup', '/forgot-password', '/reset-password', '/accept-invite', '/dashboard', '/staff', '/templates', '/settings', '/campaigns', '/team', '/superadmin'];
   
   // Check if current URL starts with any internal application route
-  const isInternalRoute = internalDashboardPaths.some(path => location.pathname.startsWith(path));
+  const isInternalRoute = shouldRedirectNativeRoot || internalDashboardPaths.some(path => location.pathname.startsWith(path));
 
   return (
       <div className={isInternalRoute ? undefined : 'public-website'}>
@@ -90,7 +98,10 @@ const AppContent = () => {
           {/* 1. PUBLIC ROUTES (Khule Routes)*/}
           {/* ============================== */}
           
-          <Route path="/" element={<LandingPage />} />
+          <Route
+            path="/"
+            element={shouldRedirectNativeRoot ? <Navigate to="/login" replace /> : <LandingPage />}
+          />
           <Route path="/features" element={<Features />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/about" element={<About />} />

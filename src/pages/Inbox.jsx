@@ -4,6 +4,7 @@ import {
   Bot,
   Check,
   CheckCheck,
+  ChevronLeft,
   Clock3,
   Eye,
   EyeOff,
@@ -525,7 +526,7 @@ const InboxContent = () => {
     const mappedChats = Array.isArray(chatData)
       ? chatData.map((chat) => {
         const displayName = chat.name || chat.patient_name || 'Unknown Patient';
-        const currentAgent = chat?.assigned_agent_id || null;
+        const currentAgent = chat?.assigned_staff_id || chat?.assigned_agent_id || null;
         const count = Number(chat.unread_count || 0);
         return {
           id: chat.id,
@@ -539,7 +540,12 @@ const InboxContent = () => {
           deliveryStatus: resolveDeliveryStatus(chat.metadata?.delivery_status, chat.metadata?.last_template?.delivery_status, chat.status),
           scheduled_at: chat.scheduled_at || null,
           assigned_agent_id: currentAgent,
-          metadata: chat?.metadata || {},
+          assigned_staff_id: currentAgent,
+          ai_reply_active: chat?.ai_reply_active,
+          metadata: {
+            ...(chat?.metadata || {}),
+            ...(typeof chat?.ai_reply_active === 'boolean' ? { ai_reply_active: chat.ai_reply_active, ai_paused: !chat.ai_reply_active } : {}),
+          },
         };
       })
       : [];
@@ -840,11 +846,14 @@ const InboxContent = () => {
     const agent = agents.find((item) => String(item.id) === String(agentId));
     if (!agent || !selectedChat) return;
     setActiveAgent(agent);
-    updateConversation(selectedChat.id, { assigned_agent_id: agent.id });
+    const previousAgentId = selectedChat.assigned_staff_id || selectedChat.assigned_agent_id || null;
+    updateConversation(selectedChat.id, { assigned_staff_id: agent.id, assigned_agent_id: agent.id });
     try {
-      const { error } = await supabase.from('inbox_chats').update({ assigned_agent_id: agent.id }).eq('id', selectedChat.id);
-      if (error) throw error;
+      await api.patch(`/api/inbox/chats/${selectedChat.id}/assignment`, { assigned_staff_id: agent.id });
     } catch (error) {
+      const previousAgent = agents.find((item) => String(item.id) === String(previousAgentId)) || agents[0];
+      setActiveAgent(previousAgent);
+      updateConversation(selectedChat.id, { assigned_staff_id: previousAgentId, assigned_agent_id: previousAgentId });
       logInboxError(error);
     }
   };
@@ -859,24 +868,16 @@ const InboxContent = () => {
     const nextMetadata = { ...(selectedChat.metadata || {}), ai_paused: nextPaused };
 
     setAiToggleLoading(true);
-    setDoctorAiPaused(nextPaused);
-    updateConversation(selectedChat.id, { metadata: nextMetadata });
+    updateConversation(selectedChat.id, { ai_reply_active: !nextPaused, metadata: nextMetadata });
 
     try {
-      const user = await getUser();
-      const response = await api.post('/api/chat/toggle-ai', {
-        userId: user.id,
-        chatId: selectedChat.id,
-        isAiPaused: nextPaused,
-      });
-      const confirmedPaused = Boolean(response.data?.isAiPaused);
-      const confirmedMetadata = { ...(selectedChat.metadata || {}), ai_paused: confirmedPaused };
-      setDoctorAiPaused(confirmedPaused);
-      updateConversation(selectedChat.id, { metadata: confirmedMetadata });
+      const response = await api.patch(`/api/inbox/chats/${selectedChat.id}/ai-reply`, { ai_reply_active: !nextPaused });
+      const confirmedActive = Boolean(response.data?.chat?.ai_reply_active);
+      const confirmedMetadata = { ...(selectedChat.metadata || {}), ai_reply_active: confirmedActive, ai_paused: !confirmedActive };
+      updateConversation(selectedChat.id, { ai_reply_active: confirmedActive, metadata: confirmedMetadata });
     } catch (error) {
       const revertedPaused = !nextPaused;
-      setDoctorAiPaused(revertedPaused);
-      updateConversation(selectedChat.id, { metadata: { ...(selectedChat.metadata || {}), ai_paused: revertedPaused } });
+      updateConversation(selectedChat.id, { ai_reply_active: !revertedPaused, metadata: { ...(selectedChat.metadata || {}), ai_reply_active: !revertedPaused, ai_paused: revertedPaused } });
       logInboxError(error);
     } finally {
       setAiToggleLoading(false);
@@ -1246,6 +1247,62 @@ const InboxContent = () => {
           </div>
         </div>
       )}
+
+      <section className="flex min-w-0 flex-1 flex-col bg-[#111827] text-white md:hidden" aria-label="Mobile inbox">
+        {!selectedChat ? (
+          <>
+            <header className="sticky top-0 z-20 border-b border-white/10 bg-[#111827]/95 px-4 pb-4 pt-5 backdrop-blur-xl">
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff6b00]">Patient conversations</p>
+              <h1 className="mt-1 text-2xl font-black">Inbox</h1>
+              <div className="relative mt-4">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={17} />
+                <input value={activeFilters.search} onChange={(event) => setActiveFilters((current) => ({ ...current, search: sanitizeTextInput(event.target.value) }))} placeholder="Search chats" className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.06] pl-11 pr-4 text-sm font-semibold text-white outline-none placeholder:text-slate-500 focus:border-[#ff6b00]" />
+              </div>
+            </header>
+            <div className="custom-scrollbar flex-1 overflow-y-auto px-3 py-3">
+              {loading && <div className="flex justify-center py-12 text-[#ff6b00]"><Loader className="animate-spin" /></div>}
+              {!loading && visibleConversations.length === 0 && <p className="py-16 text-center text-sm font-semibold text-slate-500">No conversations found.</p>}
+              {visibleConversations.map((chat) => {
+                const assigned = agents.find((agent) => String(agent.id) === String(chat.assigned_staff_id || chat.assigned_agent_id));
+                return (
+                  <button key={chat.id} type="button" onClick={() => openChat(chat)} className="mb-2 flex w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.04] p-3.5 text-left transition active:scale-[0.99] active:bg-white/10">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ff6b00] text-base font-black text-white">{safeInitial(chat.name)}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-3"><strong className="truncate text-sm text-white">{sanitizeTextInput(chat.name) || 'Patient'}</strong><small className="shrink-0 text-[10px] text-slate-500">{chat.time}</small></span>
+                      <span className="mt-1 block truncate text-xs text-slate-400">{sanitizeTextInput(chat.lastMsg) || 'No message preview'}</span>
+                      <span className="mt-2 inline-flex rounded-full bg-white/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-300">{assigned?.name || 'Unassigned'}</span>
+                    </span>
+                    {chat.unread > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#ff6b00] px-1 text-[10px] font-black">{chat.unread}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <header className="border-b border-white/10 bg-[#111827] px-4 pb-3 pt-4">
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => setSelectedChat(null)} className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10" aria-label="Back to conversations"><ChevronLeft size={21} /></button>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ff6b00] font-black">{safeInitial(selectedChat.name)}</span>
+                <div className="min-w-0"><h2 className="truncate text-sm font-black">{selectedChat.name || 'Patient'}</h2><p className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">Active conversation</p></div>
+              </div>
+            </header>
+            <div className="sticky top-0 z-20 m-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#273244]/95 p-3 shadow-2xl backdrop-blur-xl">
+              <button type="button" onClick={handleToggleAiMode} disabled={aiToggleLoading || aiAccessLocked} className="flex min-w-0 items-center gap-2 disabled:opacity-50">
+                <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${!isAiPausedForSelectedChat ? 'bg-[#ff6b00]' : 'bg-slate-600'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition ${!isAiPausedForSelectedChat ? 'left-6' : 'left-1'}`} /></span>
+                <span className={`text-[10px] font-black uppercase tracking-wide ${!isAiPausedForSelectedChat ? 'text-[#ff6b00]' : 'text-slate-400'}`}>AI Copilot</span>
+              </button>
+              <label className="min-w-0 text-right"><span className="block text-[9px] font-black uppercase tracking-wider text-slate-500">Assign Team</span><select value={activeAgent?.id || ''} onChange={(event) => handleAssignAgent(event.target.value)} className="max-w-32 bg-transparent text-xs font-black text-white outline-none">{agents.map((agent) => <option className="text-[#111827]" key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
+            </div>
+            <div className="custom-scrollbar flex-1 space-y-3 overflow-y-auto px-4 py-2">
+              {messages.map((item) => <div key={item.id} className={`flex ${item.from_me ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-5 ${item.from_me ? 'rounded-br-md bg-[#ff6b00] text-white' : 'rounded-bl-md bg-white text-[#111827]'}`}><p>{item.text}</p><small className={`mt-1 block text-[9px] ${item.from_me ? 'text-white/70' : 'text-slate-400'}`}>{item.time}</small></div></div>)}
+            </div>
+            <div className="border-t border-white/10 bg-[#111827] p-3"><div className="flex items-center gap-2 rounded-2xl bg-white p-1.5 pl-4"><input value={message} onChange={handleTextChange} onKeyDown={handleComposerKeyDown} placeholder="Write a reply…" className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-[#111827] outline-none" /><button type="button" onClick={handleSendMessage} className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#ff6b00] text-white" aria-label="Send message"><Send size={18} /></button></div></div>
+          </>
+        )}
+      </section>
+
+      <div className="hidden min-w-0 flex-1 md:contents">
 
       <div className="flex w-80 flex-col border-r border-slate-200 bg-white lg:w-96">
         <div className="sticky top-0 z-10 border-b border-slate-100 bg-white p-4">
@@ -1715,6 +1772,7 @@ const InboxContent = () => {
           </div>
         </div>
       )}
+      </div>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

@@ -10,6 +10,9 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "@react-oauth/google": "^0.13.4",
     "@supabase/supabase-js": "^2.105.4",
     "axios": "^1.13.2",

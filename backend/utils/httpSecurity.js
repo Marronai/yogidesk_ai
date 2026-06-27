@@ -10,11 +10,21 @@ const DEVELOPMENT_ORIGINS = [
   'http://127.0.0.1:5173',
 ];
 
+// Fixed WebView origins used by packaged Capacitor applications. These are not
+// development servers; Android defaults to http://localhost and iOS commonly
+// reports capacitor://localhost.
+const NATIVE_APP_ORIGINS = [
+  'http://localhost',
+  'https://localhost',
+  'capacitor://localhost',
+];
+
 const CORS_ALLOWED_METHODS = 'GET, POST, OPTIONS, PUT, PATCH, DELETE';
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, X-YogiDesk-User-Email, X-Hub-Signature-256, X-Requested-With';
 const CORS_ALLOWED_ORIGINS = new Set([
   ...PRODUCTION_ORIGINS,
   ...DEVELOPMENT_ORIGINS,
+  ...NATIVE_APP_ORIGINS,
 ]);
 
 const resolveCorsOrigin = (origin) => {

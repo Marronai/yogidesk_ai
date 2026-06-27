@@ -427,7 +427,39 @@ const TemplateManager = () => {
   }, [wallet.balance]);
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500">
+    <div className="space-y-6 max-w-7xl mx-auto animate-in fade-in duration-500 md:p-6">
+      <section className="-mx-4 min-h-[calc(100vh-5rem)] bg-[#111827] px-4 py-6 text-white md:hidden" aria-label="WhatsApp template showcase">
+        <header>
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff6b00]">Read-only showcase</p>
+          <h1 className="mt-2 text-2xl font-black">WhatsApp Templates</h1>
+          <p className="mt-2 text-sm font-medium text-slate-400">Choose an approved message flow for your next patient touchpoint.</p>
+        </header>
+        <div className="relative mt-5">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={17} />
+          <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search templates" className="h-12 w-full rounded-2xl border border-white/10 bg-white/[0.06] pl-11 pr-4 text-sm font-semibold text-white outline-none placeholder:text-slate-500 focus:border-[#ff6b00]" />
+        </div>
+        <div className="mt-5 grid grid-cols-1 gap-3 min-[560px]:grid-cols-2">
+          {loading && <div className="col-span-full py-16 text-center text-sm font-bold text-slate-500">Loading templates…</div>}
+          {!loading && templateRows.length === 0 && <div className="col-span-full rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center text-sm font-bold text-slate-500">No templates available.</div>}
+          {templateRows.map((template, index) => {
+            const status = String(template?.status || 'DRAFT').toUpperCase().replace('PENDING_APPROVAL', 'PENDING');
+            const body = template?.body_text || template?.body || template?.message_body || template?.content || 'No body copy available.';
+            return (
+              <article key={template?.id || template?.template_name || index} className="flex min-h-64 flex-col rounded-3xl bg-white p-5 text-[#111827] shadow-xl shadow-black/10">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-[#ff6b00]"><FileText size={20} /></span>
+                  <span className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${getStatusColor(status)}`}>{status}</span>
+                </div>
+                <h2 className="mt-4 break-words text-base font-black">{template?.template_name || 'Untitled template'}</h2>
+                <p className="mt-3 line-clamp-5 flex-1 whitespace-pre-wrap rounded-2xl bg-slate-50 p-3 text-xs font-medium leading-5 text-slate-600">{body}</p>
+                <button type="button" onClick={() => handleExecuteBroadcast(template)} disabled={status !== 'APPROVED'} className="mt-4 min-h-11 rounded-xl bg-[#ff6b00] px-4 text-xs font-black uppercase tracking-wider text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">{status === 'APPROVED' ? 'Use Template' : 'Awaiting Approval'}</button>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <div className="hidden space-y-6 md:block">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -782,6 +814,8 @@ const TemplateManager = () => {
         </div>
       </div>
       </div>}
+
+      </div>
 
       {selectedTemplate && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">

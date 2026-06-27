@@ -4,6 +4,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
+  CalendarDays,
   Clock3,
   Facebook,
   Gift,
@@ -170,6 +171,7 @@ const DashboardHome = () => {
   const category = localStorage.getItem('user_business_category') || 'Clinic';
   const [wallet, setWallet] = useState(() => ensureWallet({ welcomeGift: true }));
   const [walletBalance, setWalletBalance] = useState(0);
+  const [todayAppointments, setTodayAppointments] = useState(0);
   const [showWelcome, setShowWelcome] = useState(false);
   const [isDashboardInitialized, setIsDashboardInitialized] = useState(false);
   const [profile, setProfile] = useState({
@@ -243,6 +245,7 @@ const DashboardHome = () => {
         templateRows,
         leakageRows,
         inboundRows,
+        appointmentsResult,
       ] = await Promise.all([
         safeFetch(
           () => supabase.from('wallets').select('balance,is_first_recharge,welcome_gift_active').eq('user_id', userId).maybeSingle(),
@@ -339,6 +342,10 @@ const DashboardHome = () => {
             .gte('created_at', sevenDayStart.toISOString()),
           { data: [] }
         ),
+        safeFetch(
+          () => api.get(backendPath('/api/appointments'), { params: { userId } }),
+          { data: { appointments: [] } }
+        ),
       ]);
 
       if (!active) return;
@@ -408,6 +415,9 @@ const DashboardHome = () => {
       setMessageHistory(historyRows.length > 0 && historyRows[0]?.key ? historyRows : countRowsByDay(historyRows, sevenDays));
 
       const inbound = Array.isArray(inboundRows?.data) ? inboundRows.data : [];
+      const appointmentRows = Array.isArray(appointmentsResult?.data?.appointments) ? appointmentsResult.data.appointments : [];
+      const todayKey = todayStart.toISOString().slice(0, 10);
+      setTodayAppointments(appointmentRows.filter((row) => String(row.appointment_date || row.appointment_at || '').slice(0, 10) === todayKey).length);
       const hourCounts = inbound.reduce((acc, row) => {
         const hour = new Date(row.created_at).getHours();
         if (Number.isFinite(hour)) acc[hour] = (acc[hour] || 0) + 1;
@@ -644,6 +654,42 @@ const DashboardHome = () => {
         </div>
       )}
 
+      <section className="-mx-4 space-y-5 bg-[#111827] px-4 py-6 text-white md:hidden" aria-label="YogiDesk mobile dashboard">
+        <header className="rounded-3xl border border-white/10 bg-white/[0.04] px-5 py-5">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-[#ff6b00]">Healthcare workspace</p>
+          <h1 className="mt-2 text-2xl font-black tracking-tight">YogiDesk AI Admin Console</h1>
+          <p className="mt-2 text-sm font-medium text-slate-400">Live clinic performance at a glance.</p>
+        </header>
+
+        <div className="grid gap-3 min-[420px]:grid-cols-2">
+          <article className="rounded-3xl bg-white p-5 text-[#111827] shadow-xl shadow-black/10 min-[420px]:col-span-2">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-slate-500">Total Messages Sent</p>
+                <p className="mt-3 text-4xl font-black text-[#ff6b00]">{stats.weeklySent.toLocaleString()}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-400">This week</p>
+              </div>
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-[#ff6b00]"><Send size={24} aria-hidden="true" /></span>
+            </div>
+          </article>
+
+          <article className="rounded-3xl bg-[#273244] p-5 text-white ring-1 ring-white/10">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-[#ff6b00]"><CalendarDays size={21} aria-hidden="true" /></span>
+            <p className="mt-5 text-xs font-black uppercase tracking-wider text-slate-300">Today's Appointments</p>
+            <p className="mt-2 text-3xl font-black">{todayAppointments}</p>
+          </article>
+
+          <article className="rounded-3xl bg-white p-5 text-[#111827] shadow-xl shadow-black/10">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-[#ff6b00]"><Wallet size={21} aria-hidden="true" /></span>
+            <p className="mt-5 text-xs font-black uppercase tracking-wider text-slate-500">Wallet Balance</p>
+            <p className="mt-2 text-2xl font-black">₹{walletBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+            <Link to="/dashboard/wallet" className="mt-3 inline-flex min-h-10 items-center rounded-xl bg-[#ff6b00] px-4 text-xs font-black text-white shadow-lg shadow-orange-500/25">Recharge Now</Link>
+          </article>
+        </div>
+      </section>
+
+      <div className="hidden space-y-8 md:block">
+
       {trialState.active && !isStaff && (
         <div className="flex flex-col gap-4 rounded-2xl border border-orange-200 bg-gradient-to-r from-orange-50 via-white to-slate-50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
@@ -794,6 +840,7 @@ const DashboardHome = () => {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

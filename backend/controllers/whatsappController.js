@@ -1758,6 +1758,17 @@ const handleGeminiWhatsAppMessage = async ({ payload, message, languageCode = 'h
                 ownerId: doctor.id,
                 patientPhone: inbound.fromPhone
             });
+            const chatAiReplyActive = existingChat?.metadata?.ai_reply_active ?? !existingChat?.metadata?.ai_paused;
+            if (chatAiReplyActive === false) {
+                return {
+                    ...inbound,
+                    doctorId: doctor.id,
+                    chatId: existingChat?.id || null,
+                    ai: { provider: 'gemini', skipped: true, reason: 'contact_ai_disabled' },
+                    replyTexts: [],
+                    metaReplies: []
+                };
+            }
             sendWhatsAppTypingIndicator({
                 inbound,
                 phoneNumberId: inbound.phoneNumberId,
